@@ -27,7 +27,7 @@
 
 ## 仪表盘（最近验证快照，2026-09-29，main）
 
-- 后端 pytest：**345 passed**（命令与逐文件覆盖见 [tests/README.md](tests/README.md)）
+- 后端 pytest：**349 passed**（命令与逐文件覆盖见 [tests/README.md](tests/README.md)）
 - 前端 vitest：**338 passed**；tsc + vite build 成功；lint / ruff 零告警（命令见 [frontend/README.md](frontend/README.md)、[tests/README.md](tests/README.md)）
 - E2E [verify_canvas.py](frontend/e2e/verify_canvas.py)：**36/36 PASS**（前置：起 7860 服务，见 [frontend/README.md](frontend/README.md)）
 - 迁移（v1→v2 / .canvas→.assets / 账本回填）已完成，日常无需执行（见 [scripts/README.md](scripts/README.md)）
