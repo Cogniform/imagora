@@ -8,7 +8,7 @@ React 19 + TypeScript + Vite + Tailwind v4 + React Flow（`@xyflow/react`）。�
 npm install
 npm run dev        # 开发模式（热更新；需后端已启动，见下）
 npm run build      # tsc --noEmit + vite build → dist/（git 忽略，由后端服务托管）
-npm test           # vitest run（358 用例）
+npm test           # vitest run（360 用例）
 npm run lint       # eslint
 npx tsc --noEmit   # 类型检查
 ```
@@ -216,7 +216,7 @@ E2E（画布交互回归，真实浏览器；36 断言）：
 - [`HistoryGallery.tsx`](src/components/HistoryGallery.tsx) — 生成历史面板：**分页滚动加载**（首屏 60 条，滚动接近底部 600px 内自动追加、未占满视口自动续拉，按钮仅兜底，DOM 恒在单页数量级）两栏网格卡片（160px 结果图 | 提示词 2 行截断随容器宽 | 56px 参考图换行 | 按钮底部对齐横排）；提示词超 2 行时悬浮浮层补全（仅截断弹、宽固定 80vw 水平居中左/右各留 10vw、高随行数自动长、垂直跟随鼠标、无滚动条）；搜索/状态筛选重置到第 0 页；双击放大预览 / 单击新窗口开原图 / 导入当前画布；每行按钮与成败无关（复制提示词 / 打开目录 / 导入当前画布）；参考图已丢失的失败记录只给一条条数提示（无法还原，无重跑入口）
 - [`CostBoard.tsx`](src/components/CostBoard.tsx) — 成本看板条（历史面板顶部）：今日/累计花费、成功率、失败数、成功平均耗时、按尺寸分布 + 本机预算（日预算 / 单次上限，0 = 不限）编辑保存；数据来自 `/api/history/stats`，保存走 `/api/budget`
 - [`PromptImportModal.tsx`](src/components/PromptImportModal.tsx) — 粘贴导入弹窗（实时解析 + 问题标红）
-- [`ProviderModal.tsx`](src/components/ProviderModal.tsx) — **添加第三方供应商**弹窗（顶栏插头图标入口）：Provider ID（前端先按 `^[a-z][a-z0-9_-]{0,31}$` 即时提示，服务端仍会再校验）/ 显示名称 / API 地址 / API 协议（`openai` 带 `/v1` · `ark` 已含版本号 · `custom` 手填路径）/ API 密钥（只进 `.env`）/ 默认模型（「获取可用模型」探 `GET {base}/models`，探到即填第一个，也可留空让配置弹窗退化成文本框）/ 「创建后立即切换」（默认不勾：新建来源只是目录多一条，换 profile 属「改了要重启」）
+- [`ProviderModal.tsx`](src/components/ProviderModal.tsx) — **添加第三方供应商**弹窗（顶栏插头图标入口）：Provider ID（前端先按 `^[a-z][a-z0-9_-]{0,31}$` 即时提示，服务端仍会再校验）/ 显示名称 / API 地址 / API 协议（`openai` 标准 `/v1` · `ark` 已含版本号 · `custom` 手填路径）/ API 密钥（只进 `.env`）/ 默认模型（「获取可用模型」探 `GET {base}/models`，**探到即从文本框切成下拉**并选第一个，点「手填」可切回自由输入 —— 两种都要留：下拉解决「探到 7 个却看不见」，手填解决「清单外的 ID」）/ 「创建后立即切换」（默认不勾：新建来源只是目录多一条，换 profile 属「改了要重启」）。**别用 `<datalist>`**：它只提供输入建议、会按已输入内容过滤，原生渲染还随浏览器变，曾导致「上游 7 个模型只显示 2 个」
 - [`FolderPicker.tsx`](src/components/FolderPicker.tsx) / [`Select.tsx`](src/components/Select.tsx) — 目录选择 / 尺寸质量下拉
 
 ### 根文件
@@ -225,7 +225,7 @@ E2E（画布交互回归，真实浏览器；36 断言）：
 - [`main.tsx`](src/main.tsx) — 入口（挂载 + accent 主题注入）
 - [`index.css`](src/index.css) — **唯一样式层**（Tailwind v4）：`:root` 设计 token + `@layer components` 组件类 + 动效层；导出的 token 与公共类清单见本文「样式体系」节，组件只引用类名、不写死尺寸与颜色
 - [`verify_canvas.py`](e2e/verify_canvas.py) — 画布交互 E2E（36 断言，Playwright headless）
-- [`verify_provider.py`](e2e/verify_provider.py) — 「添加第三方供应商」E2E（29 断言）：真实点顶栏插头 → 填表 → 真实落盘 `providers.local.json` → 断言文件内容（8 档尺寸单价全 0 / 7 个比例 / 模型目录 / **不含密钥**）→ 新来源出现在配置弹窗下拉。探测那步打一个不存在的域名（预期 400，不花外部配额）；Provider ID 用随机值，跑完不留残留
+- [`verify_provider.py`](e2e/verify_provider.py) — 「添加第三方供应商」E2E（30 断言）：真实点顶栏插头 → 填表 → 真实落盘 `providers.local.json` → 断言文件内容（8 档尺寸单价全 0 / 7 个比例 / 模型目录 / **不含密钥** / 地址带 `/v1` 时路径不重复）→ 新来源出现在配置弹窗下拉。探测那步打一个不存在的域名（预期 400，不花外部配额）；Provider ID 用随机值，跑完不留残留
 
 ## 上下游依赖
 

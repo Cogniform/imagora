@@ -45,11 +45,16 @@ _NAME_RE = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
 
 # API 协议预设：真正决定请求形态的是**路径前缀**（base_url 是否已含 /v1）
 PROTOCOL_PRESETS: dict[str, dict[str, str]] = {
-    # OpenAI 兼容中转站：base_url 通常不带版本号，路径自带 /v1
+    # OpenAI 兼容中转站：路径自带 /v1。地址若也带 /v1，由 _strip_duplicate_version 去重
     "openai": {"generations": "/v1/images/generations", "edits": "/v1/images/edits"},
     # 火山方舟：base_url 已含 /api/v3，路径不再带版本号
     "ark": {"generations": "/images/generations", "edits": "/images/generations"},
 }
+
+# base_url 结尾的版本段（/v1、/v1beta、/api/v3 里的 v3 那一段）
+_VERSION_TAIL_RE = re.compile(r"/v\d+(?:alpha|beta)?$", re.IGNORECASE)
+# 路径开头的版本段（/v1/images/... 里的 /v1）
+_VERSION_HEAD_RE = re.compile(r"^/v\d+(?:alpha|beta)?(?=/)", re.IGNORECASE)
 
 # 新建来源沿用的标准尺寸表：8 档常用尺寸，**单价一律 0**。
 #
@@ -178,11 +183,41 @@ def validate_base_url(raw) -> str:
     return text.rstrip("/")
 
 
+def dedupe_version_prefix(base_url: str, api_paths: dict[str, str]) -> dict[str, str]:
+    """地址尾部已有版本段时，把路径开头重复的那一段去掉。
+
+    为什么需要这一步：中转站的标准写法是「地址带 /v1」（`https://relay.example/v1`，
+    这样 `/models` 之类的端点才通），而 OpenAI 兼容的图片端点路径本身也以 `/v1` 开头
+    （`/v1/images/generations`）。两者直接拼起来就是
+    `https://relay.example/v1/v1/images/generations` —— 必然 404，而且报错只会说
+    「接口不存在」，很难看出是路径重复。用户按界面提示填了带 /v1 的地址就一定会撞上，
+    所以去重必须由程序做，不能指望用户选对协议。
+
+    只在**版本段完全相同**时才剥（`/v1` 对 `/v1`）：`/v2` 地址配 `/v1` 路径属于真实
+    不一致，擅自改写会把用户配错的地址藏起来。
+    """
+    tail = _VERSION_TAIL_RE.search(base_url)
+    if not tail:
+        return dict(api_paths)
+    version = tail.group(0).lower()
+    fixed: dict[str, str] = {}
+    for key, path in api_paths.items():
+        head = _VERSION_HEAD_RE.search(path)
+        if head and head.group(0).lower() == version:
+            fixed[key] = path[len(head.group(0)) :]
+        else:
+            fixed[key] = path
+    return fixed
+
+
 def resolve_api_paths(payload: dict) -> dict[str, str]:
     """按协议预设或自定义路径得出 api_paths。
 
     - 预设名（openai / ark）→ 查表
     - `custom` → 取用户填的 generations 路径，edits 默认同一条（多数中转站两者一致）
+
+    本函数只按协议出路径，**不看地址**；地址与路径的版本段去重由
+    `dedupe_version_prefix` 在 `build_profile` 里统一做。
     """
     protocol = str(payload.get("protocol") or "openai").strip().lower()
     if protocol in PROTOCOL_PRESETS:
@@ -210,7 +245,7 @@ def build_profile(payload: dict) -> tuple[str, dict]:
     name = validate_name(payload.get("name"))
     base_url = validate_base_url(payload.get("baseUrl"))
     label = str(payload.get("label") or "").strip() or name
-    api_paths = resolve_api_paths(payload)
+    api_paths = dedupe_version_prefix(base_url, resolve_api_paths(payload))
 
     model_id = str(payload.get("model") or "").strip()
     models: list[dict] = []

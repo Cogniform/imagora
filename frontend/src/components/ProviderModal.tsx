@@ -12,12 +12,15 @@ const NAME_RE = /^[a-z][a-z0-9_-]{0,31}$/;
 
 /** 协议预设：与 core/provider_store.py 的 PROTOCOL_PRESETS 一一对应。
  *  imagora 只有「OpenAI 兼容 images」这一种真实上游协议，所谓「协议」实际只决定
- *  路径前缀 —— 地址里已含版本号（如火山方舟的 /api/v3）就选 ark，否则选 openai。 */
+ *  路径前缀 —— 地址里已含版本号（如火山方舟的 /api/v3）就选 ark，否则选 openai。
+ *  注意：地址末尾若带 /v1，服务端会把路径里重复的那段去掉（dedupe_version_prefix），
+ *  所以 openai 这一项**不要求**地址不带版本号 —— 以前这里写「地址不含版本号」而示例
+ *  又给 https://gateway.example/v1，自相矛盾，用户按示例填就撞上 /v1/v1 的 404。 */
 const PROTOCOLS: { value: ProviderDraft["protocol"]; label: string; hint: string }[] = [
   {
     value: "openai",
-    label: "OpenAI 兼容（地址不含版本号）",
-    hint: "地址形如 https://gateway.example/v1，路径自动补 /v1/images/generations",
+    label: "OpenAI 兼容（标准 /v1 接口）",
+    hint: "地址可带也可不带 /v1，重复的版本段会自动去掉",
   },
   {
     value: "ark",
@@ -60,6 +63,10 @@ export function ProviderModal({ registeredNames, onClose, onCreated }: ProviderM
   const [probing, setProbing] = useState(false);
   const [probed, setProbed] = useState<string[] | null>(null);
   const [probeError, setProbeError] = useState<string | null>(null);
+  /** 模型字段的呈现方式：探到清单后默认走下拉，用户可切回手填。
+   *  两种都要保留 —— 下拉解决「探到 7 个却看不见」，手填解决「清单外的 ID」，
+   *  后者是 docs/config-editor-ui-design.md 第 0 节明确不许剥夺的合法场景。 */
+  const [manualModel, setManualModel] = useState(true);
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -96,6 +103,33 @@ export function ProviderModal({ registeredNames, onClose, onCreated }: ProviderM
     pathIssue === null &&
     !busy;
 
+  /** 探到的模型清单 → Select 的选项 */
+  const modelOptions = useMemo(
+    () => (probed ?? []).map((id) => ({ value: id, label: id })),
+    [probed],
+  );
+
+  /** 有清单且用户没主动切回手填时用下拉 */
+  const showSelect = modelOptions.length > 0 && !manualModel;
+
+  const toggleManualModel = () => {
+    setManualModel((prev) => {
+      // 切到下拉时，若当前值是手填的、不在清单里，Select 会显示「请选择」——
+      // 这种情况下把值清掉，避免「显示请选择但其实有值」的错觉。
+      if (!prev && model.trim() !== "" && !(probed ?? []).includes(model.trim())) {
+        setModel("");
+      }
+      return !prev;
+    });
+  };
+
+  const modelHint = (() => {
+    if (!probed) return "模型清单可留空 —— 之后在生图 API 配置里手填 ID 也能用";
+    if (probed.length === 0) return "该地址没报出任何模型，可以手填模型 ID";
+    if (showSelect) return `探到 ${probed.length} 个模型，从下拉里选一个`;
+    return `探到 ${probed.length} 个模型，点「从清单选」用下拉挑，或直接手填`;
+  })();
+
   const probe = async () => {
     setProbing(true);
     setProbeError(null);
@@ -109,9 +143,13 @@ export function ProviderModal({ registeredNames, onClose, onCreated }: ProviderM
       setProbed(result.models.map((m) => m.id));
       if (result.models.length === 0) {
         setProbeError("该地址没报出任何模型，可以直接手填模型 ID");
-      } else if (!model.trim()) {
-        // 探到清单且用户还没填 → 顺手填第一个，省一次输入
-        setModel(result.models[0]!.id);
+      } else {
+        // 探到清单 → 切到下拉呈现（用户仍可点「手填」切回）
+        setManualModel(false);
+        if (!model.trim()) {
+          // 还没填过 → 顺手填第一个，省一次输入
+          setModel(result.models[0]!.id);
+        }
       }
     } catch (err) {
       setProbeError(errMessage(err));
@@ -284,33 +322,39 @@ export function ProviderModal({ registeredNames, onClose, onCreated }: ProviderM
             <label className="field-label" htmlFor="pv-model">
               默认模型
             </label>
-            <button
-              type="button"
-              className="btn-ghost btn-xs"
-              disabled={probing || baseUrl.trim() === "" || urlIssue !== null}
-              onClick={() => void probe()}
-            >
-              {probing ? "获取中…" : "获取可用模型"}
-            </button>
+            <div className="flex items-center gap-1">
+              {modelOptions.length > 0 && (
+                <button
+                  type="button"
+                  className="btn-ghost btn-xs"
+                  onClick={toggleManualModel}
+                >
+                  {showSelect ? "手填" : "从清单选"}
+                </button>
+              )}
+              <button
+                type="button"
+                className="btn-ghost btn-xs"
+                disabled={probing || baseUrl.trim() === "" || urlIssue !== null}
+                onClick={() => void probe()}
+              >
+                {probing ? "获取中…" : "获取可用模型"}
+              </button>
+            </div>
           </div>
-          <input
-            id="pv-model"
-            className="field-control text-sm font-mono"
-            value={model}
-            onChange={(event) => setModel(event.target.value)}
-            placeholder="gpt-image-2.5（留空则退化为文本框，稍后可填）"
-            list="pv-model-list"
-          />
-          <datalist id="pv-model-list">
-            {(probed ?? []).map((id) => (
-              <option key={id} value={id} />
-            ))}
-          </datalist>
+          {showSelect ? (
+            <Select id="pv-model" options={modelOptions} value={model} onChange={setModel} />
+          ) : (
+            <input
+              id="pv-model"
+              className="field-control text-sm font-mono"
+              value={model}
+              onChange={(event) => setModel(event.target.value)}
+              placeholder="gpt-image-2.5（可留空，稍后在生图 API 配置里填）"
+            />
+          )}
           <p className={`text-caption mt-2 ${probeError ? "text-amber-700" : ""}`}>
-            {probeError ??
-              (probed && probed.length > 0
-                ? `探到 ${probed.length} 个模型，可在下拉里选`
-                : "模型清单可留空 —— 之后在生图 API 配置里手填 ID 也能用")}
+            {probeError ?? modelHint}
           </p>
         </div>
 

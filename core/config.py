@@ -195,18 +195,38 @@ _ENV_FILE_KEYS: set[str] = set()
 
 
 def _load_env_file():
-    """读取 .env（KEY=VALUE，# 注释），已存在的环境变量不覆盖"""
-    if not ENV_FILE_PATH.exists():
-        return
-    for line in ENV_FILE_PATH.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        name = key.strip()
-        if name and name not in os.environ:
+    """读取 .env（KEY=VALUE，# 注释），真正来自系统环境变量的键不覆盖。
+
+    「已存在」必须区分来源，否则热加载永远不生效：首次导入时本函数已经把 .env
+    的值灌进了 os.environ，reload_config() 再调本函数时每个键都「已存在」→ 一个
+    都不更新，界面刚写进 .env 的地址/模型/密钥永远读不到（表现就是「填了 API Key
+    却提示要重启」）。所以判据是 `name in os.environ and name not in _ENV_FILE_KEYS`
+    —— 只有用户自己 export 的系统环境变量才享有优先权。
+
+    反过来也要处理：上一轮来自 .env、这一轮文件里被删掉或被注释掉的键，必须从
+    os.environ 撤掉。否则「清空密钥」（config_write 是注释掉而不是删除）之后热加载
+    仍能读到旧值，等于没清。
+    """
+    previous = set(_ENV_FILE_KEYS)
+    _ENV_FILE_KEYS.clear()
+    seen: set[str] = set()
+    if ENV_FILE_PATH.exists():
+        for line in ENV_FILE_PATH.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            name = key.strip()
+            if not name:
+                continue
+            # 用户自己 export 的变量优先，不被 .env 覆盖
+            if name in os.environ and name not in previous:
+                continue
             os.environ[name] = value.strip().strip('"').strip("'")
             _ENV_FILE_KEYS.add(name)
+            seen.add(name)
+    for name in previous - seen:
+        os.environ.pop(name, None)
 
 
 _load_env_file()

@@ -16,17 +16,8 @@ from pathlib import Path
 
 import requests
 
-from core.config import (
-    API_PATHS,
-    BASE_URL,
-    DEFAULT_MODEL,
-    DEFAULT_OUTPUT_DIR,
-    DEFAULT_QUALITY,
-    DEFAULT_SIZE,
-    RATIOS,
-    get_api_key,
-    normalize_model_id,
-)
+from core import config
+from core.config import get_api_key, normalize_model_id
 from core.console import print_success
 
 # 全局序号：保证默认文件名在并发/多窗口下唯一（时间戳只有秒级，同秒必撞）
@@ -39,19 +30,24 @@ def format_error(error: Exception, limit: int = 150) -> str:
 
 
 def resolve_size_with_ratio(size, ratio, tier):
-    """--size 与 --ratio 二选一，返回最终分辨率字符串"""
+    """--size 与 --ratio 二选一，返回最终分辨率字符串。
+
+    注意：这里经 `config.xxx` 取运行期值，不在模块顶层 `from core.config import RATIOS`
+    —— 顶层导入是**导入时绑定**的快照，配置热加载后拿到的仍是旧表。
+    """
+    ratios = config.RATIOS
     if ratio and size:
         raise ValueError("--size 和 --ratio 不能同时使用，二选一")
     if ratio:
-        if ratio not in RATIOS:
-            raise ValueError(f"不支持比例 {ratio}，可用: {', '.join(RATIOS)}")
-        tiers = RATIOS[ratio]
+        if ratio not in ratios:
+            raise ValueError(f"不支持比例 {ratio}，可用: {', '.join(ratios)}")
+        tiers = ratios[ratio]
         if tier not in tiers:
             raise ValueError(
                 f"比例 {ratio} 没有 {tier} 档，可用档位: {', '.join(tiers)}"
             )
         return tiers[tier]
-    return size or DEFAULT_SIZE
+    return size or config.DEFAULT_SIZE
 
 
 def build_default_output_path(output_path, output_format):
@@ -60,7 +56,7 @@ def build_default_output_path(output_path, output_format):
         return output_path
     seq = next(_SEQ)
     return str(
-        Path(DEFAULT_OUTPUT_DIR)
+        Path(config.DEFAULT_OUTPUT_DIR)
         / f"ai_{time.strftime('%Y%m%d_%H%M%S')}_{seq:03d}.{output_format}"
     )
 
@@ -199,9 +195,9 @@ def generate_image(
     prompt,
     image_path=None,
     images=None,
-    size=DEFAULT_SIZE,
-    quality=DEFAULT_QUALITY,
-    model=DEFAULT_MODEL,
+    size=None,
+    quality=None,
+    model=None,
     n=1,
     output_format="png",
     output_path=None,
@@ -222,20 +218,27 @@ def generate_image(
         prompt: 提示词（英文优先，减少歧义）
         image_path: 单张底图路径（None 则看 images）
         images: 多张底图路径列表，一次请求全部作为参考（用途由提示词决定）
-        size: 分辨率字符串，如 "1024x1024"
+        size: 分辨率字符串，如 "1024x1024"（None 取当前配置的默认尺寸）
         quality: low / medium / high（火山 Seedream 会忽略，但不报错）
-        model: 模型名
+        model: 模型名（None 取当前配置的默认模型）
         n: 生成张数
         output_format: png / jpg / webp
         output_path: 保存路径（None 时自动生成）
         watermark: 是否带 AI 生成水印（火山 Seedream 支持，默认 False 关闭）
         seed: 随机种子（火山 Seedream 支持，同 seed 可复现；None 则不传）
+
+    默认值刻意写成 None 而不是 `size=DEFAULT_SIZE`：Python 的函数默认值在 **def
+    执行时**求值一次，写成常量等于把导入时的配置固化进签名，热加载后仍然用旧值。
     """
     # 模型 ID 里的连字符有半角(U+002D)与全角(U+2011)之分，肉眼完全一样 ——
     # 中转站同一条产品线上两种都在用，用户手打或沿用历史记录时必踩。
     # 发请求前统一纠正成配置里的真实 ID，否则上游只回一个 model_not_found。
-    model = normalize_model_id(model) or model
-    base_url = (api_base_url or BASE_URL).rstrip("/")
+    wanted_model = model or config.DEFAULT_MODEL
+    model = normalize_model_id(wanted_model) or wanted_model
+    size = size or config.DEFAULT_SIZE
+    quality = quality or config.DEFAULT_QUALITY
+    api_paths = config.API_PATHS
+    base_url = (api_base_url or config.BASE_URL).rstrip("/")
     headers = {"Authorization": f"Bearer {api_key or get_api_key()}"}
     payload = {
         "model": model,
@@ -255,7 +258,7 @@ def generate_image(
     image_paths = images if images else ([image_path] if image_path else [])
     if image_paths:
         # 图生图：一张或多张参考图，一次请求提交（ExitStack 保证任一打开失败时已开的也关闭）
-        url = f"{base_url}{edits_path or API_PATHS['edits']}"
+        url = f"{base_url}{edits_path or api_paths['edits']}"
         with contextlib.ExitStack() as stack:
             opened = [stack.enter_context(open(p, "rb")) for p in image_paths]
             files = [
@@ -267,7 +270,7 @@ def generate_image(
             )
     else:
         # 文生图
-        url = f"{base_url}{generations_path or API_PATHS['generations']}"
+        url = f"{base_url}{generations_path or api_paths['generations']}"
         response = requests.post(url, headers=headers, json=payload, timeout=300)
 
     if response.status_code != 200:

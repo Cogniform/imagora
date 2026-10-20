@@ -191,7 +191,7 @@ describe("ProviderModal", () => {
     expect(draft.generationsPath).toBe("/v2/paint");
   });
 
-  it("「获取可用模型」探到清单后自动填第一个", async () => {
+  it("「获取可用模型」探到清单后切成下拉并自动选第一个", async () => {
     probeProviderModels.mockResolvedValue({
       ok: true,
       models: [
@@ -203,10 +203,52 @@ describe("ProviderModal", () => {
     fillBasics();
     fireEvent.click(screen.getByRole("button", { name: "获取可用模型" }));
 
+    // 探到清单后模型字段从文本框换成下拉（datalist 会按输入过滤、原生渲染还随浏览器变，
+    // 曾经导致「上游 7 个模型只显示 2 个」）。下拉的触发器可访问名来自 label。
     await waitFor(() =>
-      expect((screen.getByLabelText("默认模型") as HTMLInputElement).value).toBe("gpt-image-2"),
+      expect(screen.getByRole("button", { name: "默认模型" }).textContent).toBe("gpt-image-2"),
     );
     expect(screen.getByText(/探到 2 个模型/)).toBeTruthy();
+  });
+
+  it("探到清单后可以点「手填」切回文本框", async () => {
+    probeProviderModels.mockResolvedValue({
+      ok: true,
+      models: [
+        { id: "gpt-image-2", label: "gpt-image-2" },
+        { id: "dall-e-3", label: "dall-e-3" },
+      ],
+    });
+    render(<ProviderModal registeredNames={[]} onClose={vi.fn()} onCreated={vi.fn()} />);
+    fillBasics();
+    fireEvent.click(screen.getByRole("button", { name: "获取可用模型" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "手填" })).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: "手填" }));
+    const input = screen.getByLabelText("默认模型") as HTMLInputElement;
+    expect(input.tagName).toBe("INPUT");
+    // 当前值在清单里，切回手填时不该被清掉
+    expect(input.value).toBe("gpt-image-2");
+  });
+
+  it("清单外的 ID 手填后能原样提交（不许剥夺自定义模型）", async () => {
+    probeProviderModels.mockResolvedValue({
+      ok: true,
+      models: [{ id: "gpt-image-2", label: "gpt-image-2" }],
+    });
+    render(<ProviderModal registeredNames={[]} onClose={vi.fn()} onCreated={vi.fn()} />);
+    fillBasics();
+    fireEvent.click(screen.getByRole("button", { name: "获取可用模型" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "手填" })).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: "手填" }));
+    fireEvent.change(screen.getByLabelText("默认模型"), { target: { value: "my-private-model" } });
+    fireEvent.click(submitButton());
+
+    await waitFor(() => expect(createProvider).toHaveBeenCalledTimes(1));
+    expect((createProvider.mock.calls[0]![0] as Record<string, unknown>).model).toBe(
+      "my-private-model",
+    );
   });
 
   it("探测带上当前密钥与 ID（便于服务端复用已存的 Key）", async () => {

@@ -28,9 +28,9 @@
 
 ## 仪表盘（最近验证快照，2026-09-29，main）
 
-- 后端 pytest：**412 passed**（命令与逐文件覆盖见 [tests/README.md](tests/README.md)）
-- 前端 vitest：**358 passed**；tsc + vite build 成功；lint / ruff 零告警（命令见 [frontend/README.md](frontend/README.md)、[tests/README.md](tests/README.md)）
-- E2E [verify_canvas.py](frontend/e2e/verify_canvas.py)：**36/36 PASS**；[verify_provider.py](frontend/e2e/verify_provider.py)：**29/29 PASS**（前置：起 7860 服务，见 [frontend/README.md](frontend/README.md)）
+- 后端 pytest：**420 passed**（命令与逐文件覆盖见 [tests/README.md](tests/README.md)）
+- 前端 vitest：**360 passed**；tsc + vite build 成功；lint / ruff 零告警（命令见 [frontend/README.md](frontend/README.md)、[tests/README.md](tests/README.md)）
+- E2E [verify_canvas.py](frontend/e2e/verify_canvas.py)：**36/36 PASS**；[verify_provider.py](frontend/e2e/verify_provider.py)：**30/30 PASS**（前置：起 7860 服务，见 [frontend/README.md](frontend/README.md)）
 - 迁移（v1→v2 / .canvas→.assets / 账本回填）已完成，日常无需执行（见 [scripts/README.md](scripts/README.md)）
 
 ## 构建时机（三套构建互不相干，别混着做）
@@ -76,6 +76,8 @@ CI 在 push 后自动跑，红叉处理顺序：`gh run view <id>` 看哪个 job
 - 早于「提交时登记参考图」机制的历史失败记录（本机 8-19 之前）没有参考图记录，历史面板只会显示原因、无法还原；别把它当数据修复手段，也别为此改判定去"凑齐"参考图
 - **模型名「全角连字符」陷阱（2026-10-19 实测踩中，已于 2026-10-20 根治）**：上游把 `gpt‑image‑2.5` 登记成 **U+2011 全角连字符**——与键盘能打出的半角 `-` 肉眼完全一样，用户手打必然对不上。`normalize_model_id()` 折叠各类连字符后比对，命中就换回配置里的真实 ID，本意是救这种手误。**曾经的 bug**：它遍历 `all_known_models()`（当前 profile → 其它全部 profile），于是别的 profile 里一条全角历史条目，会把本 profile 下用户打的半角名**静默改写成那条全角 ID** 再发上游；上游回 `unsupported image model`（HTTP 400），而报错里列出的"支持的模型"看起来与输入一模一样，极具误导性。**现已改为只查当前 profile 的 `MODELS`**——模型 ID 是各家上游自己的标识，同名不代表同一个东西，纠正只在"本 profile 自己登记过"时才有依据。排查一行：`python -c "from core import config; print(repr(config.normalize_model_id('gpt-image-2.5')))"`，打印结果里带 U+2011 说明当前 profile 确实登记的是全角名（属正常，不是 bug）。
 - **Windows 注册表可把 `.js` 的 MIME 写成 `text/plain`，导致 Web UI 整页白屏**：`StaticFiles` 判 Content-Type 走标准库 `mimetypes`，而 Windows 上它会读 `HKEY_CLASSES_ROOT\.js` 的 `Content Type`。本机实测被写成 `text/plain`，浏览器按 ES module 的严格 MIME 校验拒绝执行构建产物，`#root` 无子节点、控制台报 `Expected a JavaScript-or-Wasm module script`，而服务端日志一切正常。现已在 [server.py](server.py) 里用 `ensure_static_mimetypes()` 把 `.js/.mjs/.css/.json/.svg/.woff2` 显式钉死（无条件执行，未构建前端的环境也受保护），单测 `test_static_assets_use_javascript_mime` 兜底。本机若再遇白屏，先查注册表：`(Get-ItemProperty 'HKLM:\SOFTWARE\Classes\.js').'Content Type'`。
+- **配置热加载的两个隐形陷阱（2026-10-20 修）**：① `_load_env_file()` 原先写「键已存在就不覆盖」——首次导入时它已把 `.env` 灌进 `os.environ`，`reload_config()` 再调时每个键都「已存在」→ 一个都不更新，表现就是「界面填了 API Key 却提示要重启」。判据必须是 `name in os.environ and name not in _ENV_FILE_KEYS`（只有用户自己 export 的系统变量才优先），且上一轮来自 `.env`、这一轮被删/注释掉的键要从 `os.environ` 撤掉，否则「清空密钥」等于没清。② 常量快照有两层：`from core.config import XXX` 是**导入时绑定**（热加载改不到），`def f(size=DEFAULT_SIZE)` 的默认值也是**def 时求值一次**。两者都必须改成运行期 `config.xxx` / `None` 哨兵，否则会出现「文件改了、一半生效一半不生效」。
+- **中转站地址带 `/v1` 会与路径的 `/v1` 叠成 `/v1/v1`（必然 404，报错看不出原因）**：中转站标准写法是地址带 `/v1`（这样 `/models` 才通），而 OpenAI 兼容的图片端点路径本身也以 `/v1` 开头。`provider_store.dedupe_version_prefix()` 只在版本段**完全相同**时剥掉路径开头那段；`/v2` 地址配 `/v1` 路径属真实不一致，不擅自抹平。界面上的协议文案也踩过：曾写「地址不含版本号」而示例又给 `https://gateway.example/v1`，自相矛盾，用户按示例填必中招。
 
 ## 文档地图
 

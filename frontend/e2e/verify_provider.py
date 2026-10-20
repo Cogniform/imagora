@@ -118,6 +118,13 @@ def main() -> int:
                 entry.get("base_url") == "https://e2e-gateway.example.com/v1",
             )
             check("label 落盘正确", entry.get("label") == "E2E 测试来源")
+            # 地址带 /v1 + 路径也带 /v1 会拼成 .../v1/v1/... 必然 404，
+            # 所以服务端必须把重复的版本段剥掉（dedupe_version_prefix）。
+            check(
+                "地址带 /v1 时路径不重复",
+                (entry.get("api_paths") or {}).get("generations")
+                == "/images/generations",
+            )
             check("质量默认 high", entry.get("default_quality") == "high")
             check("尺寸 8 档", len(entry.get("size_options") or []) == 8)
             check(

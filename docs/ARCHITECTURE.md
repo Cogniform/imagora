@@ -47,7 +47,7 @@ Imagora 是本地单机工具，运行时分三层，方向单一：
 | `core/` | 后端核心逻辑（见 2.2），全部无 HTTP 依赖的纯业务模块；**双件**：规则层 core/AGENTS.md + 文件索引 core/README.md |
 | `frontend/` | React SPA（见 2.3）；**双件**：frontend/AGENTS.md（规则）+ frontend/README.md（索引） |
 | `scripts/` | 独立运维脚本：`migrate.py`（存储一步到最新，默认只报告、`--apply` 才落盘备份校验）；**双件**：scripts/AGENTS.md + scripts/README.md |
-| `tests/` | 后端 pytest（412 用例）+ 前端 vitest（358 用例），全部不调上游；**双件**：tests/AGENTS.md + tests/README.md（逐文件覆盖） |
+| `tests/` | 后端 pytest（420 用例）+ 前端 vitest（360 用例），全部不调上游；**双件**：tests/AGENTS.md + tests/README.md（逐文件覆盖） |
 | `docs/` | 设计圣经 `ARCHITECTURE.md`（本文档）+ `prompt-import-format.md` / `ecom-prompt-import-format.md`（格式规范）；**双件**：docs/AGENTS.md + docs/README.md |
 | `assets/` | **文档配图**（只服务 markdown 渲染，不是应用资源）：`screenshots/` 放 README「界面一览」的界面截图；**双件**：assets/AGENTS.md + assets/README.md |
 | `_ui-audit/` | 开发期 UI 审计图（本机产物，git 忽略）：由 [scripts/capture.py](../scripts/capture.py) 生成，与门面配图 `assets/screenshots/` 不是一回事 |
@@ -184,7 +184,7 @@ Imagora 是本地单机工具，运行时分三层，方向单一：
 
 **要改价目表 / 模型清单 / 新增整条来源，走 `providers.local.json`，不走环境变量**：覆盖通道只负责「把出厂来源的某一项临时换掉」，造新来源是另一件事（`POST /api/config/providers`）。新建来源的单价一律填 0 —— 真实单价只有用户知道，界面不编假数字，费用显示 0、预算看板不统计这家。
 
-`ACTIVE_PROFILE` 也可在界面切换（写 `.env`，值是 `config.json` 已注册的 profile 名，服务端校验）。它是其余覆盖键的**父级**——`BASE_URL_<PROFILE>` / `MODEL_<PROFILE>` 都挂在选中的 profile 下，所以切换它会换掉整条解析链，同样计入「待重启」。
+`ACTIVE_PROFILE` 也可在界面切换（写 `.env`，值是 `config.json` 已注册的 profile 名，服务端校验）。它是其余覆盖键的**父级**——`BASE_URL_<PROFILE>` / `MODEL_<PROFILE>` 都挂在选中的 profile 下，所以切换它会换掉整条解析链。
 **未设置环境变量时回退路径与没有覆盖通道时逐字相同**（`tests/test_core_config_override.py` 锁死）。
 空白值视为未设置（宁可回出厂值，也不要「配了个空地址」）。
 
@@ -197,8 +197,9 @@ Imagora 是本地单机工具，运行时分三层，方向单一：
 冲突与生效：
 
 - 写配置接口带 `expectedMtimes`，与磁盘 mtime 不符则 409，**绝不静默覆盖**。两个文件各自独立比对。
-- 全部字段都是 import 时求值的模块级常量，**没有可热加载的部分**，所以写入后一律标记「待重启」（`fileState.pending` = 文件值 ≠ 生效值）。
-- 取常量一律走 `config.xxx`，不用模块顶层 `from core.config import XXX` 的名字——后者是导入时绑定的快照。
+- **写入即生效**：两个写接口在落盘后都调 `config.reload_config()`，它重读 `config.json` + `providers.local.json` + `.env` 并重算全部模块级常量。以前「填了 API Key 却要重启」就是缺这一步 —— 文件改了，进程内的值没重算。
+- `pending` 因此只在**绕过界面直接改文件**时非空（文件值 ≠ 生效值），机制本身没废。
+- 取常量一律走 `config.xxx`，不用模块顶层 `from core.config import XXX` 的名字——后者是导入时绑定的快照，热加载改不到它。同理，**函数默认值不能写成常量**（`def f(size=DEFAULT_SIZE)` 在 def 时求值一次就固化了），要用 `None` 哨兵在函数体内解析。
 
 ### 4.5 错误处理与日志
 
@@ -508,8 +509,8 @@ React Flow v12（`@xyflow/react`）受控模式：`nodes` / `edges` 状态由 `C
 
 ### 10.1 单元测试
 
-- 后端 pytest：**412 用例**（Windows 含 5 个专属测试，CI 必须 `windows-latest`；默认 tmp 路径的 WinError 5 历史坑已随目录重建恢复，见 AGENTS「活跃坑」）
-- 前端 vitest：**358 用例**；`tsc --noEmit` + `vite build` 成功；`npm run lint` / `uv run ruff check .` 均零告警
+- 后端 pytest：**420 用例**（Windows 含 5 个专属测试，CI 必须 `windows-latest`；默认 tmp 路径的 WinError 5 历史坑已随目录重建恢复，见 AGENTS「活跃坑」）
+- 前端 vitest：**360 用例**；`tsc --noEmit` + `vite build` 成功；`npm run lint` / `uv run ruff check .` 均零告警
 - 文档完整性：`python scripts/check_docs.py`（相对链接可解析 + AGENTS/tests-README/ARCHITECTURE/frontend-README 的测试计数与源码一致；改任何文档后必跑，见 [scripts/README.md](../scripts/README.md)）
 - **逐文件用例 / 覆盖范围 / 变更影响路由（完整表）见 [tests/README.md](../tests/README.md) 文件索引**
 

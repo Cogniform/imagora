@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -31,12 +32,19 @@ def env(tmp_path: Path, monkeypatch):
     """隔离到临时目录：不碰真实 .env / config.json。"""
     env_file = tmp_path / ".env"
     env_file.write_text(SAMPLE_ENV, encoding="utf-8")
+    # 路由写完会调 config.reload_config() 重新读盘 —— 只在内存里塞 _cfg 不够，
+    # 必须让磁盘上真有一份同形状的 config.json，否则热加载会把 _cfg 读成空 dict。
+    cfg = {"default_profile": "wanwu", "profiles": {"wanwu": PROFILE}}
+    (tmp_path / "config.json").write_text(
+        json.dumps(cfg, ensure_ascii=False), encoding="utf-8"
+    )
     monkeypatch.setattr(config, "ENV_FILE_PATH", env_file)
     monkeypatch.setattr(config, "WORK_ROOT", tmp_path)
     monkeypatch.setattr(config, "_CONFIG_FILE", tmp_path / "config.json")
     monkeypatch.setattr(config, "ACTIVE_PROFILE", "wanwu")
     monkeypatch.setattr(config, "_profile", PROFILE)
     monkeypatch.setattr(config, "_ENV_FILE_KEYS", set())
+    monkeypatch.setattr(config, "_cfg", cfg)
     for key in ("BASE_URL_WANWU", "MODEL_WANWU", "API_PATH_WANWU", "API_KEY_WANWU"):
         monkeypatch.delenv(key, raising=False)
     return env_file
@@ -201,12 +209,26 @@ def test_写值会留备份(env):
     assert "sk-old" in (env.parent / ".env.bak").read_text(encoding="utf-8")
 
 
-def test_pending_在写入后报出该字段(env):
+def test_写完当场生效不留pending(env):
+    """写盘成功后立刻重读，pending 为空 —— 这是「填了 Key 却要重启」的修复点。
+
+    旧契约断言 `"baseUrl" in body["pending"]`（文件改了、进程没刷新），那正是 bug
+    本身。现在 write_config 结尾统一调 config.reload_config()。
+    """
     body = write_config(
         {"profile": "wanwu", "changes": {"baseUrl": "https://mine.example"}}
     )
-    assert "baseUrl" in body["pending"]
+    assert body["pending"] == []
     assert body["fileState"]["fields"]["baseUrl"]["fileValue"] == "https://mine.example"
+    assert config.BASE_URL == "https://mine.example"  # 内存常量已跟上
+
+
+def test_手工改文件仍报pending(env):
+    """pending 机制没废：绕过界面直接改 .env，进程读不到，仍报待重启。"""
+    env.write_text("BASE_URL_WANWU=https://typed.example\n", encoding="utf-8")
+    fs = get_config(None)["fileState"]
+    assert fs["fields"]["baseUrl"]["fileValue"] == "https://typed.example"
+    assert "baseUrl" in fs["pending"]
 
 
 def test_多个键一次写完(env):

@@ -34,7 +34,7 @@
   "ok": true,
   "written": ["baseUrl", "apiKey"],  // 实际写下去的键（空值键不会出现在这里）
   "mtimes": { "env": 1758000001.5 }, // 写后的新 mtime，前端直接覆盖 fileState 用
-  "pending": ["baseUrl", "apiKey"],  // 写了但进程尚未重载 = 待重启
+  "pending": ["baseUrl", "apiKey"],  // 写完重读后仍与生效值不符的键（经界面写入通常为空）
   "unchanged": []                    // 提交了但与文件里一样的键
 }
 ```
@@ -164,6 +164,8 @@ def apply_env_changes(path, changes, expected_mtime):
 | `POST /api/config/secret` | 确认清空后该行被注释掉，且响应不返回原值 |
 | 切 profile | 写 `ACTIVE_PROFILE`，注释与未改的键保留；未注册的来源 400 且磁盘不变 |
 | 切 profile + 改字段同批 | 字段覆盖键按**选中**的来源拼（`MODEL_VOLC`），**不落到**当前生效的那个（`MODEL_WANWU`）——否则切过去后覆盖失效，表现为「切换成功但模型没变」 |
+| 写入即生效 | 写完 `reload_config()` 后 `pending == []`，且 `GET /api/config` 立刻反映新值（这是「填了 API Key 却要重启」的回归锁） |
+| 绕过界面改文件 | 手工改 `.env` 后 `pending` 仍如实报出该字段（机制没废） |
 | 路径逃逸 | profile 名含 `../` 时 400 |
 
 ## 6. 已知不做

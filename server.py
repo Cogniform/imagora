@@ -58,20 +58,7 @@ from core import (
 )
 from core.api import format_error, generate_image, list_models
 from core.canvas import safe_ref_path_allowlist
-from core.config import (
-    ACTIVE_PROFILE,
-    API_PATHS,
-    BASE_URL,
-    DEFAULT_MODEL,
-    DEFAULT_OUTPUT_DIR,
-    DEFAULT_QUALITY,
-    DEFAULT_SIZE,
-    MODELS,
-    PROFILE_LABEL,
-    QUALITY_OPTIONS,
-    SIZE_OPTIONS,
-    get_api_key,
-)
+from core.config import get_api_key
 from core.history import (
     read_generation_history,
     read_generation_history_paged,
@@ -86,7 +73,10 @@ _WIN_VALUE = 0
 # 生成文件名全局序号：秒级时间戳同秒并发必撞，加序号保证唯一
 _SEQ = itertools.count(1)
 # 参考图缓存：前端「添加即上传」落盘于此，跨窗口只传路径引用（不占浏览器存储配额）
-REF_DIR = os.path.join(DEFAULT_OUTPUT_DIR, ".refs")
+# 注意这两个是**导入时**由 config.DEFAULT_OUTPUT_DIR 算出的常量。DEFAULT_OUTPUT_DIR
+# 本身不随 profile / .env 变化（永远是 WORK_ROOT/output），所以这里不必运行期求值；
+# tests/conftest.py 也依赖它们是模块属性来打补丁。
+REF_DIR = os.path.join(config.DEFAULT_OUTPUT_DIR, ".refs")
 
 
 def _next_window_id() -> int:
@@ -107,7 +97,7 @@ _REF_SEQ = itertools.count(1)
 # 参考图孤儿文件最长保留时长（前端删除失败 / 上传未用的情况兜底清理）
 REF_MAX_AGE_SECONDS = 24 * 3600
 # 上次输出路径记录：服务重启后默认沿用（无记录才按窗口分区）
-LAST_OUTPUT_DIR_FILE = os.path.join(DEFAULT_OUTPUT_DIR, ".last_output_dir")
+LAST_OUTPUT_DIR_FILE = os.path.join(config.DEFAULT_OUTPUT_DIR, ".last_output_dir")
 # 串行化有界面副作用的系统调用（tkinter 选择器、explorer 置前）
 _UI_LOCK = threading.Lock()
 
@@ -277,7 +267,7 @@ def health_details():
         "apiKey": has_api_key(),
         "frontendBuilt": (DIST_DIR / "index.html").is_file(),
         "outputWritable": _directory_writable(
-            load_last_output_dir() or DEFAULT_OUTPUT_DIR
+            load_last_output_dir() or config.DEFAULT_OUTPUT_DIR
         ),
     }
     issues = []
@@ -303,19 +293,21 @@ def get_config(win: int | None = None):
     window_id = win if win and win > 0 else _next_window_id()
     # 默认输出路径：优先记住的上次路径（服务重启沿用），无记录才按窗口分区
     last_dir = load_last_output_dir()
-    default_dir = last_dir or os.path.join(DEFAULT_OUTPUT_DIR, f"win{window_id}")
+    default_dir = last_dir or os.path.join(config.DEFAULT_OUTPUT_DIR, f"win{window_id}")
+    # 一律经 config.xxx 取运行期值：顶层 `from core.config import ...` 是导入时绑定的
+    # 快照，配置热加载后拿到仍是旧值（见 _config_file_state 的同类说明）。
     return {
-        "sizes": SIZE_OPTIONS,
-        "qualities": QUALITY_OPTIONS,
+        "sizes": config.SIZE_OPTIONS,
+        "qualities": config.QUALITY_OPTIONS,
         "defaultOutputDir": default_dir,
         "windowId": window_id,
-        "baseUrl": BASE_URL,
-        "apiPath": API_PATHS.get("generations", ""),
-        "defaultModel": DEFAULT_MODEL,
-        "activeProfile": ACTIVE_PROFILE,
+        "baseUrl": config.BASE_URL,
+        "apiPath": config.API_PATHS.get("generations", ""),
+        "defaultModel": config.DEFAULT_MODEL,
+        "activeProfile": config.ACTIVE_PROFILE,
         # 当前 profile 的可选模型清单（每个带自己的尺寸/价格）；空则前端回退单模型。
-        "models": MODELS,
-        "profileLabel": PROFILE_LABEL,
+        "models": config.MODELS,
+        "profileLabel": config.PROFILE_LABEL,
         # 全部来源（profile）目录：前端按「使用中的接口地址」换尺寸/单价表 ——
         # 个人配置切了中转站，尺寸下拉不能继续沿用 default_profile 那张价目表。
         "providers": config.provider_catalog(),
@@ -423,7 +415,7 @@ def write_config(body: dict = Body(...)):
     请求/响应契约见 docs/config-write-api-design.md。
     值为空字符串的字段 = 不修改（界面的「留空则不修改」规则）。
     """
-    profile = str(body.get("profile") or "").strip() or (ACTIVE_PROFILE or "")
+    profile = str(body.get("profile") or "").strip() or (config.ACTIVE_PROFILE or "")
     changes = body.get("changes")
     if not isinstance(changes, dict):
         raise HTTPException(
@@ -522,6 +514,10 @@ def write_config(body: dict = Body(...)):
             status_code=500, detail={"error": "write_failed", "reason": str(exc)}
         ) from exc
 
+    # 写完立刻重读，让改动当场生效 —— 这正是「填了 API Key 却提示要重启」的修复点。
+    # 配置全是模块级常量，导入时求值一次；不重跑就永远是旧值。重跑之后文件值 == 生效值，
+    # pending 自然为空（前端「待重启」角标不再出现）。
+    config.reload_config()
     after = _config_file_state()
     return {
         "ok": True,
@@ -545,7 +541,7 @@ def clear_config_secret(body: dict = Body(...)):
             status_code=400,
             detail={"error": "invalid_value", "reason": "需要 confirm=true"},
         )
-    profile = str(body.get("profile") or "").strip() or (ACTIVE_PROFILE or "")
+    profile = str(body.get("profile") or "").strip() or (config.ACTIVE_PROFILE or "")
     try:
         env_path = config_guard.safe_profile_path(config.WORK_ROOT, profile)
     except ValueError as exc:
@@ -561,6 +557,8 @@ def clear_config_secret(body: dict = Body(...)):
         raise HTTPException(
             status_code=500, detail={"error": "write_failed", "reason": str(exc)}
         ) from exc
+    # 同 write_config：注释掉之后必须重读，否则内存里还留着旧密钥（等于没清）。
+    config.reload_config()
     return {"ok": True, "cleared": "apiKey", "fileState": _config_file_state()}
 
 
@@ -1136,7 +1134,7 @@ def run_generation(task: GenerationTask) -> None:
     保存路径统一以绝对路径进消息（前端动态显示本机路径 + 点击复制词条），不再相对化。
     """
     out_dir = os.path.abspath(
-        (task.output_dir.strip() or DEFAULT_OUTPUT_DIR).rstrip("\\/")
+        (task.output_dir.strip() or config.DEFAULT_OUTPUT_DIR).rstrip("\\/")
     )
     os.makedirs(out_dir, exist_ok=True)
     stamp = time.strftime("%Y%m%d_%H%M%S")
@@ -1160,7 +1158,7 @@ def run_generation(task: GenerationTask) -> None:
                 images=bases,
                 size=task.size,
                 quality=task.quality,
-                model=DEFAULT_MODEL,
+                model=config.DEFAULT_MODEL,
                 output_format="png",
                 output_path=dest,
             )
@@ -1170,7 +1168,7 @@ def run_generation(task: GenerationTask) -> None:
                 image_path=None,
                 size=task.size,
                 quality=task.quality,
-                model=DEFAULT_MODEL,
+                model=config.DEFAULT_MODEL,
                 output_format="png",
                 output_path=dest,
             )
@@ -1278,8 +1276,8 @@ task_manager = TaskManager(concurrency=MAX_CONCURRENCY, run_task=run_generation)
 @app.post("/api/generate")
 def generate(
     prompt: str = Form(...),
-    size: str = Form(DEFAULT_SIZE),
-    quality: str = Form(DEFAULT_QUALITY),
+    size: str = Form(""),
+    quality: str = Form(""),
     output_dir: str = Form(""),
     images: list[UploadFile] = File(default=[]),
     ref_paths: str = Form(""),
@@ -1297,6 +1295,12 @@ def generate(
     此前前端会带 api_key / api_base_url 覆盖，那是「浏览器也存一份配置」时代的产物，
     已随配置归一移除（见 docs/config-write-api-design.md）。
     """
+    # 空值回退到当前生效的默认尺寸/质量。不能写成 `size: str = Form(DEFAULT_SIZE)` ——
+    # Form 默认值在 import 时求值，配置热加载后就永远拿旧值了（见 core/config.py 的
+    # reload_config 说明）。
+    size = size.strip() or config.DEFAULT_SIZE
+    quality = quality.strip() or config.DEFAULT_QUALITY
+
     ref_bases: list[str] = []
     if ref_paths:
         try:
@@ -1372,8 +1376,8 @@ def generate_batch(body: dict):
         if not prompt:
             skipped.append({"index": index, "reason": "提示词为空"})
             continue
-        size = str(item.get("size") or DEFAULT_SIZE)
-        quality = str(item.get("quality") or DEFAULT_QUALITY)
+        size = str(item.get("size") or config.DEFAULT_SIZE)
+        quality = str(item.get("quality") or config.DEFAULT_QUALITY)
         ref_bases: list[str] = []
         bad_ref = ""
         for raw_path in item.get("refPaths") or []:

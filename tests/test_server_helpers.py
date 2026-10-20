@@ -11,7 +11,7 @@ from io import BytesIO
 from fastapi import UploadFile
 from starlette.datastructures import Headers
 
-from core.config import SIZE_OPTIONS
+from core import config
 from server import ensure_static_mimetypes, size_cost
 
 
@@ -39,8 +39,12 @@ def test_static_assets_use_javascript_mime():
 
 def test_size_cost_known_sizes():
     """已知尺寸 -> 对应费用（从当前 profile 的 size_options 推导，不硬编码价格，
-    否则切换 profile/供应商就会误报失败）"""
-    for opt in SIZE_OPTIONS:
+    否则切换 profile/供应商就会误报失败）。
+
+    这里必须用 `config.SIZE_OPTIONS` 而非模块级 `from core.config import SIZE_OPTIONS`：
+    后者是导入时快照，而用例执行时 conftest 已把配置拨回出厂目录，两边会不一致。
+    """
+    for opt in config.SIZE_OPTIONS:
         assert size_cost(opt["value"]) == float(opt.get("cost", 0.0))
 
 
@@ -408,7 +412,9 @@ def test_health_details_reports_actionable_checks(monkeypatch, tmp_path):
     dist = tmp_path / "dist"
     output = tmp_path / "output"
     monkeypatch.setattr("server.DIST_DIR", dist)
-    monkeypatch.setattr("server.DEFAULT_OUTPUT_DIR", str(output))
+    # server.py 已改为运行期读 config.DEFAULT_OUTPUT_DIR（配置热加载后要跟上新值），
+    # 模块里不再有同名副本 —— 补丁要打在 config 上。
+    monkeypatch.setattr("core.config.DEFAULT_OUTPUT_DIR", str(output))
     monkeypatch.setattr("server.load_last_output_dir", lambda: None)
     monkeypatch.setattr("server.has_api_key", lambda: False)
 

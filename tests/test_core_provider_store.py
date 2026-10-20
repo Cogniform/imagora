@@ -147,6 +147,90 @@ def test_bad_protocol_payload_rejected(payload):
         provider_store.resolve_api_paths(payload)
 
 
+# ---------- 地址与路径的版本段去重 ----------
+#
+# 这是实测踩到的坑：中转站标准写法是地址带 /v1（这样 /models 才通），而 OpenAI 兼容的
+# 图片端点路径本身也以 /v1 开头。两者直拼会得到 .../v1/v1/images/generations，必然 404。
+
+
+def test_dedupe_strips_path_version_when_url_has_it():
+    """地址带 /v1 + 路径带 /v1 → 只留一份。"""
+    paths = provider_store.dedupe_version_prefix(
+        "https://relay.example/v1",
+        {"generations": "/v1/images/generations", "edits": "/v1/images/edits"},
+    )
+    assert paths == {
+        "generations": "/images/generations",
+        "edits": "/images/edits",
+    }
+
+
+def test_dedupe_keeps_path_when_url_has_no_version():
+    """地址不带版本号时路径必须保留 /v1，否则拼出来的 URL 少一段。"""
+    paths = provider_store.dedupe_version_prefix(
+        "https://gateway.example",
+        {"generations": "/v1/images/generations", "edits": "/v1/images/edits"},
+    )
+    assert paths == {
+        "generations": "/v1/images/generations",
+        "edits": "/v1/images/edits",
+    }
+
+
+def test_dedupe_handles_ark_style_url():
+    """方舟地址以 /api/v3 结尾（版本段是 v3），路径里没有版本段 → 原样保留。"""
+    paths = provider_store.dedupe_version_prefix(
+        "https://ark.cn-beijing.volces.com/api/v3",
+        {"generations": "/images/generations", "edits": "/images/generations"},
+    )
+    assert paths == {
+        "generations": "/images/generations",
+        "edits": "/images/generations",
+    }
+
+
+def test_dedupe_does_not_rewrite_mismatched_versions():
+    """/v2 地址配 /v1 路径是真实不一致，不能擅自抹平 —— 那会把配错的地址藏起来。"""
+    paths = provider_store.dedupe_version_prefix(
+        "https://relay.example/v2",
+        {"generations": "/v1/images/generations", "edits": "/v1/images/edits"},
+    )
+    assert paths == {
+        "generations": "/v1/images/generations",
+        "edits": "/v1/images/edits",
+    }
+
+
+def test_dedupe_returns_copy():
+    """返回新字典：调用方改动不该污染 PROTOCOL_PRESETS。"""
+    original = {"generations": "/v1/images/generations", "edits": "/v1/images/edits"}
+    result = provider_store.dedupe_version_prefix("https://relay.example/v1", original)
+    result["generations"] = "/mutated"
+    assert original["generations"] == "/v1/images/generations"
+
+
+def test_build_profile_dedupes_version_prefix():
+    """端到端：界面填带 /v1 的地址，落盘的 api_paths 不能再带 /v1。"""
+    _, profile = provider_store.build_profile(
+        _payload(baseUrl="https://relay.example/v1", protocol="openai")
+    )
+    assert profile["api_paths"]["generations"] == "/images/generations"
+    assert profile["api_paths"]["edits"] == "/images/edits"
+
+
+def test_build_profile_custom_path_also_deduped():
+    """自定义路径同样去重：用户填了 /v1/... 而地址也带 /v1 时不该重复。"""
+    _, profile = provider_store.build_profile(
+        _payload(
+            baseUrl="https://relay.example/v1",
+            protocol="custom",
+            generationsPath="/v1/paint",
+            editsPath="/v1/edit",
+        )
+    )
+    assert profile["api_paths"] == {"generations": "/paint", "edits": "/edit"}
+
+
 # ---------- 表单 → profile ----------
 
 
@@ -154,7 +238,9 @@ def _payload(**overrides) -> dict:
     base = {
         "name": "acme-gateway",
         "label": "Acme 中转",
-        "baseUrl": "https://gateway.example/v1",
+        # 刻意用不带版本号的地址：带 /v1 的地址会触发路径去重（见 dedupe_version_prefix
+        # 的测试组），这里的用例只想验 profile 形状，不该被去重逻辑干扰。
+        "baseUrl": "https://gateway.example",
         "protocol": "openai",
         "model": "gpt-image-2.5",
     }
@@ -166,7 +252,7 @@ def test_build_profile_shape():
     name, profile = provider_store.build_profile(_payload())
     assert name == "acme-gateway"
     assert profile["label"] == "Acme 中转"
-    assert profile["base_url"] == "https://gateway.example/v1"
+    assert profile["base_url"] == "https://gateway.example"
     assert profile["api_paths"]["generations"] == "/v1/images/generations"
     assert profile["default_model"] == "gpt-image-2.5"
     assert profile["default_quality"] == "high"
@@ -301,7 +387,7 @@ def test_add_provider_writes_file(tmp_path):
     assert written == path
     doc = json.loads(path.read_text(encoding="utf-8"))
     assert doc["version"] == provider_store.SCHEMA_VERSION
-    assert doc["profiles"]["acme-gateway"]["base_url"] == "https://gateway.example/v1"
+    assert doc["profiles"]["acme-gateway"]["base_url"] == "https://gateway.example"
 
 
 def test_add_provider_rejects_duplicate(tmp_path):

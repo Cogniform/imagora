@@ -28,9 +28,15 @@ from server import (
 
 TODAY = time.strftime("%Y-%m-%d")
 
+
 # 1024x1024 单价从当前 profile 的 size_options 推导——不硬编码 0.05，
 # 否则切换供应商 profile（价格不同）时这些预算断言会假失败。
-UNIT = server.size_cost("1024x1024")
+#
+# 必须写成函数而不是模块级常量：模块导入时 conftest 的隔离夹具还没跑，此时读到的是
+# 开发机真实 .env 指向的 profile（可能是单价全 0 的自建来源），而用例执行时配置已被
+# 拨回出厂目录 —— 两边不一致就会出现「本地红、CI 绿」。
+def _unit() -> float:
+    return server.size_cost("1024x1024")
 
 
 def _ledger_row(status="ok", cost_value=0.05, size="1024x1024", prompt="p", day=None):
@@ -136,10 +142,11 @@ def test_budget_set_then_read(ledger):
 
 
 def test_budget_check_by_count(ledger):
-    # 预算按当前单价缩放：3 张预估 = 3*UNIT，日限设为略低于「预估+已花」以触发超限
-    set_budget({"dailyLimit": UNIT})  # 已花 UNIT（ledger）+ 预估 3*UNIT > UNIT
+    # 预算按当前单价缩放：3 张预估 = 3*unit，日限设为略低于「预估+已花」以触发超限
+    unit = _unit()
+    set_budget({"dailyLimit": unit})  # 已花 unit（ledger）+ 预估 3*unit > unit
     result = check_budget_route({"count": 3, "size": "1024x1024"})
-    assert result["estimate"] == pytest.approx(3 * UNIT)
+    assert result["estimate"] == pytest.approx(3 * unit)
     assert result["over"] is True and result["allowed"] is False
     assert "当日预算" in result["reason"]
 
@@ -150,14 +157,14 @@ def test_budget_check_by_items_allows_within_limit(ledger):
         {"items": [{"size": "1024x1024"}, {"size": "1024x1024"}]}
     )
     assert (
-        result["estimate"] == pytest.approx(2 * UNIT)
+        result["estimate"] == pytest.approx(2 * _unit())
         and result["over"] is False
         and result["allowed"] is True
     )
 
 
 def test_budget_check_single_limit(ledger):
-    set_budget({"singleRunLimit": UNIT})  # 单次上限 = 1 张单价
+    set_budget({"singleRunLimit": _unit()})  # 单次上限 = 1 张单价
     assert check_budget_route({"count": 3, "size": "1024x1024"})["over"] is True
     assert check_budget_route({"count": 2, "size": "1024x1024"})["over"] is True
     assert check_budget_route({"count": 1, "size": "1024x1024"})["over"] is False
@@ -241,7 +248,7 @@ def test_generate_batch_submits_valid_and_skips_invalid(
     result = generate_batch(body)
     assert len(result["submitted"]) == 1
     assert result["submitted"][0]["size"] == "1024x1024"
-    assert result["estimate"] == pytest.approx(UNIT)
+    assert result["estimate"] == pytest.approx(_unit())
     reasons = [row["reason"] for row in result["skipped"]]
     assert any("提示词为空" in r for r in reasons)
     assert any("参考图不可用" in r for r in reasons)

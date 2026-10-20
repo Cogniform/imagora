@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -25,6 +26,15 @@ PROFILE = {
 def env(tmp_path: Path, monkeypatch):
     env_file = tmp_path / ".env"
     env_file.write_text(SAMPLE_ENV, encoding="utf-8")
+    # 路由写完会调 config.reload_config() 重新读盘 —— 只在内存里塞 _cfg 不够，
+    # 必须让磁盘上真有一份同形状的 config.json，否则热加载会把 _cfg 读成空 dict。
+    cfg = {
+        "default_profile": "wanwu",
+        "profiles": {"wanwu": PROFILE, "volc": {}, "other": {}},
+    }
+    (tmp_path / "config.json").write_text(
+        json.dumps(cfg, ensure_ascii=False), encoding="utf-8"
+    )
     monkeypatch.setattr(config, "ENV_FILE_PATH", env_file)
     monkeypatch.setattr(config, "WORK_ROOT", tmp_path)
     monkeypatch.setattr(config, "_CONFIG_FILE", tmp_path / "config.json")
@@ -32,9 +42,7 @@ def env(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(config, "_profile", PROFILE)
     monkeypatch.setattr(config, "_ENV_FILE_KEYS", set())
     # 替换 describe_config 的注册名单来源：build_profile_view 读 cfg 的 profiles
-    monkeypatch.setattr(
-        config, "_cfg", {"profiles": {"wanwu": PROFILE, "volc": {}, "other": {}}}
-    )
+    monkeypatch.setattr(config, "_cfg", cfg)
     for key in (
         "BASE_URL_WANWU",
         "MODEL_WANWU",
@@ -72,12 +80,18 @@ def test_profile非字符串被拒(env):
     assert ei.value.detail["error"] == "invalid_value"
 
 
-def test_切profile计入pending(env):
+def test_切profile当场生效不留pending(env):
+    """写完立刻重读盘，profile 当场切换 —— 不再留「待重启」。
+
+    旧契约是「文件里已改、进程还跑在 wanwu 上 → 待重启」，那正是「填了 API Key
+    却提示要重启」的同一病根：写盘成功但内存常量没刷新。现在 write_config 结尾
+    统一调 config.reload_config()，文件值 == 生效值。
+    """
     body = write_config({"profile": "wanwu", "changes": {"profile": "volc"}})
-    # 文件里已改、进程还跑在 wanwu 上 → 待重启
-    assert "profile" in body["pending"]
-    assert body["fileState"]["profile"] == "wanwu"  # 生效值
+    assert body["pending"] == []
+    assert body["fileState"]["profile"] == "volc"  # 生效值已跟上
     assert body["fileState"]["fileProfile"] == "volc"  # 文件值
+    assert config.ACTIVE_PROFILE == "volc"
 
 
 def test_切换profile与字段可同一次写入(env):
