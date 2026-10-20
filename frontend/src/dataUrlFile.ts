@@ -10,7 +10,7 @@
  */
 
 /** 派生图的文件名前缀（用于在输出目录里一眼看出这张图是加工来的） */
-export type DerivedPrefix = "crop" | "upscale";
+export type DerivedPrefix = "crop" | "upscale" | "split";
 
 const DATA_URL_RE = /^data:([^;,]*)((?:;[^,]*)?),(.*)$/s;
 
@@ -92,4 +92,31 @@ function compactStamp(at: Date): string {
   const date = `${at.getFullYear()}${pad(at.getMonth() + 1)}${pad(at.getDate())}`;
   const time = `${pad(at.getHours())}${pad(at.getMinutes())}${pad(at.getSeconds())}`;
   return `${date}-${time}`;
+}
+
+/**
+ * 一次产出多张派生图（切分）的文件名，形如
+ * `split-红苹果-20261020-131045-1.png`、`...-2.png`。
+ *
+ * 为什么不能直接对每张调 `derivedImageName`：它的时间戳只到秒，同一批切分必然
+ * 落在同一秒，多张图会拿到**同一个文件名**（上传时互相覆盖，画布上只剩一张）。
+ * 所以批量场景必须带序号；序号从 1 开始、按传入顺序连续，与 `splitCells` 的
+ * 行优先顺序一致，用户看文件名就能对回原图的位置。
+ */
+export function derivedImageSeries(
+  sourceName: string,
+  prefix: DerivedPrefix,
+  count: number,
+  at: Date = new Date(),
+): string[] {
+  const total = Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
+  if (total === 0) return [];
+  const stem = sourceName.replace(/\.[^./\\]+$/, "").trim() || "image";
+  const safe = stem.replace(/[\\/:*?"<>|]/g, "_").slice(0, 40);
+  const stamp = compactStamp(at);
+  const names: string[] = [];
+  for (let i = 1; i <= total; i += 1) {
+    names.push(`${prefix}-${safe}-${stamp}-${i}.png`);
+  }
+  return names;
 }

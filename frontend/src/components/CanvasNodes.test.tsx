@@ -17,6 +17,7 @@ function nodeProps<T extends ElementType>(props: Partial<ComponentProps<T>>): Co
 function renderImageNode(onZoom = vi.fn(), onCanvasDoubleClick = vi.fn(), lod?: boolean) {
   const onCrop = vi.fn();
   const onUpscale = vi.fn();
+  const onSplit = vi.fn();
   const props = nodeProps<typeof ImageNode>({
     id: "image-1",
     type: "image",
@@ -36,6 +37,7 @@ function renderImageNode(onZoom = vi.fn(), onCanvasDoubleClick = vi.fn(), lod?: 
     onDelete: vi.fn(),
     onCrop,
     onUpscale,
+    onSplit,
   });
 
   render(
@@ -45,7 +47,7 @@ function renderImageNode(onZoom = vi.fn(), onCanvasDoubleClick = vi.fn(), lod?: 
       </ReactFlowProvider>
     </div>,
   );
-  return { onZoom, onCanvasDoubleClick, onCrop, onUpscale };
+  return { onZoom, onCanvasDoubleClick, onCrop, onUpscale, onSplit };
 }
 
 describe("ImageNode", () => {
@@ -72,8 +74,23 @@ describe("ImageNode", () => {
     expect(screen.getByRole("button", { name: "预览大图" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "裁剪图片" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "放大图片" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "切分图片" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "替换图片" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "删除图片" })).toBeTruthy();
+  });
+
+  it("keeps the action rail hoverable and unclickable while hidden", () => {
+    renderImageNode();
+    const rail = screen.getByTestId("image-action-rail");
+
+    // 隐藏态必须挡掉命中测试：opacity:0 仍会参与命中，只靠透明度等于常驻一排隐形按钮。
+    expect(rail.className).toContain("pointer-events-none");
+    expect(rail.className).toContain("group-hover:pointer-events-auto");
+
+    // 视觉间距必须来自容器内边距而不是外边距，否则鼠标移向按钮的途中会掉出 .group 导致闪断。
+    expect(rail.className).toContain("pl-2");
+    expect(rail.className).not.toContain("ml-2");
+    expect(rail.className).not.toMatch(/\binvisible\b/);
   });
 
   it("wires crop and upscale buttons to their handlers", () => {
@@ -84,6 +101,13 @@ describe("ImageNode", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "放大图片" }));
     expect(onUpscale).toHaveBeenCalledWith("image-1");
+  });
+
+  it("wires the split button to its handler", () => {
+    const { onSplit } = renderImageNode();
+
+    fireEvent.click(screen.getByRole("button", { name: "切分图片" }));
+    expect(onSplit).toHaveBeenCalledWith("image-1");
   });
 
   it("leaves handle dimensions to the zoom-aware canvas styles", () => {
@@ -211,6 +235,7 @@ describe("LOD abstract mode", () => {
     expect(screen.queryByRole("button", { name: "替换图片" })).toBeNull();
     expect(screen.queryByRole("button", { name: "裁剪图片" })).toBeNull();
     expect(screen.queryByRole("button", { name: "放大图片" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "切分图片" })).toBeNull();
   });
 
   it("renders prompt cards as abstract read-only cards with status text", () => {
@@ -295,6 +320,70 @@ describe("LOD abstract mode", () => {
 
     expect(screen.getByText("5 张图")).toBeTruthy();
     expect(screen.queryByText("去重")).toBeNull();
+  });
+
+  it("stacks background cards behind the group so a batch reads as a pile", () => {
+    const props = nodeProps<typeof GroupNode>({
+      id: "group-1",
+      type: "group",
+      data: { name: "图片组", imageCount: 4, totalSize: 4 * 1024 * 1024 },
+      selected: false,
+      onDelete: vi.fn(),
+    });
+
+    const { container } = render(<ReactFlowProvider><GroupNode {...props} /></ReactFlowProvider>);
+
+    // 4 张图 = 1 张本体 + 3 张叠卡（imageCount - 1 夹到 3）
+    const stacks = container.querySelectorAll('[aria-hidden="true"].pointer-events-none');
+    expect(stacks).toHaveLength(3);
+  });
+
+  it("caps the stack at three cards no matter how many images are in the group", () => {
+    const props = nodeProps<typeof GroupNode>({
+      id: "group-1",
+      type: "group",
+      data: { name: "图片组", imageCount: 40, totalSize: 40 * 1024 * 1024 },
+      selected: false,
+      onDelete: vi.fn(),
+    });
+
+    const { container } = render(<ReactFlowProvider><GroupNode {...props} /></ReactFlowProvider>);
+
+    // 张数是数据，不能直接当渲染数量：40 张渲染 39 层会拖垮缩放帧率
+    const stacks = container.querySelectorAll('[aria-hidden="true"].pointer-events-none');
+    expect(stacks).toHaveLength(3);
+    expect(screen.getByText("40 张图")).toBeTruthy();
+  });
+
+  it("draws no stack cards for a single-image group", () => {
+    const props = nodeProps<typeof GroupNode>({
+      id: "group-1",
+      type: "group",
+      data: { name: "图片组", imageCount: 1, totalSize: 1024 * 1024 },
+      selected: false,
+      onDelete: vi.fn(),
+    });
+
+    const { container } = render(<ReactFlowProvider><GroupNode {...props} /></ReactFlowProvider>);
+
+    expect(container.querySelectorAll('[aria-hidden="true"].pointer-events-none')).toHaveLength(0);
+    expect(screen.getByText("1 张图")).toBeTruthy();
+  });
+
+  it("keeps the stack cards in LOD mode too", () => {
+    const props = nodeProps<typeof GroupNode>({
+      id: "group-1",
+      type: "group",
+      data: { name: "图片组", imageCount: 3, totalSize: 3 * 1024 * 1024 },
+      selected: false,
+      lod: true,
+      onDelete: vi.fn(),
+    });
+
+    const { container } = render(<ReactFlowProvider><GroupNode {...props} /></ReactFlowProvider>);
+
+    // LOD 只去掉 hover 操作栏，叠卡是「有多少张」的主要视觉信号，必须留着
+    expect(container.querySelectorAll('[aria-hidden="true"].pointer-events-none')).toHaveLength(2);
   });
 
   it("renders a failed prompt status without leaking the failure message into the card", () => {

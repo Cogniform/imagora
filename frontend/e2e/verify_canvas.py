@@ -5,7 +5,10 @@
 工具栏按钮拖出新建（提示词卡片 / 图片组，示意文案与全局跟随、松开即建）、
 真实鼠标拖拽（原生 HTML5 DnD 管线）、拖到画布外松开=取消（示意切「松开取消」，拖回画布仍新建）、
 缩放滑杆与视口双向同步、小地图开关（默认关 → 开 → 关，选择落 localStorage）、
-图片节点裁剪与放大（入口按钮 → 对话框 → 确认后派生新节点，原图保留）。
+图片节点裁剪与放大（入口按钮 → 对话框 → 确认后派生新节点，原图保留）、
+图片切分（3×2 预设 → 一次产出 6 张派生节点）、
+拖拽吸附（拖拽中出现对齐线、松手清空、关掉开关后不再出现）、
+聚焦所选节点（选中后缩放变化且不放大到失真）。
 
 前置：本地服务已启动（uv run python -m main ui --port 7860），且已安装：
   pip install playwright && playwright install chromium
@@ -102,6 +105,20 @@ def check(name, ok, detail=""):
         ("PASS" if ok else "FAIL") + " | " + name + ((" | " + detail) if detail else "")
     )
     results.append((name, ok))
+
+
+def click_hover_action(node_locator, name):
+    """点节点悬停操作栏里的按钮。
+
+    操作栏常驻布局但默认 `opacity-0 pointer-events-none` —— 一排隐形按钮不能挡住
+    画布点击（见 ARCHITECTURE 5.4）。真实用户 hover 时 `group-hover` 会把它翻成
+    `pointer-events-auto`；但 E2E 里画布节点在视口中心互相叠住，React Flow 还会把
+    选中节点抬 z-index，真实 hover 会落到别的节点上，`group-hover` 不触发。
+    所以直接向按钮派发 click（跳过命中测试），等价于「用户已经 hover 在上面了」。
+    注意不能用 `click(force=True)`：force 只是跳过可操作性等待，鼠标事件照样走
+    命中测试，会被 `pointer-events: none` 拦掉。
+    """
+    node_locator.get_by_role("button", name=name).dispatch_event("click")
 
 
 def main():
@@ -644,11 +661,11 @@ def main():
             .last
         )
         # 不用 hover：画布上多个节点会在视口中心叠住，React Flow 还会把选中节点抬 z-index，
-        # 真实 hover 会落到别的节点上。操作栏是 opacity-0 而非 display:none，元素仍在布局里，
-        # 用 force 点击跳过命中测试直接派发到按钮上。
+        # 真实 hover 会落到别的节点上。操作栏常驻布局但默认 pointer-events-none（隐形按钮
+        # 不能挡住画布），故用 dispatch_event 直接派发，见 click_hover_action 的说明。
         crop_btn = src_node.get_by_role("button", name="裁剪图片")
         check("裁剪入口按钮存在", crop_btn.count() == 1)
-        crop_btn.click(force=True)
+        click_hover_action(src_node, "裁剪图片")
         page.wait_for_timeout(700)
         crop_dialog = page.locator('[data-testid="image-crop-dialog"]')
         check("裁剪对话框打开", crop_dialog.count() == 1)
@@ -694,7 +711,7 @@ def main():
             .last
         )
         check("裁剪产物已出现在画布上", crop_node.count() == 1)
-        crop_node.get_by_role("button", name="放大图片").click(force=True)
+        click_hover_action(crop_node, "放大图片")
         page.wait_for_timeout(700)
         up_dialog = page.locator('[data-testid="image-upscale-dialog"]')
         check("放大对话框打开", up_dialog.count() == 1)
@@ -716,6 +733,185 @@ def main():
             "放大后对话框关闭",
             page.locator('[data-testid="image-upscale-dialog"]').count() == 0,
         )
+
+        # 16. 图片切分：入口 → 对话框 → 3×2 预设 → 确认一次产出 6 张派生节点
+        #     切的是第 14 段上传的原图（240×160），不切裁剪/放大产物，
+        #     因为那些产物的字节内容由 canvas 决定，尺寸断言不好写死。
+        split_src = (
+            page.locator(".react-flow__node-image")
+            .filter(has=page.locator('img[alt="imagora_e2e_240x160.png"]'))
+            .last
+        )
+        split_btn = split_src.get_by_role("button", name="切分图片")
+        check("切分入口按钮存在", split_btn.count() == 1)
+        click_hover_action(split_src, "切分图片")
+        page.wait_for_timeout(700)
+        split_dialog = page.locator('[data-testid="image-split-dialog"]')
+        check("切分对话框打开", split_dialog.count() == 1)
+        check(
+            "切分预览网格已渲染",
+            split_dialog.locator('[data-testid="split-preview"]').count() == 1,
+        )
+        # 默认 2×2（4 块）已可切；换成 3×2 验证预设按钮真的改了行列
+        split_dialog.locator('[data-testid="split-preset-3x2"]').click()
+        page.wait_for_timeout(300)
+        split_count_text = split_dialog.locator(
+            '[data-testid="split-count"]'
+        ).inner_text()
+        check(
+            "3×2 预设把块数改为 6",
+            "6" in split_count_text,
+            f"count={split_count_text}",
+        )
+        check(
+            "预览网格画出 6 个格子",
+            split_dialog.locator('[data-testid="split-cell"]').count() == 6,
+        )
+        # 文件名预览只列前 NAME_PREVIEW_LIMIT（3）条，其余折叠成「…等 N 个」——
+        # 6 个文件名全铺出来会把弹窗撑长，而用户只需要确认命名规律对不对。
+        name_li_count = split_dialog.locator('[data-testid="split-names"] li').count()
+        check(
+            "文件名预览列出前 3 条",
+            name_li_count == 3,
+            f"li={name_li_count}",
+        )
+        check(
+            "文件名预览折叠其余并标出总数",
+            "等 6 个"
+            in split_dialog.locator('[data-testid="split-names"]').inner_text(),
+        )
+        before_split = len(image_positions())
+        split_dialog.locator('[data-testid="image-split-confirm"]').click()
+        page.wait_for_timeout(5000)
+        after_split = len(image_positions())
+        # 不能用「节点数 +6」当判据：画布开了 onlyRenderVisibleElements，切分产物排在
+        # 原图右侧，多数落在视口外、根本不进 DOM。产物张数以画布日志为准（一次上传一次
+        # 落库，日志里明确写了张数），节点数只断言「确实新增了」。
+        split_logs = " | ".join(page.locator(".log-toast").all_inner_texts())
+        check(
+            "切分日志报出 6 张",
+            "→ 6 张" in split_logs,
+            f"logs={split_logs[-120:]}",
+        )
+        check(
+            "确认切分后画布新增节点",
+            after_split > before_split,
+            f"{before_split}->{after_split}",
+        )
+        check(
+            "切分后对话框关闭",
+            page.locator('[data-testid="image-split-dialog"]').count() == 0,
+        )
+
+        # 17. 拖拽吸附：开着吸附拖动节点，对齐时出现 .snap-guide；关掉开关后不再出现
+        #     对齐线只在拖拽的那几帧存在，所以用 mouse.down → move → 读 → up 的时序抓。
+        snap_toggle = page.get_by_role("button", name="关闭拖拽吸附")
+        check("吸附默认开启", snap_toggle.count() == 1)
+        check(
+            "吸附偏好默认未写 localStorage（默认即开）",
+            page.evaluate("() => window.localStorage.getItem('imagora.canvas-snap.v1')")
+            in (None, "1"),
+        )
+        # 先把两个节点摆成同一列：拖第一个到第二个的正下方附近，应吸住竖直对齐线。
+        drag_target = page.locator(".react-flow__node-prompt").first
+        tbox = drag_target.bounding_box()
+        if tbox is None:
+            check("找到可拖拽的提示词节点", False)
+        else:
+            grab_x = tbox["x"] + tbox["width"] / 2
+            grab_y = tbox["y"] + 14
+            page.mouse.move(grab_x, grab_y)
+            page.mouse.down()
+            page.mouse.move(grab_x + 40, grab_y + 60, steps=8)
+            page.wait_for_timeout(200)
+            guides_during = page.locator(".snap-guide").count()
+            page.mouse.move(grab_x + 42, grab_y + 62, steps=4)
+            page.wait_for_timeout(200)
+            guides_moved = page.locator(".snap-guide").count()
+            page.mouse.up()
+            page.wait_for_timeout(400)
+            check(
+                "拖拽过程中出现过对齐线",
+                guides_during > 0 or guides_moved > 0,
+                f"during={guides_during} moved={guides_moved}",
+            )
+            check("松手后对齐线清空", page.locator(".snap-guide").count() == 0)
+        # 关掉吸附后再拖，不应再出现对齐线
+        page.get_by_role("button", name="关闭拖拽吸附").click()
+        page.wait_for_timeout(200)
+        check(
+            "关闭吸附后开关态翻转",
+            page.get_by_role("button", name="开启拖拽吸附").count() == 1,
+        )
+        check(
+            "吸附偏好写入 localStorage",
+            page.evaluate("() => window.localStorage.getItem('imagora.canvas-snap.v1')")
+            == "0",
+        )
+        tbox2 = page.locator(".react-flow__node-prompt").first.bounding_box()
+        if tbox2 is not None:
+            gx = tbox2["x"] + tbox2["width"] / 2
+            gy = tbox2["y"] + 14
+            page.mouse.move(gx, gy)
+            page.mouse.down()
+            page.mouse.move(gx + 40, gy + 60, steps=8)
+            page.wait_for_timeout(200)
+            check(
+                "关闭吸附后拖拽不再出现对齐线", page.locator(".snap-guide").count() == 0
+            )
+            page.mouse.up()
+            page.wait_for_timeout(300)
+        # 恢复默认，避免影响后续（与其它段的偏好写入保持一致的做法）
+        page.get_by_role("button", name="开启拖拽吸附").click()
+        page.wait_for_timeout(200)
+
+        # 18. 聚焦所选节点：选中一个节点 → 点「聚焦所选节点」→ 视口缩放变化且不放大到失真
+        #     不能用 locator.click()：画布节点在视口中心互相叠住，Playwright 的可操作性
+        #     检查会因为「另一个节点的 textarea 拦截了指针事件」而超时。改用裸 mouse.click
+        #     打坐标 —— 谁在最上层就选中谁，对「聚焦选中内容」这个断言完全等价。
+        img_box = page.locator(".react-flow__node-image").first.bounding_box()
+        if img_box is None:
+            check("找到可点击的图片节点", False)
+        else:
+            page.mouse.click(
+                img_box["x"] + img_box["width"] / 2,
+                img_box["y"] + img_box["height"] / 2,
+            )
+            page.wait_for_timeout(400)
+            selected_count = page.evaluate(
+                "() => document.querySelectorAll('.react-flow__node.selected').length"
+            )
+            check(
+                "点击后确有节点被选中",
+                selected_count >= 1,
+                f"selected={selected_count}",
+            )
+            # 先把画布缩小到 30%：聚焦的缩放上限是 1（不放大小图到失真），
+            # 当前视口若本来就是 100%，聚焦后 zoom 不变 —— 那是正确行为，不是缺陷。
+            # 缩小后再聚焦，才能看出「它确实按节点尺寸重算了视口」。
+            slider = page.get_by_role("slider", name="画布缩放")
+            slider.fill("30")
+            slider.dispatch_event("pointerup")
+            page.wait_for_timeout(500)
+            zoom_before_focus = vp_snap(page)["zoom"]
+            check(
+                "先缩小到 30% 作为聚焦前状态",
+                abs(zoom_before_focus - 0.3) < 0.02,
+                f"zoom={zoom_before_focus:.3f}",
+            )
+            page.get_by_role("button", name="聚焦所选节点").click()
+            page.wait_for_timeout(900)
+            zoom_after_focus = vp_snap(page)["zoom"]
+            check(
+                "聚焦后视口缩放变大",
+                zoom_after_focus > zoom_before_focus + 0.001,
+                f"{zoom_before_focus:.3f}->{zoom_after_focus:.3f}",
+            )
+            check(
+                "聚焦后缩放不超过 1（不放大到失真）",
+                zoom_after_focus <= 1.001,
+                f"zoom={zoom_after_focus:.3f}",
+            )
 
         browser.close()
 

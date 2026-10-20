@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { dataUrlToFile, derivedImageName } from "./dataUrlFile";
+import { dataUrlToFile, derivedImageName, derivedImageSeries } from "./dataUrlFile";
 
 /** 1×1 透明 PNG 的 base64（固定值，避免测试里再依赖 canvas） */
 const TINY_PNG_BASE64 =
@@ -74,5 +74,41 @@ describe("derivedImageName", () => {
   it("空名字回退成 image", () => {
     expect(derivedImageName("", "crop", at)).toBe("crop-image-20261020-130405.png");
     expect(derivedImageName("   .png", "crop", at)).toBe("crop-image-20261020-130405.png");
+  });
+});
+
+describe("derivedImageSeries", () => {
+  const at = new Date(2026, 9, 20, 13, 4, 5);
+
+  it("按顺序给出带序号的文件名，序号从 1 开始", () => {
+    expect(derivedImageSeries("红苹果.png", "split", 3, at)).toEqual([
+      "split-红苹果-20261020-130405-1.png",
+      "split-红苹果-20261020-130405-2.png",
+      "split-红苹果-20261020-130405-3.png",
+    ]);
+  });
+
+  it("同批次内文件名互不相同（时间戳只到秒，序号是唯一去重手段）", () => {
+    const names = derivedImageSeries("photo.png", "split", 9, at);
+    expect(new Set(names).size).toBe(9);
+  });
+
+  it("数量为 0 或非法时返回空数组（不产出一张没名字的图）", () => {
+    expect(derivedImageSeries("a.png", "split", 0, at)).toEqual([]);
+    expect(derivedImageSeries("a.png", "split", Number.NaN, at)).toEqual([]);
+    expect(derivedImageSeries("a.png", "split", -3, at)).toEqual([]);
+  });
+
+  it("数量带小数时向下取整（切出 4.7 张没有意义）", () => {
+    expect(derivedImageSeries("a.png", "split", 2.9, at)).toHaveLength(2);
+  });
+
+  it("清掉禁用字符并保留回退名", () => {
+    const names = derivedImageSeries('a/b:c*d.png', "split", 2, at);
+    expect(names).toHaveLength(2);
+    for (const name of names) {
+      expect(name).not.toMatch(/[\\/:*?"<>|]/);
+    }
+    expect(derivedImageSeries("", "split", 1, at)).toEqual(["split-image-20261020-130405-1.png"]);
   });
 });

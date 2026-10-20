@@ -19,15 +19,17 @@ import {
   ReactFlow,
   useEdgesState,
   useNodesState,
+  ViewportPortal,
   type Connection,
   type Edge,
   type IsValidConnection,
   type Node,
+  type NodeChange,
   type NodeMouseHandler,
   type ReactFlowInstance,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { GripVertical } from "lucide-react";
+import { Crosshair, GripVertical, Magnet } from "lucide-react";
 
 import {
   canvasUpload,
@@ -39,7 +41,7 @@ import {
   workflowSave,
 } from "../api";
 import { createCanvasHistory } from "../canvasHistory";
-import { dataUrlToFile, derivedImageName } from "../dataUrlFile";
+import { dataUrlToFile, derivedImageName, derivedImageSeries } from "../dataUrlFile";
 import { errMessage } from "../format";
 import {
   readMinimapVisible,
@@ -51,6 +53,12 @@ import {
   ZOOM_SLIDER_MAX_PERCENT,
   ZOOM_SLIDER_MIN_PERCENT,
 } from "../minimapVisible";
+import {
+  applySnapToChanges,
+  readSnapEnabled,
+  saveSnapEnabled,
+} from "../snapDrag";
+import type { SnapGuide } from "../snapGuide";
 import { useGenerationTask, type GenerationTaskView } from "../useGenerationTask";
 import { useCanvasRecovery } from "../useCanvasRecovery";
 import { useCanvasDrop } from "../useCanvasDrop";
@@ -82,9 +90,11 @@ import {
   workflowToCanvas,
 } from "../workflow";
 import { layoutPromptResults, layoutSelection, nodeSize } from "../layout";
+import { focusViewportForNode, nodeBounds, type NodeBox } from "../canvasGeometry";
 import { GroupNode, ImageNode, PromptNode } from "./CanvasNodes";
 import { HistoryGallery } from "./HistoryGallery";
 import { ImageCropDialog } from "./ImageCropDialog";
+import { ImageSplitDialog } from "./ImageSplitDialog";
 import { ImageUpscaleDialog } from "./ImageUpscaleDialog";
 import { ModalShell } from "./ModalShell";
 import { PromptImportModal } from "./PromptImportModal";
@@ -101,6 +111,10 @@ const MIN_FIT_ZOOM = 0.02;
  *  两值之间是迟滞带（0.1~0.2），避免在阈值附近反复缩放时抖动切换。 */
 const LOD_IN_ZOOM = 0.1;
 const LOD_OUT_ZOOM = 0.2;
+
+/** 聚焦节点时底部要让出的高度：画布日志浮层常驻右下角，聚焦后节点压在日志上等于白聚焦。
+ *  取 96px ≈ 五行日志条（LOG_VISIBLE_COUNT = 5）加上边距，宁多留一点。 */
+const FOCUS_BOTTOM_INSET = 96;
 
 /** 小地图里按节点类型取色：三类节点在小缩略图上仍能分辨结构。
  *  取的是 index.css 里的品牌色与两个中性色，不新增色板 —— 小地图是导航辅助，
@@ -208,7 +222,7 @@ export function CanvasPage({
   importSubmissionId,
   onSubmissionImported,
 }: CanvasPageProps) {
-  const [nodes, setNodes, onNodesChange] = useNodesState<WorkflowNode>([]);
+  const [nodes, setNodes, onNodesChangeBase] = useNodesState<WorkflowNode>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   /** 画布容器引用：把实时 zoom 写入 --canvas-zoom CSS 变量（连接点绝对大小用） */
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -262,6 +276,10 @@ export function CanvasPage({
       return !visible;
     });
   }, []);
+  /** 拖拽吸附开关（纯本机偏好，默认开：对齐是画布的默认期望，想自由摆放的人才去关） */
+  const [snapEnabled, setSnapEnabled] = useState(readSnapEnabled);
+  /** 当前帧需要画出来的对齐线（松手即清空） */
+  const [snapGuides, setSnapGuides] = useState<SnapGuide[]>([]);
   /** 节点/边的最新引用：回调经 ref 读取，避免 useCallback 依赖 nodes/edges
    *  导致 nodeTypes 每次拖拽重建 -> 全节点重渲染闪烁 */
   const nodesRef = useRef<WorkflowNode[]>(nodes);
@@ -273,6 +291,35 @@ export function CanvasPage({
     nodesRef.current = nodes;
     edgesRef.current = edges;
   }, [nodes, edges]);
+  /**
+   * 接管 React Flow 的节点变更：拖拽时做对齐吸附，其余变更原样透传。
+   *
+   * 为什么必须在 `onNodesChange` 这一层接而不是在 `onNodeDrag` 里改 nodes：
+   * React Flow 的位置更新只有一个入口，就是它自己发出来的 position change；
+   * 在 `onNodeDrag` 里再 setNodes 会与这条 change 打架（同一帧两个写入源，
+   * 节点会来回跳）。在这里改坐标，等于「把这一帧的位移换成吸附后的位移」，
+   * 上游完全不知情，拖拽手感与官方一致。
+   *
+   * 松手时（dragging=false 的最后一条 change）清空对齐线。
+   */
+  const onNodesChange = useCallback(
+    (changes: NodeChange<WorkflowNode>[]) => {
+      const outcome = applySnapToChanges(changes, nodesRef.current, snapEnabled);
+      onNodesChangeBase(outcome.changes as NodeChange<WorkflowNode>[]);
+      // 拖拽结束的那一条（dragging=false）也会走到这里，此时 guides 恒为空 → 自动清线
+      setSnapGuides((prev) => {
+        if (outcome.guides.length === 0 && prev.length === 0) return prev;
+        return outcome.guides;
+      });
+    },
+    [onNodesChangeBase, snapEnabled],
+  );
+  const toggleSnap = useCallback(() => {
+    setSnapEnabled((enabled) => {
+      saveSnapEnabled(!enabled);
+      return !enabled;
+    });
+  }, []);
   const [logs, setLogs] = useState<{ id: number; text: string }[]>([]);
   /** 日志自增 id：稳定 key 触发轮播入场动画（index 复用会原地改文字不触发） */
   const logIdRef = useRef(0);
@@ -313,6 +360,7 @@ export function CanvasPage({
    *  加工是可回溯的派生操作，原图必须留着，否则用户裁坏了没法退回。 */
   const [cropTarget, setCropTarget] = useState<ImageOpTarget | null>(null);
   const [upscaleTarget, setUpscaleTarget] = useState<ImageOpTarget | null>(null);
+  const [splitTarget, setSplitTarget] = useState<ImageOpTarget | null>(null);
   /** 保存/加载工作流弹窗 */
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [showLoadModal, setShowLoadModal] = useState(false);
@@ -825,6 +873,18 @@ export function CanvasPage({
     [pushLog, readOpTarget],
   );
 
+  const handleSplitImage = useCallback(
+    (nodeId: string) => {
+      const target = readOpTarget(nodeId);
+      if (!target) {
+        pushLog("切分失败：图片文件缺失");
+        return;
+      }
+      setSplitTarget(target);
+    },
+    [pushLog, readOpTarget],
+  );
+
   /** 默认质量：优先 high（用户要求） */
   const defaultQuality = config.qualities.includes("high") ? "high" : config.qualities[0] ?? "low";
 
@@ -881,6 +941,88 @@ export function CanvasPage({
     },
     [getCreatePosition, pushLog, recordHistory, setNodes],
   );
+
+  /** 切分产物落地：一次上传多张，全部放在源图右侧、纵向排开。
+   *
+   *  与裁剪/放大共用 `commitDerivedImage` 的单张语义吗？不能 —— 切分一次出 N 张，
+   *  逐张调用会把 N 次上传拆成 N 个历史记录点，撤销要按 N 次才回到原状。
+   *  这里一次 `canvasUpload` + 一次 `recordHistory`，撤销一步到位。
+   *
+   *  排列：横向偏移 DERIVED_NODE_OFFSET_X（与裁剪一致，紧挨原图），
+   *  纵向按 `canvasEntriesToNodes` 自身的批次排布（它会横向排开，所以给的是同一个 origin）。
+   *  图片多时叠成一排也没关系 —— 用户拖走就行，比堆在视口中心强。 */
+  const commitSplitImages = useCallback(
+    async (target: ImageOpTarget, dataUrls: string[]) => {
+      if (dataUrls.length === 0) {
+        pushLog("切分失败：没有产出任何图片");
+        return;
+      }
+      try {
+        const names = derivedImageSeries(target.name, "split", dataUrls.length);
+        const files = dataUrls.map((dataUrl, i) => dataUrlToFile(dataUrl, names[i] ?? `split-${i + 1}.png`));
+        const { images } = await canvasUpload(files);
+        if (!images.length) {
+          pushLog("切分失败：上传未返回图片");
+          return;
+        }
+        const source = nodesRef.current.find((n) => n.id === target.nodeId);
+        const origin = source
+          ? { x: source.position.x + DERIVED_NODE_OFFSET_X, y: source.position.y }
+          : getCreatePosition();
+        recordHistory();
+        setNodes((nds) => [
+          ...nds,
+          ...canvasEntriesToNodes(images, nds, origin).map((n, i) => withEnterAnim(n, i)),
+        ]);
+        pushLog(`已切分：${target.name} → ${images.length} 张`);
+      } catch (err) {
+        pushLog(`切分失败：${errMessage(err)}`);
+      }
+    },
+    [getCreatePosition, pushLog, recordHistory, setNodes],
+  );
+
+  /** 聚焦选中节点：让选中内容最多占视口 60%（而不是 fitView 那种「把所有东西塞进屏幕」）。
+   *
+   *  为什么需要它：画布上东西一多，`fitView` 会把缩放压到 5%，节点缩成看不见的色块。
+   *  用户选中一两个节点后按这个键，要的是「看清楚它」，不是「看全所有东西」。
+   *
+   *  算法在 canvasGeometry.focusViewportForNode（纯函数，45 个单测钉住）：
+   *  可用高度按「视口高 - 底部日志条」算，上方留 0 给悬停工具栏（工具栏在节点上方，
+   *  已由 layout 保证不压），下方留 LOG_VISIBLE_COUNT 那条浮层的高度。
+   *  多个选中节点时用包围盒当「一个虚拟节点」喂进去。 */
+  const handleFocusSelected = useCallback(() => {
+    const rf = rfInstanceRef.current;
+    const el = canvasRef.current;
+    if (!rf || !el) return;
+    const selected = nodesRef.current.filter((node) => selectedIdsRef.current.has(node.id));
+    const targets = selected.length > 0 ? selected : nodesRef.current;
+    if (targets.length === 0) {
+      pushLog("聚焦失败：画布上还没有节点");
+      return;
+    }
+    const boxes: NodeBox[] = targets.map((node) => {
+      const size = nodeSize(node);
+      return { id: node.id, type: node.type, position: node.position, width: size.width, height: size.height };
+    });
+    const bounds = nodeBounds(boxes);
+    const rect = el.getBoundingClientRect();
+    const virtual: NodeBox = {
+      id: "focus-bounds",
+      position: { x: bounds.left, y: bounds.top },
+      width: bounds.right - bounds.left,
+      height: bounds.bottom - bounds.top,
+    };
+    const next = focusViewportForNode(
+      virtual,
+      { width: rect.width, height: rect.height },
+      { above: 0, below: FOCUS_BOTTOM_INSET, bottomInset: FOCUS_BOTTOM_INSET },
+    );
+    // canvasGeometry 用 {x, y, k} 表达视口变换（世界坐标乘 k 再加 x/y），
+    // React Flow 的 setViewport 要的是 {x, y, zoom} —— 同一个量的两种命名，这里做一次转换。
+    void rf.setViewport({ x: next.x, y: next.y, zoom: next.k }, { duration: 220 });
+    pushLog(`已聚焦 ${targets.length} 个节点`);
+  }, [pushLog]);
 
   /* ---------------- 拖放落画布（接线在 useCanvasDrop：意图解析 / 落点换算 / 示意 / 窗口守卫） ----------------
    * 这里只负责"节点怎么建"，与点击新建共用同一构建函数与去重逻辑。 */
@@ -1465,6 +1607,7 @@ export function CanvasPage({
           onZoom={handleZoom}
           onCrop={handleCropImage}
           onUpscale={handleUpscaleImage}
+          onSplit={handleSplitImage}
         />
       ),
       group: (props: object) => (
@@ -1496,6 +1639,7 @@ export function CanvasPage({
       handleZoom,
       handleCropImage,
       handleUpscaleImage,
+      handleSplitImage,
       sizeOptions,
       qualityOptions,
       qualityEffective,
@@ -1513,7 +1657,8 @@ export function CanvasPage({
     showHelp ||
     zoomImage !== null ||
     cropTarget !== null ||
-    upscaleTarget !== null;
+    upscaleTarget !== null ||
+    splitTarget !== null;
   const { dropIntent, dropChip, dragHandlers, startToolbarDrag, hideDropChip } = useCanvasDrop({
     canvasRef,
     rfInstanceRef,
@@ -1728,7 +1873,42 @@ export function CanvasPage({
                 {minimapVisible ? "▣" : "▢"}
               </span>
             </ControlButton>
+            {/* 吸附开关：默认开，关掉后拖拽完全自由（偏好落 localStorage） */}
+            <ControlButton
+              onClick={toggleSnap}
+              title={snapEnabled ? "关闭拖拽吸附" : "开启拖拽吸附"}
+              aria-label={snapEnabled ? "关闭拖拽吸附" : "开启拖拽吸附"}
+              aria-pressed={snapEnabled}
+            >
+              <Magnet aria-hidden="true" size={14} />
+            </ControlButton>
+            {/* 聚焦：有选中就聚焦选中，没选中就聚焦全图。取代 fitView 的「全塞进屏幕」 */}
+            <ControlButton
+              onClick={handleFocusSelected}
+              title="聚焦（有选中时只看选中的，否则看全图）"
+              aria-label="聚焦所选节点"
+            >
+              <Crosshair aria-hidden="true" size={14} />
+            </ControlButton>
           </Controls>
+          {/* 对齐线：画在 React Flow 的视口坐标层里，随平移/缩放自动跟随。
+              只在拖拽的那几帧存在，松手即清空（见 onNodesChange）。
+              横向线（axis="x"）是竖直的一条，纵向线（axis="y"）是水平的一条。 */}
+          <ViewportPortal>
+            {snapGuides.map((guide) => (
+              <div
+                key={`${guide.axis}-${guide.position}-${guide.targetId}`}
+                className="snap-guide"
+                data-axis={guide.axis}
+                data-testid="snap-guide"
+                style={
+                  guide.axis === "x"
+                    ? { left: guide.position, top: -10000, width: 1, height: 20000 }
+                    : { left: -10000, top: guide.position, width: 20000, height: 1 }
+                }
+              />
+            ))}
+          </ViewportPortal>
         </ReactFlow>
         {/* 拖拽落点示意（useCanvasDrop 提供：portal 到 body 跟随光标，显示图片数量/新建类型） */}
         {dropChip}
@@ -1825,6 +2005,14 @@ export function CanvasPage({
           name={upscaleTarget.name}
           onClose={() => setUpscaleTarget(null)}
           onConfirm={(dataUrl) => commitDerivedImage(upscaleTarget, dataUrl, "upscale")}
+        />
+      )}
+      {splitTarget && (
+        <ImageSplitDialog
+          src={splitTarget.url}
+          name={splitTarget.name}
+          onClose={() => setSplitTarget(null)}
+          onConfirm={(dataUrls) => commitSplitImages(splitTarget, dataUrls)}
         />
       )}
     </div>

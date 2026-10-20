@@ -525,6 +525,17 @@ html[data-wallpaper="on"] select {
   border-radius: 11px;
   box-shadow: 0 7px 18px rgba(31, 41, 55, 0.08);
 }
+/* 拖拽对齐线（吸附命中时的那几帧）：1px 实线，位置由 TSX 用视口坐标算，
+ * 所以这里只给视觉、不给尺寸。颜色取品牌色而不是中性灰 —— 中性灰在点阵背景上看不清，
+ * 而对齐线是「刚刚发生了吸附」的即时反馈，必须一眼看到。
+ * pointer-events 必须关掉：它横跨整个视口，否则会挡住底下所有节点的拖拽与点击。 */
+.snap-guide {
+  position: absolute;
+  pointer-events: none;
+  background: var(--color-brand);
+  opacity: 0.55;
+  z-index: 5;
+}
 /* 画布边界关闭（外观弹窗开关；默认开，保持既有观感）：
  * 容器只剩内容——边框 / 底色 / 投影 / 画布自身的底色晕一起收掉，与页面背景融为一体。
  * 网格点保留：那是画布内容，不是容器边界。 */

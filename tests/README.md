@@ -50,7 +50,7 @@ cd frontend; npm test
 | [`test_main_process.py`](test_main_process.py) | 4 | 端口探测 / 祖先链回溯（Windows） |
 | [`test_main_cli.py`](test_main_cli.py) | 31 | CLI gen 子命令全链路（校验/输出解析/文生图+图生图+多参考/失败/--no-asset/比例档位）/ **`--n` 逐张请求（每次 `n=1`、各存各的账、部分失败保留已成功、默认单张行为不变）** / config 输出 |
 
-## 文件索引（前端 vitest，共 534，位于 frontend/src/）
+## 文件索引（前端 vitest，共 730，位于 frontend/src/）
 
 | 文件 | 用例 | 覆盖 |
 | --- | --- | --- |
@@ -67,18 +67,25 @@ cd frontend; npm test
 | [`logPath.test.ts`](../frontend/src/logPath.test.ts) | 6 | 日志路径词条解析（绝对/相对、正反斜杠、多路径、扩展名大小写） |
 | [`generationPending.test.ts`](../frontend/src/generationPending.test.ts) | 11 | 渐近进度曲线单调递增并逼近 98% 但永不越过（最后 2% 留给真实完成）、首秒即从 10% 起步、非法入参（NaN / ±Infinity / 负数）按 0s 处理绝不产出 `NaN%`、文案每 2s 轮播并循环 |
 | [`imageOps.test.ts`](../frontend/src/imageOps.test.ts) | 49 | 裁剪/放大几何：`clampCrop` 最小尺寸与越界回收、`moveCrop` 与 `resizeCrop` 八向手柄、`fitCropToRatio` 保持中心收缩到能放下的最大尺寸（像素比与归一化比的换算必须乘框宽高比）、`resolveUpscaleSize` 长边上限与非法入参、`gcdRatio` 约分（含不可约分尺寸）、`centeredSquareCrop` 默认框。**B 层 canvas I/O 不测**（jsdom 的 `getContext("2d")` 返回 null） |
-| [`dataUrlFile.test.ts`](../frontend/src/dataUrlFile.test.ts) | 11 | dataUrl → `File` 转换（base64 与百分号编码两种载荷；非法输入**抛错而不是返回空 File**，0 字节上传会在画布多出永远加载失败的红框节点）、派生文件名（前缀 + 原名清洗 + 时间戳 + 扩展名，长度精确断言） |
+| [`dataUrlFile.test.ts`](../frontend/src/dataUrlFile.test.ts) | 16 | dataUrl → `File` 转换（base64 与百分号编码两种载荷；非法输入**抛错而不是返回空 File**，0 字节上传会在画布多出永远加载失败的红框节点）、派生文件名（前缀 + 原名清洗 + 时间戳 + 扩展名，长度精确断言） |
+| [`aspectIcon.test.ts`](../frontend/src/aspectIcon.test.ts) | 12 | 比例图标几何：`aspectIconSize` 长边固定 24、短边按比例算且不低于 10（再矮就看不出是矩形）、横竖两个分支都只动短边、非法比例（NaN / 0 / 负数 / Infinity）回落正方形；`ratioFromSizeLabel` 三层解析（括号内 `a:b` → 裸 `a:b` → `WxH` 宽高比），**括号里只有中文方位词（如 `1024x1792 (竖版长图)`）必须退回宽高比**，否则这两项没有图标 |
+| [`canvasGeometry.test.ts`](../frontend/src/canvasGeometry.test.ts) | 45 | 视口聚焦与分组几何（移植 basketikun，MIT）：`nodeBounds` 空数组返回退化盒而不是 ±Infinity、`containsCenter` 用**中心点**判归属（整体包含会让大节点永远拖不进组）、`findGroupDropTarget` 倒序遍历让上层 group 优先且被拖集合含 group 时返回 null（禁止组嵌套组）、`snapNodesIntoGroup` 超宽贴左否则贴右、`getGroupWrapRect` 顶部多留 52 给工具栏、`focusViewportForNode` 的 60% 上限与下方有面板时的 3:1 上推 |
+| [`imageSplit.test.ts`](../frontend/src/imageSplit.test.ts) | 30 | 切分几何：`clampGrid` 的 NaN / 超上限 / 小数取整且 1×1 合法（等于不切，不强行抬到 2）、`splitCells` 行优先且**用 `col/cols` 直算不累加**（累加会漂）、格子边界不重叠且覆盖满 0~1、`splitCellsByLines` 排序去重 + 丢弃贴端点的线 + 空线返回单格、`splitOutputName` 命名格式与非法字符清洗。`splitDataUrl` 不测（jsdom 无 2D context） |
+| [`modelIcon.test.ts`](../frontend/src/modelIcon.test.ts) | 22 | 模型品牌识别：9 类品牌各自的 `includes` 命中、匹配顺序（`claude` 先于 `openai`）、`dall-e-3` 归 openai、大小写不敏感、**全角连字符 U+2011 归一化后仍能认出 `gpt`**（中转站真实踩过的坑）、空串与未知模型回落 `unknown`、每个品牌都有非空字形与中文名 |
+| [`snapGuide.test.ts`](../frontend/src/snapGuide.test.ts) | 38 | 拖拽吸附纯函数：左/中/右与上/中/下三对齐线取最近目标、x 与 y **独立决策**（可能只吸一轴）、阈值用严格 `<`（等于阈值不吸）、无邻居或全部超阈值时**原样返回不做任何位移也不偷偷退回网格**、`snapToGrid` 的 8px 对齐（含负坐标与小数）且 guides 恒空、NaN / Infinity / step<=0 安全退化不抛错（每帧拖拽都跑，抛错会让画布白屏） |
+| [`snapDrag.test.ts`](../frontend/src/snapDrag.test.ts) | 22 | 吸附接线层（纯函数 → React Flow `NodeChange`）：只拦 position 变更、多选拖拽按主节点算位移后整体平移、吸附位移写回 `position` 与 `positionAbsolute` 两个字段（少写一个节点会瞬移回原位）、对齐线只在拖拽帧产出、松手帧返回空 guides |
+| [`ImageSplitDialog.test.tsx`](../frontend/src/components/ImageSplitDialog.test.tsx) | 13 | 切分对话框：五个预设按钮与 `aria-pressed`、行列手填即时夹到 1~8、网格预览格子数（`split-cell` 数量）随行列变化、1×1 时确认禁用、文件名预览、确认后 `splitDataUrl` 收到 `{rows, cols}` 且 `onConfirm` 拿到数组、失败显示 `role="alert"` 且不回调。`vi.importActual` 部分替身只换 `splitDataUrl` / `readImageSize` |
 | [`minimapVisible.test.ts`](../frontend/src/minimapVisible.test.ts) | 16 | 画布小地图显隐与缩放滑杆偏好：默认值（小地图默认关、滑杆默认 100%）、`zoomToSliderPercent`/`sliderPercentToZoom` 互为反函数往返、NaN/±Infinity 夹到端点而不抛错、localStorage 不可用时静默降级 |
 | [`rankByName.test.ts`](../frontend/src/rankByName.test.ts) | 10 | 模糊排序：query 是 name 的大小写不敏感**有序子序列**（`gi25` 命中 `gpt-image-2.5`）、边界命中加分优先、相邻匹配加分、跳跃扣分、空 query 返回**同一数组引用**、全角 U+2011 折叠后比对 |
 | [`optionGroups.test.ts`](../frontend/src/optionGroups.test.ts) | 6 | 分组归并：组间按首次出现顺序、组内保持源顺序、无分组的项归入空标题兜底组、全部无分组时返回单组、混合时兜底组排最后 |
-| [`CanvasNodes.test.tsx`](../frontend/src/components/CanvasNodes.test.tsx) | 17 | 节点操作栏 / 双击行为 / 组卡去重提示渲染 |
+| [`CanvasNodes.test.tsx`](../frontend/src/components/CanvasNodes.test.tsx) | 23 | 节点操作栏 / 双击行为 / 组卡去重提示渲染 |
 | [`Field.test.tsx`](../frontend/src/components/Field.test.tsx) | 8 | 字段壳：label 与控件经 id 关联、`hint` 与 `error` **共用同一个消息槽位**（invalid 时 error 顶掉 hint、任何时刻至多一行）、`aria-describedby` 无内容时不写空串、`aria-invalid` 条件展开、`action` 插槽渲染 |
 | [`GenerationPending.test.tsx`](../frontend/src/components/GenerationPending.test.tsx) | 7 | 生成中占位卡：`role="status"` + `aria-live` 语义、受控 `elapsed` 优先于自走表、进度条只改 `transform: scaleX()`（不给 width 做动画）、文案随秒数轮播 |
 | [`ImageCropDialog.test.tsx`](../frontend/src/components/ImageCropDialog.test.tsx) | 7 | 裁剪对话框：比例预设按钮（`aria-pressed`）、八向手柄拖拽的位移换算（先除 stage 宽高再交给 `resizeCrop`）、遮罩用 `boxShadow` spread 覆盖整块视口、确认回传 dataUrl、取消关闭。测试用 `vi.mock("../imageOps", …)` 部分替身（`vi.importActual` 展开真身、只换 `readImageSize` / `cropDataUrl` 两个 canvas I/O 函数），几何纯函数全走真实实现 |
 | [`ImageUpscaleDialog.test.tsx`](../frontend/src/components/ImageUpscaleDialog.test.tsx) | 9 | 放大对话框：目标长边预设与自定义、默认值（原长边 ×2 且夹在 [1024, 4096]）、换算文案（`原 1024×768 → 2048×1536（2.0×）· 显示比例 4:3`）、busy 时按钮文案变化**必须按 `data-testid` 查不能按文本**（文案会变导致按名查丢）、卸载后迟到的放大结果不再回调 `onConfirm` |
 | [`ProviderModal.test.tsx`](../frontend/src/components/ProviderModal.test.tsx) | 22 | 添加第三方供应商弹窗：Provider ID 正则与地址协议的即时校验、协议预设切换与路径联动、探测模型（成功切下拉并选第一个 / 失败留文本框 / 「手填」可切回自由输入）、提交与错误提示 |
 | [`ModalShell.test.tsx`](../frontend/src/components/ModalShell.test.tsx) | 5 | 弹窗基座：dialog 语义 / 面板与遮罩点击分流 / Esc 关闭与焦点归还 / **下拉展开时 Esc 先收下拉、不关弹窗** |
-| [`Select.test.tsx`](../frontend/src/components/Select.test.tsx) | 10 | 自定义下拉：listbox 语义 / 键盘导航 / 点外部关闭 / **展开列表挂到 body（不被滚动容器裁切）** |
+| [`Select.test.tsx`](../frontend/src/components/Select.test.tsx) | 13 | 自定义下拉：listbox 语义 / 键盘导航 / 点外部关闭 / **展开列表挂到 body（不被滚动容器裁切）** |
 | [`popupLayer.test.ts`](../frontend/src/popupLayer.test.ts) | 5 | 浮层计数：push/pop 配对、嵌套多层、**多余 pop 不弄成负数**（否则弹窗再也关不掉）/ reset |
 | [`ResultPanel.test.tsx`](../frontend/src/components/ResultPanel.test.tsx) | 7 | 结果区 5 态面板 / 切换交叉淡化（旧层保留至淡出移除） |
 | [`WorkflowModals.test.tsx`](../frontend/src/components/WorkflowModals.test.tsx) | 2 | ZoomModal Portal 点击隔离（点图片/空白不误关外层宿主遮罩） |
@@ -112,7 +119,7 @@ cd frontend; npm test
 - 改 `core/api.py` → `test_core_api.py` + `test_main_cli.py`
 - 改 `server.py` 路由 → 对应 `test_server_*.py` + 前端 `types.ts`/`api.ts`
 - 改前端纯函数 → 对应 `*.test.ts`（同目录同名）
-- 改前端组件 → 组件单测 + E2E（`../frontend/e2e/verify_canvas.py` 60 断言；改来源/配置相关再跑 `verify_provider.py` 38 断言）
+- 改前端组件 → 组件单测 + E2E（`../frontend/e2e/verify_canvas.py` 81 断言；改来源/配置相关再跑 `verify_provider.py` 38 断言）
 - **增/删用例后更新 AGENTS「当前仪表盘」数字**
 
 ## CI 要求

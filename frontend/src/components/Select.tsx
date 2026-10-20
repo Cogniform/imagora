@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
   type KeyboardEvent,
+  type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
 
@@ -33,6 +34,9 @@ interface SelectProps {
   /** 由 Field 通过 cloneElement 注入，转发到触发器按钮上（按钮才是 label 的控件） */
   "aria-describedby"?: string;
   "aria-invalid"?: boolean;
+  /** 在选项文字**前面**插一段自定义内容（如尺寸下拉的比例图标）。
+   *  只影响列表行的渲染，不参与搜索过滤与键盘导航；不传则保持纯文字。 */
+  renderOption?: ((option: SelectOption) => ReactNode) | undefined;
 }
 
 /**
@@ -72,6 +76,7 @@ export function Select({
   emptyLabel = "没有匹配项",
   "aria-describedby": describedBy,
   "aria-invalid": invalid,
+  renderOption,
 }: SelectProps) {
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
@@ -271,7 +276,14 @@ export function Select({
         aria-invalid={invalid}
         className="field-control select-trigger flex items-center justify-between gap-2 text-left"
       >
-        <span className="min-w-0 truncate">{current?.label ?? "请选择"}</span>
+        {renderOption && current ? (
+          <span className="flex min-w-0 items-center gap-2">
+            {renderOption(current)}
+            <span className="truncate">{current.label}</span>
+          </span>
+        ) : (
+          <span className="min-w-0 truncate">{current?.label ?? "请选择"}</span>
+        )}
         <svg
           width="16"
           height="16"
@@ -348,7 +360,14 @@ export function Select({
                           onMouseDown={(event) => event.preventDefault()}
                           onClick={() => choose(index)}
                         >
-                          <span className="truncate">{option.label}</span>
+                          {renderOption ? (
+                            <span className="flex min-w-0 items-center gap-2">
+                              {renderOption(option)}
+                              <span className="truncate">{option.label}</span>
+                            </span>
+                          ) : (
+                            <span className="truncate">{option.label}</span>
+                          )}
                           {selected && (
                             <svg
                               width="14"

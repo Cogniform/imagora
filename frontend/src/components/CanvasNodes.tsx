@@ -1,18 +1,52 @@
 import { memo, useEffect, useState, type ReactNode } from "react";
 import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
-import { Crop, Eye, Maximize2, RefreshCw, Trash2 } from "lucide-react";
+import { Crop, Eye, Maximize2, RefreshCw, Scissors, Trash2 } from "lucide-react";
 import type { CanvasGroupNodeData, CanvasImageNodeData, CanvasPromptNodeData } from "../types";
+import { ratioFromSizeLabel } from "../aspectIcon";
 import { generatingLabel } from "../format";
+import { AspectIcon } from "./AspectIcon";
 import { FolderPicker } from "./FolderPicker";
 import { GenerationPending } from "./GenerationPending";
-import { Select } from "./Select";
+import { Select, type SelectOption } from "./Select";
 
-/* ---------------- 统一节点右侧操作区（hover 显示，竖排不遮挡内容，全部 nodrag 防误拖） ---------------- */
+/**
+ * 尺寸下拉行左侧的比例预览图标。
+ *
+ * 尺寸标签是「1024x1536 (2:3 竖版)」这种文字，光看数字判断不出横竖；配一个按真实
+ * 宽高比缩放的空心矩形，扫一眼就知道哪条是横的。比例从标签里反解（`ratioFromSizeLabel`
+ * 纯函数，有单测），解析不到时返回 null、图标不渲染 —— 宁可没有，也不画个正方形
+ * 暗示「这是 1:1」。
+ *
+ * 只有尺寸下拉用，质量下拉（low/medium/high）不传 `renderOption`，保持纯文字。
+ */
+function sizeOptionIcon(option: SelectOption): ReactNode {
+  return <AspectIcon ratio={ratioFromSizeLabel(option.label)} className="text-neutral-400" />;
+}
+
+/* ---------------- 统一节点右侧操作区（hover 显示，竖排不遮挡内容，全部 nodrag 防误拖） ----------------
+ * 这里同时修掉两个真实缺陷，改动都集中在这一处，别退回 `ml-2` + 裸 `opacity-0` 的老写法：
+ *
+ * 1) **hover 闪断**：老写法用 `ml-2` 留出 8px 空隙，鼠标从节点移向按钮的途中会短暂落在
+ *    画布上，`.group:hover` 断开 → 操作栏淡出 → 再进入又淡入，看起来在闪。
+ *    修法：容器**不留外边距**（`left-full` 起于节点右缘，零几何间隙），8px 视觉间距改由容器
+ *    自身的 `pl-2` 内边距提供。内边距属于容器盒子，鼠标落在里面仍算 hover 在 `.group` 的
+ *    后代上，整段路径连续，不再有真空。
+ *
+ * 2) **隐形按钮吃点击**：`opacity: 0` 的元素**依然参与命中测试**，老写法等于在每张图右侧
+ *    常驻一排看不见却可点的按钮，点画布空白会误触。修法：隐藏态加 `pointer-events-none`，
+ *    悬停节点时再用 `group-hover:pointer-events-auto` 放开。
+ *    **刻意不用 `invisible`**（`visibility: hidden`）：它会把按钮从无障碍树里摘掉，
+ *    E2E 的 `get_by_role("button", { name: "裁剪图片" })` 与读屏器都会查不到；而 `opacity: 0`
+ *    不影响无障碍树，只有命中测试被 `pointer-events` 拦下，两者互不干扰。
+ *    顺序上也安全：鼠标直接移到按钮区域时容器仍是 `pointer-events-none`，点击穿透到画布，
+ *    正是想要的行为；只有先悬停节点、容器放开之后，移入按钮才接得上 hover。
+ *
+ * 竖排而非横排：横排会在 380px 宽的提示词卡上方压住邻居节点，竖排只占右侧一条窄带。 */
 function NodeActions({ children, testId }: { children: ReactNode; testId?: string }) {
   return (
     <div
       data-testid={testId}
-      className="absolute left-full top-2 z-30 ml-2 flex flex-col gap-1 opacity-0 transition-opacity group-hover:opacity-100"
+      className="absolute left-full top-2 z-30 flex flex-col gap-1 pl-2 opacity-0 pointer-events-none transition-opacity group-hover:pointer-events-auto group-hover:opacity-100"
     >
       {children}
     </div>
@@ -78,6 +112,8 @@ interface ImageNodeExtraProps {
   onCrop: (nodeId: string) => void;
   /** 放大像素（产出新图，旧图保留） */
   onUpscale: (nodeId: string) => void;
+  /** 切分（按网格切成多张新图，旧图保留） */
+  onSplit: (nodeId: string) => void;
 }
 
 export function ImageNode({
@@ -90,6 +126,7 @@ export function ImageNode({
   onZoom,
   onCrop,
   onUpscale,
+  onSplit,
 }: NodeProps<ImageFlowNode> & ImageNodeExtraProps & { lod?: boolean | undefined }) {
   // lod / normal 两分支共用的三段片段（原为两份逐字相同的内联 JSX）
   const missingBadge = data.missing ? (
@@ -160,6 +197,9 @@ export function ImageNode({
         <ActionButton label="放大图片" onClick={() => onUpscale(id)}>
           <Maximize2 aria-hidden="true" size={14} />
         </ActionButton>
+        <ActionButton label="切分图片" onClick={() => onSplit(id)}>
+          <Scissors aria-hidden="true" size={14} />
+        </ActionButton>
         <ActionButton label="替换图片" onClick={() => onReplace(id)}>
           <RefreshCw aria-hidden="true" size={14} />
         </ActionButton>
@@ -199,8 +239,33 @@ export function GroupNode({
       去重
     </span>
   ) : null;
+  /* 叠卡：用几张错位的背景卡把「这是一组、里面有 N 张」直接画出来，不靠读数字。
+   *
+   * 参考 basketikun/infinite-canvas 的 BatchFrame（MIT）：纯 CSS、零状态、零布局计算 ——
+   * 只是几个绝对定位的 div 平移 + 微旋转，不参与 React Flow 的节点尺寸测量。
+   *
+   * 为什么要夹到 3 张：张数是数据，不能直接当渲染数量 —— 一个 40 张图的组会渲染 39 层
+   * 叠卡，每层都是独立合成层，缩放时帧率会掉。夹到 3 张之后「3 张以上」在视觉上是同一个
+   * 意思（后面还有很多），用数字补足精度。
+   *
+   * z 序靠 DOM 顺序而不是 z-index：叠卡写在 body 之前，后绘制的 body 自然压在上面；
+   * 父元素没有 z-index 也就没有层叠上下文，写负 z-index 反而会被父元素背景盖住。
+   */
+  const stackCount = Math.min(Math.max(data.imageCount - 1, 0), 3);
+  const stackCards = Array.from({ length: stackCount }, (_, index) => (
+    <div
+      key={index}
+      aria-hidden="true"
+      className="pointer-events-none absolute inset-0 rounded-lg"
+      style={{
+        transform: `translate(${10 + index * 6}px, ${4 + index * 3}px) rotate(${1.5 + index}deg)`,
+        background: "color-mix(in srgb, var(--color-brand) 9%, transparent)",
+        boxShadow: "inset 0 0 0 1px color-mix(in srgb, var(--color-brand) 14%, transparent)",
+      }}
+    />
+  ));
   const body = (
-    <div className="py-2 text-center">
+    <div className="relative py-2 text-center">
       <div className="text-xl font-semibold leading-tight text-brand-dark">
         {data.imageCount} 张图
       </div>
@@ -215,6 +280,7 @@ export function GroupNode({
         className={`relative w-56 rounded-lg bg-brand/5 !p-4 ${selected ? "node-selected" : ""}`}
       >
         <NodeHandles />
+        {stackCards}
         {body}
       </div>
     );
@@ -225,6 +291,7 @@ export function GroupNode({
     >
       {/* 顶部接收图片，底部输出到提示词。 */}
       <NodeHandles />
+      {stackCards}
       <NodeActions>
         <ActionButton label="删除图片组" onClick={() => onDelete(id)} danger>
           <Trash2 aria-hidden="true" size={14} />
@@ -415,6 +482,7 @@ export const PromptNode = memo(function PromptNode({
             options={sizeOptions}
             value={data.size}
             onChange={(v) => onUpdate(id, { size: v })}
+            renderOption={sizeOptionIcon}
             className="mt-0.5"
           />
         </div>
