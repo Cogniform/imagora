@@ -28,7 +28,7 @@ cd frontend; npm test
 | --- | --- | --- |
 | [`test_core_api.py`](test_core_api.py) | 18 | 尺寸解析 / 默认输出路径（并发唯一）/ 错误格式化 / 写文件瞬时锁重试 |
 | [`test_core_batch.py`](test_core_batch.py) | 10 | 配置读取 / 路径解析 / 模块过滤 / dry-run |
-| [`test_core_config.py`](test_core_config.py) | 21 | API Key 跟随 profile / profile 解析优先级与缺失回退 / 白名单校验 / RATIOS 表结构 / **配置来源视图（值 + 来自哪一层、.env 与系统环境变量区分、密钥不回传值）** |
+| [`test_core_config.py`](test_core_config.py) | 24 | API Key 跟随 profile / profile 解析优先级与缺失回退 / 白名单校验 / RATIOS 表结构 / **配置来源视图（值 + 来自哪一层、.env 与系统环境变量区分、密钥不回传值）** / **`normalize_model_id` 只在当前 profile 内折叠连字符、不跨 profile 借名** |
 | [`test_core_config_override.py`](test_core_config_override.py) | 16 | `.env` 本机覆盖通道（`BASE_URL_` / `MODEL_` / `API_PATH_<PROFILE>`）：**未设环境变量时行为与没有覆盖时逐字相同**、覆盖只影响自己那一个键、只对当前 profile 生效、换 profile 后覆盖跟着换、空值视为未设置、来源标注区分 `.env` 与系统环境变量、删掉覆盖行后回到 config.json profile、非覆盖键没有环境变量名 |
 | [`test_core_config_write.py`](test_core_config_write.py) | 21 | `.env` 行级原地更新：注释/空行/键顺序原样保留、引号风格与缩进保留、CRLF 不混用、**留空 = 不修改**、注释掉幂等（清空密钥可手工恢复）、`.bak` 备份与原子写、写失败清理临时文件且原文件不受损 |
 | [`test_server_config_write.py`](test_server_config_write.py) | 29 | 写配置路由：三层防护纯函数（本机 / Origin 白名单 / 令牌比对 / profile 名挡路径穿越）、`GET /api/config` 不回传密钥值、写入保留注释、留空不修改、**mtime 不匹配 409 且磁盘不变**、清空密钥是注释而非删除、需要 confirm |
@@ -41,7 +41,7 @@ cd frontend; npm test
 | [`test_core_migrate.py`](test_core_migrate.py) | 19 | 注册表 detect/升级/重建/回填/迁目录 / 工作流升级 / CLI 端到端 |
 | [`test_core_tasks.py`](test_core_tasks.py) | 11 | 任务状态机 / 并发上限 / 取消 / 快照 / TTL 清理 |
 | [`test_core_pathtrust.py`](test_core_pathtrust.py) | 2 | 路径白名单（match_roots 双根/单根/跨盘） |
-| [`test_server_helpers.py`](test_server_helpers.py) | 26 | 窗口分配 / 安全路径白名单 / upload-ref / delete-ref / generate 同步性 / history 注册表解析 + inputRefs/inputRefMissing / **/api/history 分页 hasMore** / _persist_submission 含 temp_bases / 导入与展示同源（注册表副本 + 账本 output 原路径双收，含画布回流回归） |
+| [`test_server_helpers.py`](test_server_helpers.py) | 27 | 窗口分配 / 安全路径白名单 / upload-ref / delete-ref / generate 同步性 / history 注册表解析 + inputRefs/inputRefMissing / **/api/history 分页 hasMore** / _persist_submission 含 temp_bases / 导入与展示同源（注册表副本 + 账本 output 原路径双收，含画布回流回归）/ **静态产物 MIME 钉死（不受 Windows 注册表 `.js` 被写成 text/plain 影响）** |
 | [`test_server_canvas.py`](test_server_canvas.py) | 18 | canvas 路由 / workflow 往返（v2）/ missing 收集 / ref_paths 放行 |
 | [`test_server_tasks.py`](test_server_tasks.py) | 10 | generate 提交即返回 / multipart 临时文件清理 + temp 参考图注册账本 / **参考图提交时注册（源文件删后账本仍完整）** / 保存消息为绝对路径 / 路径校验 / 任务路由 |
 | [`test_server_cost.py`](test_server_cost.py) | 15 | /api/history/stats 聚合与 days 窗口、空账本 / 预算读写（默认不限、落盘回读）/ /api/budget/check 预检（按张数、按 items、单次上限边界）/ /api/generate 预算闸门（超限 409 → 确认后放行、不限不拦）/ /api/generate/batch（合法提交 + 空提示词/坏参考图逐条跳过、空 items 400、全非法不提交、超预算未确认不提交、确认后提交） |

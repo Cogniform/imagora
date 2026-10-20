@@ -30,6 +30,7 @@ API:
 import ctypes
 import itertools
 import json
+import mimetypes
 import os
 import subprocess
 import sys
@@ -1419,6 +1420,30 @@ def get_image(path: str):
         return JSONResponse({"error": "文件不存在"}, status_code=404)
     return FileResponse(abs_path)
 
+
+# StaticFiles 判定 Content-Type 走标准库 mimetypes，而 Windows 上 mimetypes 会读
+# 注册表 HKEY_CLASSES_ROOT\.js 的 "Content Type"。只要本机被别的软件写成
+# text/plain，浏览器就按 ES module 的严格 MIME 校验拒绝执行构建产物，页面整页
+# 空白（#root 无子节点，控制台报 "Expected a JavaScript-or-Wasm module script"）。
+# 显式登记优先于注册表查询，跨平台行为一致；顺带补齐其余易被注册表带偏的类型。
+# 无条件执行（而非只在 dist 存在时），这样未构建前端的环境也能被单测覆盖。
+_STATIC_MIME_TYPES = (
+    (".js", "text/javascript"),
+    (".mjs", "text/javascript"),
+    (".css", "text/css"),
+    (".json", "application/json"),
+    (".svg", "image/svg+xml"),
+    (".woff2", "font/woff2"),
+)
+
+
+def ensure_static_mimetypes() -> None:
+    """把前端构建产物用到的扩展名钉死 Content-Type，不受本机注册表影响。"""
+    for ext, content_type in _STATIC_MIME_TYPES:
+        mimetypes.add_type(content_type, ext)
+
+
+ensure_static_mimetypes()
 
 # 静态托管前端构建产物（挂在最后，仅当 dist 已构建）
 if (DIST_DIR / "index.html").exists():
