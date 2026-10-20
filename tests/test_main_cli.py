@@ -75,6 +75,19 @@ def _ns_gen(**overrides):
     return ns
 
 
+def _first_ratio_tier() -> tuple[str, str]:
+    """取当前 profile 的 RATIOS 里任意一组 (比例, 档位)。
+
+    比例/档位组合随供应商而变（见 config.json 各 profile 的 ratios），
+    硬编码 9:16 + 2K 会让按 .env.example 推荐的 ACTIVE_PROFILE 换站后假失败。
+    """
+    from core.config import RATIOS
+
+    assert RATIOS, "当前 profile 的 RATIOS 不应为空"
+    ratio = next(iter(RATIOS))
+    return ratio, next(iter(RATIOS[ratio]))
+
+
 def _ledger_rows(gen_env) -> list[dict]:
     """读回生成账本的全部行（每张一行时用这个，单行 json.loads 会失败）。"""
     path = Path(gen_env) / "logs" / "generation.jsonl"
@@ -111,8 +124,9 @@ class TestValidateGenArgs:
         assert exc.value.code == 2
 
     def test_invalid_tier_for_ratio_exits(self, gen_env):
+        ratio, _ = _first_ratio_tier()
         with pytest.raises(SystemExit) as exc:
-            main._validate_gen_args(_ns_gen(size=None, ratio="9:16", tier="999K"))
+            main._validate_gen_args(_ns_gen(size=None, ratio=ratio, tier="999K"))
         assert exc.value.code == 2
 
     def test_invalid_quality_exits(self, gen_env):
@@ -130,7 +144,8 @@ class TestValidateGenArgs:
         main._validate_gen_args(_ns_gen(size="1024x1024"))
 
     def test_valid_ratio_tier_passes(self, gen_env):
-        main._validate_gen_args(_ns_gen(size=None, ratio="9:16", tier="2K"))
+        ratio, tier = _first_ratio_tier()
+        main._validate_gen_args(_ns_gen(size=None, ratio=ratio, tier=tier))
 
 
 # ---------- _resolve_output ----------
@@ -264,21 +279,22 @@ class TestHandleGenCommand:
         )
 
     def test_ratio_tier_path_resolves_size(self, gen_env):
+        ratio, tier = _first_ratio_tier()
         out = str(gen_env / "out.png")
         main.handle_gen_command(
             _ns_gen(
                 size=None,
-                ratio="9:16",
-                tier="2K",
+                ratio=ratio,
+                tier=tier,
                 output=out,
             )
         )
         log_path = gen_env / "logs" / "generation.jsonl"
         record = json.loads(log_path.read_text(encoding="utf-8"))
-        # 9:16 2K 档的具体像素随 profile 变化，从 RATIOS 推导而非硬编码
+        # 具体像素随 profile 变化，从 RATIOS 推导而非硬编码
         from core.config import RATIOS
 
-        assert record["size"] == RATIOS["9:16"]["2K"]
+        assert record["size"] == RATIOS[ratio][tier]
 
 
 # ---------- --n：客户端逐张请求 ----------

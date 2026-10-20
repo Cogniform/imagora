@@ -19,10 +19,29 @@ FastAPI 路由（`server.py`）与 CLI（`main.py`）共用的业务层。**不�
 
 ### [config.py](config.py)
 - 职责：配置中心——profile 解析（优先级：环境变量 > config.json > 内置）、API Key、尺寸/质量选项、成本表、**配置来源视图**（每个值的来源层，供 `/api/config` 下发给前端呈现，前端不自行推断分层）
-- 关键导出：`resolve_profile_config()`、`unknown_profile_keys()`、`get_api_key()`、`get_api_key_source()`、`build_profile_view()`（纯函数）/ `describe_config()`（薄包装）、`cost_for_size()` + 模块常量（`SIZE_OPTIONS` / `QUALITY_OPTIONS` / `RATIOS` / `WORK_ROOT` / `DEFAULT_OUTPUT_DIR` 等）
-- 被谁依赖：`server.py`、`api.py`、`main.py`、`registry.py`、`history.py`
-- 改后必测：`tests/test_core_config.py`
+- 关键导出：`resolve_profile_config()`、`unknown_profile_keys()`、`get_api_key()`、`get_api_key_source()`、`build_profile_view()`（纯函数）/ `describe_config()`（薄包装）、`build_provider_catalog()` / `provider_catalog()`（**来源目录**：`config.json` 里全部 profile 归一化成 `{name,label,baseUrl,apiPath,defaultModel,sizes,models}`，供前端按地址换价目表、并在切换来源时列出该来源的模型）、`cost_for_size()` + 模块常量（`SIZE_OPTIONS` / `QUALITY_OPTIONS` / `RATIOS` / `WORK_ROOT` / `DEFAULT_OUTPUT_DIR` 等）
+- 被谁依赖：`server.py`、`api.py`、`main.py`、`registry.py`、`history.py`、`config_write.py`
+- 改后必测：`tests/test_core_config.py` + `tests/test_core_config_override.py`（本机覆盖通道）
 - 注意：新增 config.json profile 键必须同步 `unknown_profile_keys` 白名单 + 测试
+- 注意：**本机覆盖通道**只开这五个键：`ACTIVE_PROFILE`（全局，不带后缀）与 `BASE_URL_` / `MODEL_` / `API_PATH_` / `API_KEY_<PROFILE 大写>`；未设环境变量时回退路径必须与没有覆盖时逐字相同（有单测锁死）。运行时取常量用 `config.xxx`，不用模块顶层 `from core.config import XXX` 的名字（那是导入时快照）
+- 注意：**`ACTIVE_PROFILE` 是其余覆盖键的父级** —— `BASE_URL_<P>` / `MODEL_<P>` 都挂在选中的来源下，所以同一次写请求里既切来源又改字段时，字段键必须按**选中**的来源拼（`MODEL_VOLC`），不能按当前生效的拼，否则切过去后覆盖对不上任何生效的键
+- 注意：`config.json` 是**出厂目录**（git 跟踪），界面永不写；本机偏好写 `.env`。见 [../docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md) 4.4
+
+### [config_write.py](config_write.py)
+- 职责：配置文件的**行级原地更新**（surgical write-back）—— 只改目标行，用户的注释 / 空行 / 键顺序 / 引号风格逐字保留
+- 关键导出：`split_key_value()`（与 `config._load_env_file` 同一套解析规则）、`update_env_text()` / `comment_out_keys()`（纯函数）、`read_env_values()`、`update_env_file()` / `comment_out_env_file()` / `write_text_atomic()`（落盘）
+- 被谁依赖：`server.py`（POST /api/config 与 /api/config/secret）。**界面只走 `/api/config` 写 `ACTIVE_PROFILE` 与 `MODEL_<PROFILE>`**；`comment_out_*` 那条路（清空密钥）当前无界面入口，留给脚本 / 手工恢复场景
+- 改后必测：`tests/test_core_config_write.py`
+- 注意：写盘必须原子（`.bak` → 临时文件 → `fsync` → `os.replace`）——这是密钥文件，截断的 `.env` 会让服务起来后完全无法生图
+- 注意：**值为空 = 不修改**；清空密钥用注释掉而非删除（可手工恢复，因此不做「重置」按钮）
+
+### [config_guard.py](config_guard.py)
+- 职责：写配置的访问防护（本机绑定 / Origin 白名单 / 进程内令牌）+ 覆盖键命名 + profile 名白名单
+- 关键导出：`CONFIG_TOKEN`、`guard_config_write()`、`token_response_header()`、`profile_env_names()`、`safe_profile_path()`
+- 被谁依赖：`server.py`（`ConfigGuardMiddleware` + 两个写路由）
+- 改后必测：`tests/test_server_config_write.py` + `tests/test_server_config_profile.py`（切来源 / 未注册来源被拒 / 覆盖键跟选中来源）
+- 注意：令牌**不落盘**（进程内随机，重启即失效）；`GET /api/config` 不校验令牌，只有写操作校验
+- 注意：作用域仅「单人本机」；支持远程访问前必须重新设计安全层（见 [../docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md) 4.3）
 
 ### [api.py](api.py)
 - 职责：上游生图 API 封装（全项目唯一外部网络调用点）

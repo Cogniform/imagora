@@ -26,6 +26,8 @@ export interface ProviderCatalog {
   /** 展示名（如「aiwanwu 中转站」） */
   label: string;
   baseUrl: string;
+  /** 该来源的图片生成接口路径（切换 profile 时用它预览，否则只能沿用上一个来源的路径） */
+  apiPath: string;
   defaultModel: string;
   defaultQuality?: string;
   defaultSize?: string;
@@ -59,6 +61,46 @@ export interface ConfigProfileView {
   fields: ConfigFieldView[];
 }
 
+/** 配置编辑器要的可编辑状态（服务端算好；前端不自行推断分层与来源） */
+export interface ConfigFileState {
+  /** .env 绝对路径（界面只显示文件名，点击复制完整路径） */
+  envPath: string;
+  /** config.json 绝对路径（出厂目录：界面只读，永不写） */
+  configPath: string;
+  /** 当前生效的 profile 名 */
+  profile: string | null;
+  /** 文件（.env 的 ACTIVE_PROFILE）里写的 profile；未写则等于生效的 */
+  fileProfile: string | null;
+  /** config.json 里已注册的 profile 名（切 profile 的下拉选项，服务端下发） */
+  registeredProfiles: string[];
+  /** 各字段对应的 .env 覆盖键名（沿用 API_KEY_<PROFILE> 约定） */
+  envNames: Record<string, string>;
+  /** 两个配置文件各自的 mtime（秒）；不存在 → null */
+  mtimes: { env: number | null; config: number | null };
+  fields: {
+    /** 文件里的覆盖值；null = 文件里没有这一项（走 config.json 出厂值） */
+    baseUrl: { fileValue: string | null };
+    apiPath: { fileValue: string | null };
+    model: { fileValue: string | null };
+    /** 密钥 write-only：只报「文件里有没有」与当前生效来源，永不回传值 */
+    apiKey: { configured: boolean; source: string | null };
+  };
+  /** 写了但进程尚未重载的字段（文件值 ≠ 生效值） */
+  pending: string[];
+}
+
+/** 写配置接口的响应 */
+export interface ConfigWriteResult {
+  ok: boolean;
+  /** 真正写下去的字段（空字符串 = 不修改，不出现在这里） */
+  written: string[];
+  unchanged: string[];
+  mtimes: { env: number | null; config: number | null };
+  /** 写完后的待重启字段 */
+  pending: string[];
+  /** 写后的完整 fileState，前端直接替换，省一次 GET */
+  fileState: ConfigFileState;
+}
 export interface AppConfig {
   sizes: SizeOption[];
   qualities: string[];
@@ -80,8 +122,10 @@ export interface AppConfig {
   profileLabel?: string;
   /** 当前生效的配置 profile 名（config.json 多 profile，.env ACTIVE_PROFILE 可覆盖） */
   activeProfile?: string;
-  /** 配置来源视图：每个关键项的值 + 来自哪一层（供 API 设置弹窗呈现） */
+  /** 配置来源视图：每个关键项的值 + 来自哪一层（供配置编辑器呈现） */
   profileView?: ConfigProfileView;
+  /** 可编辑状态：文件里的值 + mtime + 待重启项（配置编辑器弹窗用） */
+  fileState?: ConfigFileState;
 }
 
 /** 已落盘服务端的参考图（/api/upload-ref 返回；未上传成功的本地兜底 synced=false） */
@@ -152,21 +196,7 @@ export interface GenerateParams {
   allowOverBudget?: boolean;
 }
 
-/** 当前浏览器窗口的个人兼容 API 配置（仅存本机 localStorage）。 */
-export interface PersonalApiSettings {
-  baseUrl: string;
-  apiKey: string;
-  model: string;
-  apiPath: string;
-}
 
-export interface PersonalApiPreset {
-  id: string;
-  name: string;
-  settings: PersonalApiSettings;
-  /** 最近一次使用时间（epoch ms）；「我的接口」按此倒序排列 */
-  lastUsed?: number;
-}
 
 /** 画布图片注册表条目（/api/canvas/* 返回；registry entry + absPath/url 供生成引用与显示） */
 export interface AssetEntry {

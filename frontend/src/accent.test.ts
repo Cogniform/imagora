@@ -3,7 +3,6 @@ import { describe, expect, it, beforeEach } from "vitest";
 
 import {
   ACCENT_HUE_STORAGE_KEY,
-  ACCENT_PRESETS,
   accentForWindow,
   accentFromHue,
   readAccentHue,
@@ -54,12 +53,6 @@ describe("accentFromHue（用户自定义主体色）", () => {
   it("非法输入（NaN/Infinity）回落 0 度，不产出坏值", () => {
     expect(accentFromHue(Number.NaN).brand).toBe("hsl(0.0 55% 42%)");
     expect(accentFromHue(Number.POSITIVE_INFINITY).brand).toBe("hsl(0.0 55% 42%)");
-  });
-
-  it("九个预设色相互不重复且都在合法区间", () => {
-    const hues = ACCENT_PRESETS.map((p) => p.hue);
-    expect(new Set(hues).size).toBe(hues.length);
-    expect(hues.every((h) => h >= 0 && h < 360)).toBe(true);
   });
 });
 

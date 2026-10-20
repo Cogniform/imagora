@@ -8,6 +8,7 @@ const VOLC: ProviderCatalog = {
   name: "volc",
   label: "火山方舟官方",
   baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
+  apiPath: "/images/generations",
   defaultModel: "doubao-seedream-5-0-pro-260628",
   sizes: [{ value: "1024x1024", label: "1024x1024 (1:1 1K)", cost: 0.2 }],
   models: [
@@ -29,6 +30,7 @@ const WANWU: ProviderCatalog = {
   name: "wanwu",
   label: "aiwanwu 中转站",
   baseUrl: "https://2api.aiwanwu.cc",
+  apiPath: "/v1/images/generations",
   defaultModel: "gpt-image-2.5-flare",
   sizes: [
     { value: "1024x1024", label: "1024x1024 (1:1 1K)", cost: 0.05 },

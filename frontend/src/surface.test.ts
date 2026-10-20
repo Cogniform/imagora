@@ -3,17 +3,37 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import {
   FIELD_ALPHA_FLOOR,
+  SURFACE_ROLE_DOC,
   SURFACE_TRANSPARENCY_DEFAULT,
   SURFACE_TRANSPARENCY_STORAGE_KEY,
   clampSurfaceTransparency,
   readSurfaceTransparency,
   saveSurfaceTransparency,
   surfaceTokens,
+  surfaceVarList,
+  type SurfaceTokens,
 } from "./surface";
 
-/** 从材质字符串里取出所有 alpha（`/ 0.66)` 或 `, 0.57)`），便于断言 */
+/** 从材质字符串里取出所有 alpha */
 function alphasOf(value: string): number[] {
-  return [...value.matchAll(/[/,]\s*(0?\.\d+|1|0)\s*\)/g)].map((m) => Number(m[1]));
+  return [...value.matchAll(/,\s*(0?\.\d+|1|0)\s*\)/g)].map((m) => Number(m[1]));
+}
+
+/** 从材质字符串里取出所有 rgb 通道，用来量「掺色离白多远」 */
+function channelsOf(value: string): number[][] {
+  return [...value.matchAll(/rgba\((\d+), (\d+), (\d+),/g)].map((m) => [
+    Number(m[1]),
+    Number(m[2]),
+    Number(m[3]),
+  ]);
+}
+
+const ROLES = ["base", "card", "panel", "float", "inset", "plain"] as const;
+
+/** 某个角色在给定通透度下的平均不透明度 */
+function alphaAvg(tokens: SurfaceTokens, role: (typeof ROLES)[number]): number {
+  const alphas = alphasOf(tokens[role]);
+  return alphas.reduce((a, b) => a + b, 0) / alphas.length;
 }
 
 describe("clampSurfaceTransparency", () => {
@@ -35,74 +55,131 @@ describe("clampSurfaceTransparency", () => {
   });
 });
 
-describe("surfaceTokens", () => {
-  it("三档齐备，且都是合法 CSS 值", () => {
+describe("surfaceTokens 产出形状", () => {
+  it("六档齐备，且都是合法 CSS 渐变", () => {
     const tokens = surfaceTokens(224, SURFACE_TRANSPARENCY_DEFAULT);
-    expect(tokens.card).toContain("linear-gradient(150deg");
-    expect(tokens.panel).toContain("linear-gradient(150deg");
-    expect(tokens.field).toMatch(/^rgba\(255, 255, 255, [\d.]+\)$/);
-  });
-
-  it("通透度越高，各档 alpha 越小（单调）", () => {
-    const solid = surfaceTokens(224, 0);
-    const mid = surfaceTokens(224, SURFACE_TRANSPARENCY_DEFAULT);
-    const clear = surfaceTokens(224, 1);
-    const avg = (v: string) => alphasOf(v).reduce((a, b) => a + b, 0) / alphasOf(v).length;
-    expect(avg(solid.card)).toBeGreaterThan(avg(mid.card));
-    expect(avg(mid.card)).toBeGreaterThan(avg(clear.card));
-    expect(avg(solid.panel)).toBeGreaterThan(avg(clear.panel));
-  });
-
-  it("通透度 0 时落到基准不透明度（卡片 0.9 / 0.68）", () => {
-    const tokens = surfaceTokens(0, 0);
-    expect(alphasOf(tokens.card)).toEqual([0.9, 0.68]);
-  });
-
-  it("拉到最透时接近全透明（但仍不为 0，留一线白）", () => {
-    const tokens = surfaceTokens(224, 1);
-    for (const alpha of alphasOf(tokens.card)) {
-      expect(alpha).toBeGreaterThan(0);
-      expect(alpha).toBeLessThan(0.1);
+    for (const role of ROLES) {
+      expect(tokens[role]).toMatch(/^linear-gradient\(150deg, rgba\(\d+, \d+, \d+, [\d.]+\), rgba\(\d+, \d+, \d+, [\d.]+\)\)$/);
     }
   });
 
-  it("毛玻璃彻底关闭：任何通透度都返回 none，绝不糊到壁纸", () => {
+  it("surfaceVarList 覆盖每个角色，且键名与 token 字段一一对应", () => {
+    const tokens = surfaceTokens(224, SURFACE_TRANSPARENCY_DEFAULT);
+    const vars = surfaceVarList(tokens);
+    const names = vars.map(([n]) => n);
+    // 每个角色一个变量 + blur；漏一个就会「新增角色但弹窗拿不到」
+    expect(names).toEqual([
+      "--surface-base",
+      "--surface-card",
+      "--surface-panel",
+      "--surface-float",
+      "--surface-inset",
+      "--surface-plain",
+      "--surface-blur",
+    ]);
+    for (const [name, value] of vars) {
+      const role = name.replace("--surface-", "") as keyof SurfaceTokens;
+      expect(value).toBe(tokens[role]);
+    }
+  });
+
+  it("每个角色都有用途说明（新角色必须登记，否则文档与审计无从引用）", () => {
+    for (const role of ROLES) {
+      expect(SURFACE_ROLE_DOC[role]).toBeTruthy();
+    }
+  });
+});
+
+describe("掺色：这才是「跟随主体色」的可见量", () => {
+  it("老实现的坑：色相在 token 里只差 2/255，肉眼不可见 —— 现在必须明显", () => {
+    const tokens = surfaceTokens(285, SURFACE_TRANSPARENCY_DEFAULT);
+    // 掺色最少的 plain 是纯白（画布主体有意不跟主体色）
+    for (const role of ["base", "card", "panel"] as const) {
+      const [top] = channelsOf(tokens[role]);
+      const distance = Math.max(...(top ?? [0, 0, 0]).map((c) => 255 - c));
+      // 老实现是 2/255；这里要求外壳至少 10/255，否则「跟了也看不出来」
+      expect(distance).toBeGreaterThanOrEqual(10);
+    }
+  });
+
+  it("画布主体（plain）不掺色 —— 看图台面带色会干扰对图片颜色的判断", () => {
+    for (const hue of [0, 60, 200, 285, 330]) {
+      const [top] = channelsOf(surfaceTokens(hue, 0.5).plain);
+      expect(top).toEqual([255, 255, 255]);
+    }
+  });
+
+  it("外壳比内容区掺得多（层次靠掺色量区分，越往里越中性）", () => {
+    const t = surfaceTokens(285, 0.5);
+    const dist = (role: (typeof ROLES)[number]) => {
+      const [top] = channelsOf(t[role]);
+      return Math.max(...(top ?? [255, 255, 255]).map((c) => 255 - c));
+    };
+    expect(dist("base")).toBeGreaterThan(dist("float"));
+    expect(dist("panel")).toBeGreaterThan(dist("float"));
+    expect(dist("float")).toBeGreaterThan(dist("inset"));
+  });
+
+  it("色相被归一：负值与 +360 等价，非法按 0", () => {
+    expect(surfaceTokens(224, 0.5).card).not.toBe(surfaceTokens(0, 0.5).card);
+    expect(surfaceTokens(-136, 0.5).card).toBe(surfaceTokens(224, 0.5).card);
+    expect(surfaceTokens(Number.NaN, 0.5).card).toBe(surfaceTokens(0, 0.5).card);
+  });
+});
+
+describe("不透明度：通透度滑杆必须真的有效", () => {
+  it("每个角色都随通透度单调变透，且拉到头仍留一线白", () => {
+    for (const role of ROLES) {
+      const solid = alphaAvg(surfaceTokens(224, 0), role);
+      const mid = alphaAvg(surfaceTokens(224, SURFACE_TRANSPARENCY_DEFAULT), role);
+      const clear = alphaAvg(surfaceTokens(224, 1), role);
+      expect(solid).toBeGreaterThan(mid);
+      expect(mid).toBeGreaterThan(clear);
+      expect(clear).toBeGreaterThan(0);
+    }
+  });
+
+  it("可读性优先的角色（台面/浮层）全程托得住底线，不会掉到读不清", () => {
+    for (const t of [0, 0.25, 0.55, 0.8, 1]) {
+      expect(Math.min(...alphasOf(surfaceTokens(224, t).panel))).toBeGreaterThanOrEqual(0.68);
+      expect(Math.min(...alphasOf(surfaceTokens(224, t).float))).toBeGreaterThanOrEqual(0.86);
+    }
+  });
+
+  it("面板仍有行程（老写法用硬 floor 把滑杆压成死值，拉到一半以上毫无反应）", () => {
+    const solid = alphaAvg(surfaceTokens(224, 0), "panel");
+    const clear = alphaAvg(surfaceTokens(224, 1), "panel");
+    expect(solid - clear).toBeGreaterThan(0.15);
+  });
+
+  it("嵌套不变量：内层不许比外层更透（否则壁纸从中间透出一个洞）", () => {
+    for (const t of [0, 0.25, 0.55, 0.8, 1]) {
+      const tokens = surfaceTokens(224, t);
+      const card = alphaAvg(tokens, "card");
+      const panel = alphaAvg(tokens, "panel");
+      const float = alphaAvg(tokens, "float");
+      expect(card).toBeLessThan(panel);
+      expect(panel).toBeLessThan(float);
+    }
+  });
+
+  it("输入框有 0.25 不透明度底线（灰字不飘）", () => {
+    // inset 的两端都远高于底线，故这里直接锁「不会低于底线」
+    for (const t of [0, 0.55, 1]) {
+      expect(Math.min(...alphasOf(surfaceTokens(224, t).inset))).toBeGreaterThanOrEqual(
+        FIELD_ALPHA_FLOOR,
+      );
+    }
+  });
+});
+
+describe("毛玻璃", () => {
+  it("彻底关闭：任何通透度都返回 none，绝不糊到壁纸", () => {
     for (const t of [0, 0.25, 0.55, 0.8, 1]) {
       expect(surfaceTokens(224, t).blur).toBe("none");
     }
     // 回归锁：老实现会返回 blur(20px)…blur(80px)，那层雾正是「看不清壁纸」的元凶
     expect(surfaceTokens(224, 1).blur).not.toMatch(/blur\(/);
-  });
-
-  it("输入框有 0.25 不透明度底线，保证灰字不飘；卡片不受此限", () => {
-    const fieldAlphaAt = (t: number) => alphasOf(surfaceTokens(224, t).field)[0] ?? 0;
-    expect(fieldAlphaAt(1)).toBe(FIELD_ALPHA_FLOOR);
-    expect(fieldAlphaAt(0.9)).toBe(FIELD_ALPHA_FLOOR);
-    // 低通透度档位不该被底线动到
-    expect(fieldAlphaAt(0)).toBeCloseTo(0.85, 3);
-    // 底线只保输入框：卡片的 alpha 仍一路降下去（全透约 0.05）
-    expect(fieldAlphaAt(1)).toBeGreaterThan(alphasOf(surfaceTokens(224, 1).card)[0] ?? 0);
-  });
-
-  it("面板始终比卡片实一档（层次不反）", () => {
-    const tokens = surfaceTokens(224, SURFACE_TRANSPARENCY_DEFAULT);
-    const cardAvg = alphasOf(tokens.card).reduce((a, b) => a + b, 0) / 2;
-    const panelAvg = alphasOf(tokens.panel).reduce((a, b) => a + b, 0) / 2;
-    expect(panelAvg).toBeGreaterThan(cardAvg);
-  });
-
-  it("色相参与底色：不同色相产出不同字符串，且色相被归一", () => {
-    expect(surfaceTokens(224, 0.5).card).not.toBe(surfaceTokens(0, 0.5).card);
-    expect(surfaceTokens(-136, 0.5).card).toBe(surfaceTokens(224, 0.5).card);
-    expect(surfaceTokens(Number.NaN, 0.5).card).toBe(surfaceTokens(0, 0.5).card);
-  });
-
-  it("超长/非法通透度先钳制再计算，不产出坏值", () => {
-    expect(surfaceTokens(224, 99).card).toBe(surfaceTokens(224, 1).card);
-    expect(surfaceTokens(224, -5).card).toBe(surfaceTokens(224, 0).card);
-    expect(surfaceTokens(224, Number.NaN).card).toBe(
-      surfaceTokens(224, SURFACE_TRANSPARENCY_DEFAULT).card,
-    );
   });
 });
 

@@ -5,12 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { HistoryGallery } from "./HistoryGallery";
 import {
-  checkBudget,
-  fetchTask,
   generationHistory,
   generationStats,
   saveBudget,
-  submitGenerateBatch,
   type GenerationHistoryItem,
   type HistoryStats,
 } from "../api";
@@ -263,10 +260,10 @@ describe("HistoryGallery 分页（滚动加载）", () => {
 });
 
 /**
- * 成本看板 + 重跑失败项：
+ * 成本看板：
  * - 看板指标来自 /api/history/stats（账本原始行聚合），预算设置本地草稿 + 保存；
- * - 只有失败记录出现「重跑」，参考图找不回时按钮禁用并说明原因；
- * - 批量重跑走确认弹窗（费用预估 + 超预算警示），确认后提交 /api/generate/batch。
+ * - 每行按钮与成败无关，成功与失败都是「复制提示词 / 打开目录 / 导入当前画布」；
+ * - 参考图找不回的失败记录只给一条丢失计数提示（无法还原，也没有重跑入口）。
  */
 describe("HistoryGallery 成本看板与重跑失败项", () => {
   afterEach(() => {
@@ -276,22 +273,9 @@ describe("HistoryGallery 成本看板与重跑失败项", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(generationStats).mockResolvedValue(stats());
-    vi.mocked(checkBudget).mockResolvedValue({
-      allowed: true, over: false, confirmed: false, reason: "", estimate: 0.15,
-      spentToday: 1.2, remaining: 8.8, settings: { dailyLimit: 10, singleRunLimit: 0 },
-    });
-    vi.mocked(submitGenerateBatch).mockResolvedValue({
-      submitted: [{ taskId: "t1", prompt: "一只猫", size: "1024x1024", cost: 0.05 }],
-      skipped: [], estimate: 0.05,
-      budget: {
-        allowed: true, over: false, confirmed: false, reason: "", estimate: 0.05,
-        spentToday: 1.2, remaining: 8.8, settings: { dailyLimit: 10, singleRunLimit: 0 },
-      },
-    });
-    vi.mocked(fetchTask).mockResolvedValue({ taskId: "t1", status: "done", results: [] });
   });
 
-  it("看板渲染关键指标；失败行给「重跑」，成功行给「导入当前画布」", async () => {
+  it("看板渲染关键指标；成功与失败行的按钮一致（复制 / 打开目录 / 导入画布）", async () => {
     renderList([
       item({ prompt: "失败的猫", status: "error", mode: "txt2img", refs: 0 }),
       item({ prompt: "成功的狗", status: "ok" }),
@@ -303,62 +287,21 @@ describe("HistoryGallery 成本看板与重跑失败项", () => {
     expect(board.textContent).toContain("1.20 元");
     expect(board.textContent).toContain("52.2%（290/556）");
 
-    expect(screen.getAllByText("重跑")).toHaveLength(1);        // 仅失败行
-    expect(screen.getAllByText("导入当前画布")).toHaveLength(1); // 仅成功行
+    expect(screen.getAllByText("复制提示词")).toHaveLength(2);
+    expect(screen.getAllByText("打开目录")).toHaveLength(2);
+    expect(screen.getAllByText("导入当前画布")).toHaveLength(2);
+    // 重跑入口已移除（2026-10-03）
+    expect(screen.queryByText("重跑")).toBeNull();
+    expect(screen.queryByText(/重跑失败项/)).toBeNull();
   });
 
-  it("参考图找不回的失败记录：重跑按钮禁用 + 面板提示丢失条数", async () => {
+  it("参考图找不回的失败记录：只给丢失条数提示，没有重跑入口", async () => {
     renderList([item({ prompt: "丢图的猫", status: "error", mode: "img2img", refs: 5, inputRefs: [] })]);
 
     expect(await screen.findByText("丢图的猫")).toBeTruthy();
-    const button = screen.getByText("重跑") as HTMLButtonElement;
-    expect(button.disabled).toBe(true);
-    expect(button.title).toContain("参考图已丢失");
     expect(screen.getByText("1 条参考图已丢失")).toBeTruthy();
-    expect(screen.queryByText(/重跑失败项/)).toBeNull(); // 无可重跑项时不显示批量按钮
-  });
-
-  it("点批量重跑 → 弹窗显示预估费用；确认后按未超预算提交", async () => {
-    renderList([
-      item({
-        prompt: "可重跑的猫", status: "error", mode: "img2img", refs: 1,
-        inputRefs: [{ id: "a", path: "out/.assets/canv_a.png", url: "/api/image?a" }],
-      }),
-    ]);
-
-    await screen.findByText("可重跑的猫");
-
-    fireEvent.click(screen.getByText("重跑失败项（1）"));
-    const dialog = await screen.findByTestId("rerun-dialog");
-    expect(dialog.textContent).toContain("0.15 元");
-    expect(screen.queryByTestId("rerun-over-budget")).toBeNull();
-    // 弹窗打开时先做无副作用的预算预检（只传尺寸，不带提示词/路径）
-    expect(checkBudget).toHaveBeenCalledWith({ items: [{ size: "1024x1024" }] });
-
-    fireEvent.click(screen.getByText("确认重跑"));
-    await screen.findByText(/重跑完成|重跑中|没有任务被提交/);
-    expect(submitGenerateBatch).toHaveBeenCalledWith(expect.objectContaining({
-      allowOverBudget: false,
-      items: [{ prompt: "可重跑的猫", size: "1024x1024", quality: "high", refPaths: ["out/.assets/canv_a.png"] }],
-    }));
-  });
-
-  it("超预算：弹窗给警示，确认按钮变「仍然重跑」并带 allowOverBudget 提交", async () => {
-    vi.mocked(checkBudget).mockResolvedValue({
-      allowed: false, over: true, confirmed: false, reason: "本次预估 0.15 元，超过单次上限 0.10 元",
-      estimate: 0.15, spentToday: 1.2, remaining: 8.8, settings: { dailyLimit: 10, singleRunLimit: 0.1 },
-    });
-    renderList([item({ prompt: "超预算的猫", status: "error", mode: "txt2img", refs: 0 })]);
-
-    await screen.findByText("超预算的猫");
-    fireEvent.click(screen.getByText("重跑失败项（1）"));
-
-    const warning = await screen.findByTestId("rerun-over-budget");
-    expect(warning.textContent).toContain("超过单次上限");
-
-    fireEvent.click(screen.getByText("仍然重跑（超预算）"));
-    await screen.findByText(/重跑完成|重跑中|没有任务被提交/);
-    expect(submitGenerateBatch).toHaveBeenCalledWith(expect.objectContaining({ allowOverBudget: true }));
+    expect(screen.getAllByText("导入当前画布")).toHaveLength(1);
+    expect(screen.queryByText("重跑")).toBeNull();
   });
 
   it("保存预算：调用 /api/budget 并回读看板", async () => {

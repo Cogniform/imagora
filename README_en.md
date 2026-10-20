@@ -26,7 +26,7 @@ Batch mode and a command line are included. Prompts, reference images, tasks, ou
 
 </div>
 
-> **Data boundary**　Requests go straight to the endpoint you configure; keys stay in your local `.env` or in your own browser; images and generation records land in local directories only, with no intermediary service.
+> **Data boundary**　Requests go straight to the endpoint you configure; keys stay in your local `.env`; images and generation records land in local directories only, with no intermediary service.
 
 ## Interface at a glance
 
@@ -72,7 +72,7 @@ The command line supports batch too: hand it a list of prompts and it runs them 
 The top of the generation history panel is the cost board: today's spend, total spend, success rate, failure count, average time per success, plus a breakdown by size.
 **This panel lives on the canvas page's toolbar and is not on the classic form page** — the history and every number on the board are reached from there.
 Two limits can be set: a daily budget and a per-run cap; 0 means unlimited (the default — no nagging). Every submission is priced first; if a limit is exceeded, a confirmation appears stating "spent today + estimated for this run", and nothing is submitted until you confirm. Simultaneous submissions from multiple windows are held back as well.
-Failed records can be rerun: "Rerun" for a single one, or "Rerun failed" at the top of the panel for the whole batch; the dialog lists how many, the estimated cost, and the reason any of them cannot be rerun.
+Failed records show why they failed in the panel (missing reference images are counted separately); to try again, fix the prompt on the canvas and run it again.
 
 ## Feature map
 
@@ -100,14 +100,15 @@ Failed records can be rerun: "Rerun" for a single one, or "Rerun failed" at the 
 | | |
 | --- | --- |
 | Multiple providers | Endpoint, model, sizes, and prices live side by side in one config file and switch with a single line; the title bar shows which one is active |
-| Quick key override | Top bar "Image API" → Personal config; stored only in your browser, no file edits, no restart |
+| Switch config in the UI | Model chip in the top bar → config dialog: **pick** a provider and a model from the known lists, written back to your local `.env`; marked as pending restart |
+| Everything else: edit the file | Endpoint / path / key are write-once — use a text editor on `config.json` (factory catalog) and `.env` (local overrides); the dialog and the files touch the **same data**, there is no second copy in the browser |
 
 ### Appearance
 
 | | |
 | --- | --- |
 | Accent color | A set of presets plus hue fine-tuning; windows shift color by number automatically, and the tab icon follows |
-| Background | Several light materials, a built-in wallpaper, or your own image |
+| Background | Two light base tones (accent-following or plain white); page wallpaper from your own image |
 | Card transparency | Can be pulled to nearly fully transparent; input fields keep a readability floor so text never floats on a busy background |
 | Canvas border | Can be turned off so the canvas blends into the page background |
 
@@ -125,7 +126,13 @@ Copy-Item .env.example .env
 # Edit .env and fill in the key for the active profile, e.g. API_KEY_WANWU=sk-your-key
 ```
 
-`.env` is git-ignored and never enters the repository. You can also skip this and enter a key later under "Image API" in the top bar — that copy exists only in your browser.
+`.env` is git-ignored and never enters the repository. **The key is not entered in the UI** (the dialog only picks a provider and a model) — changing a key means editing this line in a text editor. The dialog shows whether the active provider has a key set.
+
+> **Optional local mirror**　Dependencies install from the official PyPI. If that is slow where you are,
+> add `index-url = "https://pypi.tuna.tsinghua.edu.cn/simple"` to your **machine-level**
+> `%APPDATA%\uv\uv.toml` (Windows) or `~/.config/uv/uv.toml`.
+> **Do not commit `uv.lock` while that is active** — the lock pins the source into every package
+> (absolute download URLs included), which breaks CI runners abroad. `uv lock --check` tells you if it drifted.
 
 ### 3. Start
 

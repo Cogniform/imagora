@@ -49,7 +49,7 @@ export function CostBoard({
   const topSizes = stats?.bySize.slice(0, 3) ?? [];
 
   return (
-    <section data-testid="cost-board" className="corner-deco border-b border-neutral-200 bg-white px-4 pt-9 pb-3">
+    <section data-testid="cost-board" className="corner-deco surface-float border-b border-neutral-200 px-4 pt-9 pb-3">
       {loading && !stats ? (
         <span className="text-[11px] text-neutral-400">正在统计成本...</span>
       ) : stats ? (

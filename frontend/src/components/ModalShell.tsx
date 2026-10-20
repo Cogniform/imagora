@@ -8,6 +8,8 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
+import { hasOpenPopup } from "../popupLayer";
+
 const FOCUSABLE_SELECTOR = [
   "a[href]",
   "button:not([disabled])",
@@ -71,6 +73,10 @@ export function ModalShell({
     const handleKeyDown = (event: KeyboardEvent) => {
       if (!isTopModal(instanceId)) return;
       if (event.key === "Escape") {
+        // 有浮层（展开的下拉等）先让给它：本监听挂在 capture 阶段，比浮层自己的
+        // onKeyDown 先跑，不拦的话按一下 Esc 会连弹窗一起关掉 —— 用户的手感是
+        // 「我只想收起下拉，结果正在填的窗口没了」。因此这里需要第二次 Esc 才关窗。
+        if (hasOpenPopup()) return;
         event.preventDefault();
         event.stopPropagation();
         onCloseRef.current();

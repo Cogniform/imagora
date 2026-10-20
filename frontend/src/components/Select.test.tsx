@@ -73,4 +73,32 @@ describe("Select", () => {
     fireEvent.keyDown(trigger, { key: "ArrowDown" });
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
   });
+
+  it("展开列表挂到 body（不被滚动容器的 overflow 裁掉）", () => {
+    // 回归：列表曾就地 absolute 定位，被弹窗的 overflow:hidden / overflow-y:auto 裁掉，
+    // 表现为「下拉展开后底部几项看不见」。挂到 body 后不受任何祖先裁切。
+    render(
+      <div style={{ overflow: "hidden" }}>
+        <Select options={options} value="a" onChange={vi.fn()} />
+      </div>,
+    );
+    const trigger = screen.getByRole("button", { name: /选项 A/ });
+    // 关闭时不渲染列表（避免撑高外层容器）
+    expect(screen.queryByRole("listbox")).toBeNull();
+
+    fireEvent.click(trigger);
+    const listbox = screen.getByRole("listbox");
+    expect(listbox.parentElement).toBe(document.body);       // ← 关键：不在裁切祖先里
+    expect(listbox.className).toContain("fixed");
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+
+    // 挂在 body 后，点列表本身不能被判为「外部点击」而误关
+    fireEvent.mouseDown(listbox);
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+
+    // 点真正的外部才关
+    fireEvent.mouseDown(document.body);
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByRole("listbox")).toBeNull();
+  });
 });

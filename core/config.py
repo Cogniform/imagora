@@ -155,9 +155,62 @@ for _k in unknown_profile_keys(_profile):
     )
 
 
+# ---------- 本机覆盖（.env）：可被界面写入的三个字段 ----------
+# 沿用既有的 API_KEY_<PROFILE> 命名约定（见 .env.example）：
+#   config.json = 出厂目录（git 跟踪，界面永不写）
+#   .env        = 本机覆盖 + 密钥（git 忽略，界面只写这里）
+#
+# 为什么只有这三个：它们是「我这台机器用哪家接口/哪个模型」的本机偏好；
+# ratios / size_options / quality_options / models 是目录数据（价目表与能力清单），
+# 开放环境变量覆盖会把 _get 变成解析器，收益为零。
+# 未设置环境变量时 _env_override_value 一律返回 None，_get 的回退路径与改动前逐字相同。
+_ENV_OVERRIDE_KEYS = {
+    "base_url": "BASE_URL",
+    "default_model": "MODEL",
+    "api_paths": "API_PATH",
+}
+
+
+def env_override_name(key: str) -> str | None:
+    """当前 profile 下该键对应的环境变量名（不读取值）。"""
+    prefix = _ENV_OVERRIDE_KEYS.get(key)
+    if not prefix or not ACTIVE_PROFILE:
+        return None
+    return f"{prefix}_{ACTIVE_PROFILE.upper()}"
+
+
+def _env_override_value(key: str) -> str | None:
+    """本机 .env 覆盖的**实际值**；未设置（缺失或空白）返回 None。
+
+    空白值视为未设置：宁可回落到出厂值，也不要"配了个空地址"。
+    """
+    name = env_override_name(key)
+    if not name:
+        return None
+    return (os.environ.get(name) or "").strip() or None
+
+
 def _get(key: str):
-    """取当前 profile 的配置项，缺失回退内置默认"""
-    return _profile.get(key, _DEFAULTS[key])
+    """取当前 profile 的配置项：.env 本机覆盖 > profile > 内置默认。
+
+    环境变量未设置时，下面两行回退路径与改动前完全一致。
+    """
+    override = _env_override_value(key)
+    if override is None:
+        return _profile.get(key, _DEFAULTS[key])
+    if key == "api_paths":
+        # 单路径覆盖同时用于 generations 与 edits（界面只暴露"接口路径"一项）
+        return {"generations": override, "edits": override}
+    return override
+
+
+def source_of_value(key: str) -> str:
+    """某个键当前生效值的来源标签（供 /api/config 的 profileView 使用）。"""
+    if _env_override_value(key) is not None:
+        name = env_override_name(key)
+        assert name is not None
+        return f".env {name}" if name in _ENV_FILE_KEYS else f"环境变量 {name}"
+    return _SRC_PROFILE if key in _profile else _SRC_FALLBACK
 
 
 # ---------- 接口 ----------
@@ -246,19 +299,26 @@ def fold_model_id(model_id: str | None) -> str:
 
 
 def normalize_model_id(model_id: str | None) -> str | None:
-    """把用户给的模型 ID 纠正为配置里的**真实 ID**，无法匹配则原样返回。
+    """把用户给的模型 ID 纠正为**当前 profile** 里的真实 ID，无法匹配则原样返回。
 
     背景：中转站的 `gpt‑image‑2.5` 用的是全角连字符 U+2011，与键盘能打出的
     半角 `gpt-image-2.5` 在界面上毫无区别。用户手打、或沿用历史记录时必然
     拿到半角版本，请求会被上游直接判为 model_not_found（404）。
     这里做一次折叠比对，命中已知模型就换回配置里的正确 ID。
+
+    只查当前 profile 的 `MODELS`，**不跨 profile**：模型 ID 是各家上游自己的
+    标识，同名不代表同一个东西。早先这里遍历 all_known_models()（含其它全部
+    profile），于是别的 profile 里一条用全角连字符登记的历史条目，会把本
+    profile 下用户打的半角名静默改写成那条全角 ID 再发给上游——上游只回
+    `unsupported image model`，而报错里列出的"支持的模型"看起来与用户输入的
+    一模一样，极难排查。纠正只在"本 profile 自己登记过"时才有依据。
     """
     if not model_id:
         return model_id
     folded = fold_model_id(model_id)
-    for known in all_known_models():
-        if fold_model_id(known) == folded:
-            return known
+    for known in MODELS:
+        if fold_model_id(known["id"]) == folded:
+            return known["id"]
     return model_id
 
 
@@ -505,7 +565,7 @@ def build_provider_catalog(cfg: dict) -> list[dict]:
     把各 profile 的 base_url + sizes + models 一并下发，前端才能按地址自己换表；
     profile 增删来源时前端零改动。
 
-    每项：{name, label, baseUrl, defaultModel, defaultQuality, defaultSize, sizes, models}
+    每项：{name, label, baseUrl, apiPath, defaultModel, defaultQuality, defaultSize, sizes, models}
     """
     profiles = cfg.get("profiles")
     if not isinstance(profiles, dict):
@@ -514,11 +574,19 @@ def build_provider_catalog(cfg: dict) -> list[dict]:
     for name, profile in profiles.items():
         if not isinstance(profile, dict):
             continue
+        paths = profile.get("api_paths")
+        if not isinstance(paths, dict):
+            paths = _DEFAULTS["api_paths"]
         catalog.append(
             {
                 "name": str(name),
                 "label": str(profile.get("label") or name),
                 "baseUrl": str(profile.get("base_url") or _DEFAULTS["base_url"]),
+                # 供配置编辑器在切换 profile 时预览该来源的接口路径
+                # （不带上它，前端切了 profile 只能沿用上一个来源的路径）
+                "apiPath": str(
+                    paths.get("generations") or _DEFAULTS["api_paths"]["generations"]
+                ),
                 "defaultModel": str(
                     profile.get("default_model") or _DEFAULTS["default_model"]
                 ),

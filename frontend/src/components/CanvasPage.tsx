@@ -13,6 +13,7 @@ import {
   addEdge,
   Background,
   BackgroundVariant,
+  ControlButton,
   Controls,
   ReactFlow,
   useEdgesState,
@@ -71,6 +72,7 @@ import {
 import { layoutPromptResults, layoutSelection, nodeSize } from "../layout";
 import { GroupNode, ImageNode, PromptNode } from "./CanvasNodes";
 import { HistoryGallery } from "./HistoryGallery";
+import { ModalShell } from "./ModalShell";
 import { PromptImportModal } from "./PromptImportModal";
 import { WorkflowLoadModal, WorkflowSaveModal, ZoomModal } from "./WorkflowModals";
 import { buildPromptNodes, type PromptCardSpec } from "../promptImportFormat";
@@ -85,6 +87,14 @@ const MIN_FIT_ZOOM = 0.02;
  *  两值之间是迟滞带（0.1~0.2），避免在阈值附近反复缩放时抖动切换。 */
 const LOD_IN_ZOOM = 0.1;
 const LOD_OUT_ZOOM = 0.2;
+
+/** 操作帮助正文：画布 / 节点 / 连线三类交互 + 全局快捷键（内容与 README「画布工作流」一致） */
+const HELP_ROWS: [string, string][] = [
+  ["画布", "右键框选 · Ctrl+点击加选 · 滚轮缩放 · 空白拖拽平移 · 左下角适应视图全览"],
+  ["节点", "悬停显右侧操作栏 · 选中后右上角可运行/整理/连线/设路径/删除 · 双击图片放大预览 · 拖右下角拉伸"],
+  ["连线", "图片→提示词/图片组 · 图片组→提示词 · 提示词→图片；提示词仅一条入边，多图经图片组聚合"],
+  ["快捷键", "Ctrl+A 全选 · Ctrl+Z/Y 撤销恢复 · Delete 删除选中 · Ctrl+S 保存 · 双击连线删除"],
+];
 
 /** 工具栏统一样式按钮；dragStart 存在时按钮可拖出（拖到画布松开即新建，点击仍走 onClick） */
 function ToolbarButton({
@@ -235,6 +245,7 @@ export function CanvasPage({
   /** 粘贴导入提示词卡片弹窗 */
   const [showImportModal, setShowImportModal] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
   const [saveName, setSaveName] = useState("");
   const [workflows, setWorkflows] = useState<{ name: string; modified: string }[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1347,9 +1358,9 @@ export function CanvasPage({
   );
 
   /* ---------------- 拖放接管（useCanvasDrop：意图解析/落点示意/窗口守卫/工作区四事件） ----------------
-   * 挂在整个工作区（含工具栏/帮助栏）：落点夹紧到画布，UI 上不再出现浏览器禁止标志；
+   * 挂在整个工作区（含工具栏）：落点夹紧到画布，UI 上不再出现浏览器禁止标志；
    * 文本/无关拖拽放行；弹窗打开时暂停接管，避免误落到弹窗背后。 */
-  const modalOpen = showSaveModal || showLoadModal || showImportModal || showHistory || zoomImage !== null;
+  const modalOpen = showSaveModal || showLoadModal || showImportModal || showHistory || showHelp || zoomImage !== null;
   const { dropIntent, dropChip, dragHandlers, startToolbarDrag, hideDropChip } = useCanvasDrop({
     canvasRef,
     rfInstanceRef,
@@ -1421,8 +1432,6 @@ export function CanvasPage({
           </ToolbarButton>
         </div>
       </div>
-      {/* 操作帮助：单行小字，画布/节点/连线三类交互用分隔符紧凑展示（与 README「画布工作流」章节保持一致） */}
-      <div className="studio-help enter-up enter-delay-1 flex flex-wrap items-center gap-x-2 text-[11px] text-neutral-400">拖入图片 · 双击空白新建卡片 · 右键框选<details className="help-more ml-auto"><summary className="chip chip--quiet help-more__btn" title="全部快捷键">?</summary><div className="help-more__panel"><span><b>画布</b>右键框选 · Ctrl+点击加选 · 滚轮缩放 · 空白拖拽平移 · 左下角适应视图全览</span><span><b>节点</b>悬停显右侧操作栏 · 选中后右上角可运行/整理/连线/设路径/删除 · 双击图片放大预览 · 拖右下角拉伸</span><span><b>连线</b>图片→提示词/图片组 · 图片组→提示词 · 提示词→图片；提示词仅一条入边，多图经图片组聚合</span><span><b>快捷键</b>Ctrl+A 全选 · Ctrl+Z/Y 撤销恢复 · Delete 删除选中 · Ctrl+S 保存 · 双击连线删除</span></div></details></div>
 
       {/* 画布 */}
       <div className="studio-canvas panel-card enter-up enter-delay-2 relative min-h-0 flex-1 overflow-hidden">
@@ -1431,7 +1440,7 @@ export function CanvasPage({
             「删除所选」作用于全部。半透明毛玻璃面板 + 透明按钮（走 btn-ghost/btn-danger 两档体系，
             常态透明、主体色描边文字，hover 涟漪填充反白——不遮挡画布内容也能一眼看出可点）。 */}
         {selectedCount >= 1 && (
-          <div className="studio-inspector absolute right-3 top-3 z-40 flex items-center gap-1 rounded-lg border border-white/40 bg-white/20 p-1 shadow-sm backdrop-blur-md">
+          <div className="studio-inspector surface-float absolute right-3 top-3 z-40 flex items-center gap-1 rounded-lg border border-white/40 p-1 shadow-sm">
             {selectedPromptCount > 0 && (
               <button
                 type="button"
@@ -1514,7 +1523,16 @@ export function CanvasPage({
         >
           <Background variant={BackgroundVariant.Dots} gap={24} size={1} />
           {/* 左下角控制钮：fitView 显式放宽 minZoom，节点再多也能一屏全览 */}
-          <Controls fitViewOptions={{ padding: 0.15, minZoom: MIN_FIT_ZOOM, maxZoom: 2 }} />
+          <Controls fitViewOptions={{ padding: 0.15, minZoom: MIN_FIT_ZOOM, maxZoom: 2 }}>
+            {/* 操作帮助与缩放/适应视图同一栈：不再单占工具栏下方一整行 */}
+            <ControlButton
+              onClick={() => setShowHelp(true)}
+              title="操作帮助与快捷键"
+              aria-label="操作帮助与快捷键"
+            >
+              <span aria-hidden="true" className="text-[13px] font-semibold leading-none">?</span>
+            </ControlButton>
+          </Controls>
         </ReactFlow>
         {/* 拖拽落点示意（useCanvasDrop 提供：portal 到 body 跟随光标，显示图片数量/新建类型） */}
         {dropChip}
@@ -1561,7 +1579,6 @@ export function CanvasPage({
         open={showHistory}
         onClose={() => setShowHistory(false)}
         onImport={handleHistoryImport}
-        defaultOutputDir={config.defaultOutputDir}
       />
       {showLoadModal && (
         <WorkflowLoadModal
@@ -1576,6 +1593,24 @@ export function CanvasPage({
           onConfirm={handleImportCards}
           onClose={() => setShowImportModal(false)}
         />
+      )}
+      {/* 操作帮助：入口在画布左下角控件组，内容走统一弹窗基座（ModalShell）。
+          旧版是工具栏下方一整行提示 + details 浮层——浮层被画布盖住读不清，整行还白占画布高度。 */}
+      {showHelp && (
+        <ModalShell title="操作帮助" className="modal-panel--md" onClose={() => setShowHelp(false)}>
+          <header className="modal-header">
+            <h3 className="modal-title">操作帮助</h3>
+            <p className="modal-subtitle">拖入图片 · 双击空白新建卡片 · 右键框选</p>
+          </header>
+          <div className="flex flex-col gap-2.5 text-xs leading-relaxed">
+            {HELP_ROWS.map(([key, text]) => (
+              <div key={key} className="grid grid-cols-[3.25rem_1fr] gap-3">
+                <span className="font-semibold text-neutral-500">{key}</span>
+                <span className="text-neutral-700">{text}</span>
+              </div>
+            ))}
+          </div>
+        </ModalShell>
       )}
       {zoomImage && (
         <ZoomModal imageUrl={zoomImage} name={zoomName} onClose={() => setZoomImage(null)} />

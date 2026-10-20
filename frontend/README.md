@@ -8,7 +8,7 @@ React 19 + TypeScript + Vite + Tailwind v4 + React Flow（`@xyflow/react`）。�
 npm install
 npm run dev        # 开发模式（热更新；需后端已启动，见下）
 npm run build      # tsc --noEmit + vite build → dist/（git 忽略，由后端服务托管）
-npm test           # vitest run（337 用例）
+npm test           # vitest run（338 用例）
 npm run lint       # eslint
 npx tsc --noEmit   # 类型检查
 ```
@@ -44,22 +44,21 @@ E2E（画布交互回归，真实浏览器；36 断言）：
 | --- | --- | --- |
 | 尺寸阶梯 | `--h-ctl` · `--h-field` · `--h-cta` | 顶栏控件 28 · 表单控件 38 · 主行动 46 |
 | 圆角阶梯 | `--r-pill` · `--r-card` · `--r-control` | 胶囊 · 容器 16 · 控件 10 |
-| 表面 | `--surface-card` · `--surface-panel` · `--field-bg` · `--surface-blur` | 由 App 用 `surfaceTokens(色相, 通透度)` 在 **JS 里算成字面量后内联注入**（与 `--color-brand` 同路）；通透度拉到 1 时卡片/面板 alpha 仅约 0.05（接近全透明），输入框另有 `FIELD_ALPHA_FLOOR = 0.25` 底线。两条硬约束（模糊绝不随通透度增长、CSS 里不写「函数内嵌 var()」）见 [../docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md) 9.4 第 7、8 条 |
+| 表面 | `--surface-base` · `--surface-card` · `--surface-panel` · `--surface-float` · `--surface-inset` · `--surface-plain` · `--surface-blur` · `--scrim-*` | **全部由 [surface.ts](src/surface.ts) 算好后注入**，它是容器底色的唯一产地。两个正交的轴：**掺色 `tint`**（这个面是什么色，按角色分配）与**不透明度 `alpha`**（用户的「通透度」滑杆）。老实现的坑：token 写 `hsl(hue 30% 98.4% / a)`，算出来离纯白只有 **2/255**，数学上不可见 —— 看到的「跟色」全来自 alpha 低、页面底色透上来，于是任何需要不透明的面（弹窗、列表行）颜色就消失（同屏出现「左卡是粉的、右台面是白的」）。现改为解出真实 RGB，`tint 0.10` ≈ 离白 **15/255**。两条硬约束（模糊绝不随通透度增长、CSS 里不写「函数内嵌 var()」）见 [../docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md) 9.4 第 7、8 条 |
+| 表面分层 | 六档角色（见 [surface.ts](src/surface.ts) 的 `ROLES` / `SURFACE_ROLE_DOC`）：`base` 骨架 → `card` 大面衬底 → `panel` 台面 → `float` 浮层 → `inset` 内嵌；`plain` **中性**（画布主体，看图台面，刻意不跟随主体色） | **新容器先按角色选档**：骨架（顶栏 / 工具栏）`base`，经典三张输入卡 `card`，输出区 / 弹窗外壳 / 生成历史外壳 `panel`，下拉 / 列表行 / 节点卡 / 缩略图 / 最近提示词 `float`，输入框 `inset`。TSX 里挂 `.surface-*` 角色类（**别写 Tailwind 的 `bg-white`** —— 它生成 `background-color`，接不了渐变 token，且写死就不再跟随）。**嵌套不变量：内层不许比外层更透**（否则壁纸从容器中间透出一个洞），默认通透度下 卡片 0.47 < 台面 0.85 < 浮层 0.94。判据与护栏：[surfaceAudit.test.ts](src/surfaceAudit.test.ts) 解析 `index.css` **与全部 `.tsx`**，任何未登记的写死底色 / 硬编码 `blur()` 直接红（豁免要写理由，白名单按「文件+类名」精确匹配，不做全局放行） |
 | 通用滑杆 | `.range-field` | 外观弹窗的参数滑杆（通透度用它；与主体色滑杆同形，轨道保持中性） |
 | 角落装饰 | `.corner-deco` · `.corner-rings` · `.corner-note` | 编号 / 弧环 / 镜像小字 |
-| 快捷键面板 | `.help-more` + `__btn` / `__panel` | 画布页操作帮助右侧的 `?`；原生 `details/summary`，无需组件状态 |
 | 最近提示词 | `.recent-prompt` | 结果区空态一键复用的提示词行：单行截断，完整内容走 title 悬停 |
 | 行内角标 | `.chip`（`--sm` `--dot` `--brand` `--quiet` `--danger`） | 顶栏 28 · 小号 18 |
 | 分段控件 | `.tabs`（模态页签） · `.mode-switch`（顶栏模式） | 同源视觉，尺寸走 `--h-ctl` |
-| 模态内容区 | `.modal-body` | 面板是 **flex 列**（`.modal-panel`），内容区 `flex: 1 1 auto` + `min-height: 0` 才能被压缩并自己滚动——面板自身 `max-height: min(86dvh, 760px)` + `overflow: hidden`，内容一旦超高**只会被裁掉**，光给内容区写 `overflow-y: auto` 而不约束高度等于没写（`scrollHeight === clientHeight`，底部几行永远滚不到）；`scrollbar-gutter: stable` 是滚动条占位 |
+| 模态内容区 | `.modal-body` | 面板是 `max-height` + `overflow:hidden` 的 **flex 列**，内容区靠 `flex: 1 1 auto` + `min-height: 0` 才能被压到内容高度以下并自滚；`scrollbar-gutter: stable` 预留滚动条位、不横向位移。**别改回块级布局**：块级下内容区高度不受约束，`scrollHeight === clientHeight` 永远不触发滚动，超出部分被面板静默裁掉（实测 1100×620：panelClientH 531 / panelScrollH 716 / canScroll false）。原文写的 `--panel-h` 与 `[data-growing]` 早已不存在，2026-10-03 更正 |
 | 只读值表 | `.spec-list` + `__row` / `__key` / `__val` / `__src` | 「值 + 来源」两行式排版 |
-| 背景材质 | `html[data-bg="…"]` + `.bg-swatches` / `.bg-swatch`（`--plain` `--accent` `--paper` `--wood` `--cool` `--mist`） | 整页背景材质预设；**默认 `plain`（纯白 `#ffffff`、无纹理，普通网页观感）**，`:root` 兜底与它同值（不一致会在 JS 挂载前先闪一层别的底色）；材质只在 `--bg-color` / `--bg-image` / `--bg-size` 三个变量里声明一次，`html[data-bg]` 与选择器色块**共用同一组声明**（每个 id 都必须有对应规则，否则「点了没反应」——由 `backgroundPreset.test.ts` 钉住）；铺法是 `repeat`（纹理通道），**大图不许走这里**（会平铺出接缝）；「跟随主体色」的底色/光晕只能读 `--accent-hue`（`--color-brand` 在 `.imagora-app` 上，body 读不到） |
-| 预设壁纸 | `.bg-walls` / `.bg-wall`（`--dragon` `--tiger`） | 内置大图选项：缩略图直接 `background-image: url("/wallpapers/xxx.jpg")`（静态文件在 `frontend/public/wallpapers/`，构建期原样拷进 `dist/`，路径不经打包器改写）；选中后走**整页壁纸层**（cover 不重复），与「我的壁纸」同一层、同一套可读性处理 |
-| 我的壁纸 | `.imagora-wallpaper` + `__image` | 整页背景层：固定铺满、置底不挡交互；**按原图 cover 铺底，不缩放、不压暗、不重编码**，只加一层降噪滤镜（`saturate(.62) contrast(.94)`，常量见 `surface.ts` 的 `WALLPAPER_IMAGE_FILTER`）让前景字好读——**不许用半透明白纱**，白纱会把图提亮变灰，等于第二次「看不清」；有壁纸时 `html[data-wallpaper="on"] body` 让出页面底色、并给 `.panel-card` / `.classic-result-panel` 内的文字补极淡白色 text-shadow（该规则须排在预设之后才压得住）。**这一层同时服务内置预设壁纸**（`presetWallpaperOf` 有值时优先于自选图，见 `App.tsx` 的 `pageWallpaperUrl`）：两者共用一层才不会让可读性处理分叉 |
+| 背景材质 | `html[data-bg="…"]` + `.bg-swatches` / `.bg-swatch`（`--accent` `--plain`） | 整页背景材质预设；材质只在 `--bg-color` / `--bg-image` / `--bg-size` 三个变量里声明一次，`html[data-bg]` 与选择器色块**共用同一组声明**；铺法是 `repeat`（纹理通道），**大图不许走这里**（会平铺出接缝）；页面底色只能用 `--accent-hue`（`--color-brand` 在 `.imagora-app` 上，body 读不到） |
+| 我的壁纸 | `.imagora-wallpaper` + `__image` | 整页背景层：固定铺满、置底不挡交互；cover 铺底，**不缩放、不重编码**。`filter` 不在 CSS 里写死，由 `wallpaperAdjust.ts` 的 `wallpaperFilter(模糊, 明暗)` 拼成整条内联注入（降噪 + 用户两条滑杆，默认 0/1 即原图）——CSS 嵌 `var()` 会被压缩器丢弃，见 ARCHITECTURE 9.4 第 8 条。**不许用半透明白纱**，白纱会把图提亮变灰，等于第二次「看不清」；有壁纸时 `html[data-wallpaper="on"] body` 让出页面底色、并给所有走表面 token 的容器（`.panel-card` / `.classic-result-panel` / `.studio-header` / `.studio-toolbar` / `.studio-canvas`）内的文字补极淡白色 text-shadow（该规则须排在预设之后才压得住）。**整页背景图只有这一条来源**（内置预设壁纸已移除，只支持用户自己上传） |
 | 开关 | `.switch` | 布尔开关（原生 checkbox + 轨道圆钮，状态只走 `:checked`）；画布边界开关用它 |
 | 画布边界 | `html[data-canvas-bounds="off"] .studio-canvas` | 关闭时收掉画布边框 / 底色 / 投影与渲染层底色晕，与页面背景融为一体 |
 | 滚动条 | `--sb-size` · `--sb-thumb` · `--sb-track` | 全局统管；轨道 transparent = 跟随所在容器底色 |
-| 主体色选择 | `.accent-swatches` / `.accent-swatch`（选中态 `.is-on`） · `.accent-hue` | 外观弹窗的九色预设方块 + 自定义色相滑杆：**色块底色由组件按 `accentFromHue` 现算并内联注入**，CSS 只管形状（28 方块、圆角 8）、hover 抬升与选中态的双层外圈；`.accent-hue` 是主体色滑杆本体（`--r-pill` 轨道 + 自定义 thumb，「通用滑杆」`.range-field` 与它同形）。取到的色相写到根元素 `--accent-hue`，背景材质与页面光晕都读它 |
+| 主体色选择 | `.accent-hue` | 外观弹窗**只有一条色相滑杆**（九色预设方块已移除，2026-10-03）：`--r-pill` 轨道 + 自定义 thumb，轨道底色是色相彩虹——那只属于「选色」，其余参数用中性的「通用滑杆」`.range-field`；宽度交给容器（配 `flex-1`），与「卡片通透度」那行逐行对齐。取到的色相写到根元素 `--accent-hue`，背景底色与页面光晕都读它 |
 
 ## 文件索引
 
@@ -116,11 +115,9 @@ E2E（画布交互回归，真实浏览器；36 断言）：
 
 ### [cost.ts](src/cost.ts)
 - 职责：成本展示纯函数（`formatMoney` / `formatRate` / `formatSeconds` / `budgetSummary` / `statRows`）
-- 被谁依赖：CostBoard.tsx、HistoryGallery.tsx（重跑确认弹窗的预估费用与预算摘要）
+- 被谁依赖：CostBoard.tsx
 - 注意：费用口径由后端给出（`/api/history/stats`、`/api/budget/check`），前端只做显示，不重算价格规则
 
-### [rerun.ts](src/rerun.ts)
-- 职责：「重跑失败项」纯逻辑——`rerunBlockReason`（单条为何不可重跑）、`planRerun`（可重跑 / 跳过 + 参考图丢失计数）、`toBatchItems`（历史条目 → 批量提交参数）、`groupSkipReasons`（原因聚合）
 - 被谁依赖：HistoryGallery.tsx
 - 注意：图生图记录参考图找不回时**明确跳过并报因**（`RERUN_LOST_REFS`），绝不静默降级成文生图
 
@@ -135,15 +132,32 @@ E2E（画布交互回归，真实浏览器；36 断言）：
 - 注意：`accentForWindow` **不做色相归一**，越界编号（如 0）保留负色相——该行为由 `accent.test.ts` 钉住，改它会破坏既有契约
 
 ### [backgroundPreset.ts](src/backgroundPreset.ts)
-- 职责：背景预设的纯数据与读写（`BACKGROUND_PRESETS` 八项 = 六项材质 + 两张内置壁纸、`PRESET_MATERIALS` / `PRESET_WALLPAPERS` 分组、`presetWallpaperOf` 取壁纸 URL、`readBackgroundPreset` / `saveBackgroundPreset`、`isBackgroundPresetId`）；材质由 [index.css](src/index.css) 按 `html[data-bg]` 出，内置壁纸由 App 铺进整页壁纸层（走 `wallpaper` 字段，不走 `--bg-image`：那条是 repeat 的材质通道）
-- 被谁依赖：`App.tsx`（外观弹窗的色块行 + 根元素 `html[data-bg]` + 「恢复默认外观」）
-- 注意：**只有浅色系**（纯白 / 跟随主体色 / 纸纤维 / 木纹 / 干净冷灰 / 雾面），**默认是纯白 `plain`**（2026-10-07 维护者要求「不设置时就是正常网页的白底」；此前默认「跟随主体色」会让整页跟着主体色相偏色，用户形容为「背景不正常、改不回白底」）。深色的「暗房 / 蓝图」不在其中——它们要连顶栏、卡片、文字、按钮一起换深色，属独立工程；非法/空白存储值一律回落默认「纯白」
+- 职责：背景预设的纯数据与读写（`BACKGROUND_PRESETS` 两项 = 跟随主体色 / 纯白、`readBackgroundPreset` / `saveBackgroundPreset`、`isBackgroundPresetId`）；底色由 [index.css](src/index.css) 按 `html[data-bg]` 出。**不涉及图片**：整页背景图只走 `wallpaperStore` 的用户自选图（IndexedDB，不入库）
+- 被谁依赖：`App.tsx`（外观弹窗的色块行 + 根元素 `html[data-bg]`）
+- 注意：**只有浅色系**，且只有两项（跟随主体色 / 纯白）。深色的「暗房 / 蓝图」不在其中——它们要连顶栏、卡片、文字、按钮一起换深色，属独立工程；非法/空白存储值一律回落默认「跟随主体色」
+
+### [configWrite 相关](src/api.ts)
+- `getConfig()`：取配置并**同时取出写配置令牌**（令牌在 `GET /api/config` 的响应头里下发，存内存不写 localStorage）
+- `writeConfig()`：写 `.env`（带 `X-Config-Token`）；409 = 文件被外部修改，不静默覆盖
+- `clearConfigSecret()`：清空密钥（独立出口，必须 `confirm: true`）
+- 契约见 [../docs/config-write-api-design.md](../docs/config-write-api-design.md)
+
+### [popupLayer.ts](src/popupLayer.ts)
+- 职责：**浮层计数**——`pushPopup` / `popPopup` / `hasOpenPopup` / `resetPopupCount`
+- 解决的问题：`.modal-shell` 的 Esc 监听挂在 document 的 **capture 阶段**，比浮层自己的 `onKeyDown` 先跑。不判浮层的话，展开下拉时按 Esc 会**连弹窗一起关掉** —— 用户的手感是「我只想收起下拉，结果正在填的窗口没了」。`Select` 展开时 push、收起时 pop，`ModalShell` 关窗前先问 `hasOpenPopup()`，因此需要两次 Esc（先收浮层、再关弹窗）
+- 可计数：多余 `pop` 做了负数保护，否则 `hasOpenPopup()` 会永远为真、弹窗再也关不掉
+- 改后跑 `npm test`
 
 ### [surface.ts](src/surface.ts)
-- 职责：卡片表面材质——`surfaceTokens(色相, 通透度)` 产出 `--surface-card` / `--surface-panel` / `--field-bg` 三个字面量 CSS 值 + `--surface-blur`；`blurFor` 是模糊半径的唯一出处（**当前恒返回 `none`**：壁纸要原样清晰；函数保留只为「由 JS 注入整条字面量」这条路不破）；`WALLPAPER_IMAGE_FILTER` 是壁纸降噪滤镜常量（CSS 侧同值）；`FIELD_ALPHA_FLOOR` 是输入框不透明度底线（0.25）；`readSurfaceTransparency` / `saveSurfaceTransparency` 存通透度（0 最实，1 最透）
+- 职责：卡片表面材质——`surfaceTokens(色相, 通透度)` 产出 `--surface-card` / `--surface-panel` / `--field-bg` 三个字面量 CSS 值 + `--surface-blur`；`blurFor` 是模糊半径的唯一出处（**当前恒返回 `none`**：壁纸要原样清晰；函数保留只为「由 JS 注入整条字面量」这条路不破）；`WALLPAPER_IMAGE_FILTER` 是壁纸降噪滤镜常量（由 `wallpaperAdjust.ts` 的 `wallpaperFilter` 消费，CSS 侧不再重复写值）；`--surface-panel` 的消费方是 `.modal-panel`（弹窗与卡片共用一套材质 token，2026-10-03 起不再写死背景色）；`FIELD_ALPHA_FLOOR` 是输入框不透明度底线（0.25）；`readSurfaceTransparency` / `saveSurfaceTransparency` 存通透度（0 最实，1 最透）
 - 被谁依赖：`App.tsx`（外观弹窗的通透度滑杆 + 根节点内联注入）
 - 注意：**故意在 JS 里拼字符串而不是在 CSS 里用变量**——压缩器会丢弃「函数内嵌 var()」的声明；拉到最透仍留约 0.27 的白，保证文字压得住
 
+
+### [wallpaperAdjust.ts](src/wallpaperAdjust.ts)
+- 职责：壁纸自身的模糊（0~24px）与明暗（0.5~1.5）两条**显式**参数——钳制、默认值、`localStorage` 读写，以及 `wallpaperFilter()` 把「固定降噪 + 用户两项」拼成**整条** filter 字面量
+- 与「卡片通透度」完全解耦：那档管卡片自己有多透，这两条管壁纸长什么样，可同时生效；两者都默认取原图/不模糊
+- 判据：**可读性由谁决定**——系统自动改（随通透度糊）不做，用户手动拉才做，详见 ARCHITECTURE 9.4 第 7 条
 ### [wallpaperStore.ts](src/wallpaperStore.ts)
 - 职责：我的壁纸存储层，**只存图**——`readWallpaperImage` / `saveWallpaperImage` / `clearWallpaperImage`，Blob 直存 IndexedDB（不把 base64 塞 localStorage）
 - 被谁依赖：`App.tsx`（外观弹窗与整页铺底；启动时调一次 `purgeLegacyWallpaperSettings`）
@@ -178,7 +192,7 @@ E2E（画布交互回归，真实浏览器；36 断言）：
 - 改后必测：`npm test` + E2E（verify_canvas.py 第 8-11 段）
 
 ### [useGenerationTask.ts](src/useGenerationTask.ts)
-- 职责：生成任务轮询/取消（`useGenerationTask`）；导出终态常量 `TERMINAL_STATUSES`（轮询停止口径，`HistoryGallery` 批量重跑等待循环共用，勿再内联重复列表）
+- 职责：生成任务轮询/取消（`useGenerationTask`）；导出终态常量 `TERMINAL_STATUSES`（轮询停止口径，勿在别处内联重复列表）
 - 注意：返回稳定成员引用（hook 单测锁定）
 
 ### [useCanvasRecovery.ts](src/useCanvasRecovery.ts)
@@ -191,7 +205,7 @@ E2E（画布交互回归，真实浏览器；36 断言）：
 
 ### 组件（components/；改后跑 `npm test` + E2E）
 
-- [`CanvasPage.tsx`](src/components/CanvasPage.tsx) — 无限画布主页面（React Flow 集成、选中操作栏、历史面板入口）
+- [`CanvasPage.tsx`](src/components/CanvasPage.tsx) — 无限画布主页面（React Flow 集成、选中操作栏、操作帮助弹窗、历史面板入口）
 - [`CanvasNodes.tsx`](src/components/CanvasNodes.tsx) — 三类节点（图片/图片组/提示词卡）+ `ActionButton`（nodrag 胶囊按钮）；`StatusLight` 状态灯 running 恒定「生成中」，`ElapsedText` 秒数文字以 `startedAtMs` 自计时（防逐秒重渲染，见 ARCHITECTURE 5.3）
 - [`WorkflowModals.tsx`](src/components/WorkflowModals.tsx) — 保存/加载/导入弹窗 + **`ZoomModal` 全屏预览**（createPortal 到 body，画布 / 经典表单 / 生产历史共用；Portal 根截停 click 冒泡，防误关外层宿主遮罩）
 - [`ResultPanel.tsx`](src/components/ResultPanel.tsx) — 经典表单结果区 5 态容器：主图形层 absolute 居中钉死 + 副信息层底部独立生长（行增减不挤动主图形）；切换交叉淡化（swap-in/swap-out，旧层保留 200ms）；排队/生成中/失败/已取消/透传 Gallery；生成中图标本体按自身颜色呼吸光（`icon-breathe`）
@@ -199,7 +213,7 @@ E2E（画布交互回归，真实浏览器；36 断言）：
 - [`LogLine.tsx`](src/components/LogLine.tsx) — 日志单行：文本里的本机绝对路径拆成可点击复制词条（CopyChip），其余保持文本；行动画 log-line
 - [`CopyChip.tsx`](src/components/CopyChip.tsx) — 路径词条：点击复制完整路径（`navigator.clipboard`），复制后边框/底色高亮反馈 1.2s（不换文字，避免宽度跳动）
 - [`UploadZone.tsx`](src/components/UploadZone.tsx) — 参考图上传区（缩略图单击不触发文件选择器、双击放大）
-- [`HistoryGallery.tsx`](src/components/HistoryGallery.tsx) — 生成历史面板：**分页滚动加载**（首屏 60 条，滚动接近底部 600px 内自动追加、未占满视口自动续拉，按钮仅兜底，DOM 恒在单页数量级）两栏网格卡片（160px 结果图 | 提示词 2 行截断随容器宽 | 56px 参考图换行 | 按钮底部对齐横排）；提示词超 2 行时悬浮浮层补全（仅截断弹、宽固定 80vw 水平居中左/右各留 10vw、高随行数自动长、垂直跟随鼠标、无滚动条）；搜索/状态筛选重置到第 0 页；双击放大预览 / 单击新窗口开原图 / 导入当前画布；**失败行「重跑」+ 顶部「重跑失败项（N）」**（确认弹窗含费用预估、预算警示、不可重跑原因聚合、输出目录选择；提交后逐任务轮询进度，完成后刷新列表与看板）
+- [`HistoryGallery.tsx`](src/components/HistoryGallery.tsx) — 生成历史面板：**分页滚动加载**（首屏 60 条，滚动接近底部 600px 内自动追加、未占满视口自动续拉，按钮仅兜底，DOM 恒在单页数量级）两栏网格卡片（160px 结果图 | 提示词 2 行截断随容器宽 | 56px 参考图换行 | 按钮底部对齐横排）；提示词超 2 行时悬浮浮层补全（仅截断弹、宽固定 80vw 水平居中左/右各留 10vw、高随行数自动长、垂直跟随鼠标、无滚动条）；搜索/状态筛选重置到第 0 页；双击放大预览 / 单击新窗口开原图 / 导入当前画布；每行按钮与成败无关（复制提示词 / 打开目录 / 导入当前画布）；参考图已丢失的失败记录只给一条条数提示（无法还原，无重跑入口）
 - [`CostBoard.tsx`](src/components/CostBoard.tsx) — 成本看板条（历史面板顶部）：今日/累计花费、成功率、失败数、成功平均耗时、按尺寸分布 + 本机预算（日预算 / 单次上限，0 = 不限）编辑保存；数据来自 `/api/history/stats`，保存走 `/api/budget`
 - [`PromptImportModal.tsx`](src/components/PromptImportModal.tsx) — 粘贴导入弹窗（实时解析 + 问题标红）
 - [`FolderPicker.tsx`](src/components/FolderPicker.tsx) / [`Select.tsx`](src/components/Select.tsx) — 目录选择 / 尺寸质量下拉

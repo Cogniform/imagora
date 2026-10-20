@@ -6,10 +6,15 @@
 # 2. 依赖安装：后端 uv sync（pyproject.toml + uv.lock，无 requirements.txt）；
 #    前端 npm ci（package-lock.json）。dist/ 被 git 忽略，任何需要 UI 的
 #    Job（含 E2E）都必须自己构建 frontend/dist。
-# 3. 镜像：pyproject [tool.uv] index-url 指向 tuna 镜像（本地开发用）；
-#    CI runner 在海外，Backend/E2E Job 已用 job 级 env 显式覆盖
-#    UV_INDEX_URL=https://pypi.org/simple，避免 tuna 对海外 IP 超时。
-#    本地不用改 pyproject.toml。
+# 3. 索引：仓库自己钉死官方 PyPI（pyproject 的 [tool.uv.index] default = pypi），
+#    uv.lock 也只记官方地址，CI 用 `uv sync --locked` 按锁装。
+#    为什么必须由仓库钉死：uv.lock 会把 registry **固化到每个包**（连 sdist/wheels 的
+#    绝对下载 URL 一起记）。所以「跑 uv lock 那台机器用的是哪个源」直接决定锁文件内容 ——
+#    曾配了镜像，锁里就是镜像的物理地址，海外 runner 连不上必然超时
+#    （连续两次挂在 uv sync：先 packaging 后 charset-normalizer）。
+#    实测过：`--locked` 下 job 级 UV_INDEX_URL 覆盖不了锁里记的地址（锁里是绝对 URL，
+#    不是 index 名），因此「锁走官方 + 装走镜像」在锁定安装下做不到。
+#    本地要加速只能改本机（会同时让锁文件回到镜像源，别把那种锁提交上来）。
 # 4. E2E 目前（verify_canvas.py，36 断言）只测画布交互，不触发生成接口，
 #    因此无需 mock 上游 API。未来若 E2E 覆盖「生成→回流」链路，必须先
 #    mock core/api.py 的 generate_image（monkeypatch 返回固定图），
@@ -30,14 +35,13 @@ jobs:
   backend:
     name: Backend checks (pytest + ruff)
     runs-on: windows-latest
-    env:
-      UV_INDEX_URL: https://pypi.org/simple
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
       - name: Install dependencies
-        # --frozen：锁文件与 pyproject 不同步时直接红（本地已验证 uv lock --check 通过）
-        run: uv sync --frozen --group dev
+        # --locked：断言锁文件不会被改动；与 pyproject 不同步时直接红（比 --frozen 严格，
+        # --frozen 只是不更新、不同步也不报错）。本地已验证 uv lock --check 通过。
+        run: uv sync --locked --group dev
       - name: Ruff
         run: uv run ruff check .
       - name: Ruff format check
@@ -83,8 +87,6 @@ jobs:
     name: E2E (canvas regression, Playwright)
     needs: [backend, frontend]
     runs-on: windows-latest
-    env:
-      UV_INDEX_URL: https://pypi.org/simple
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -94,7 +96,7 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - name: Backend dependencies
-        run: uv sync --frozen --group dev
+        run: uv sync --locked --group dev
       - name: Build frontend (dist/ is git-ignored)
         working-directory: frontend
         run: |

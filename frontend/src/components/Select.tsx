@@ -1,4 +1,7 @@
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import { createPortal } from "react-dom";
+
+import { popPopup, pushPopup } from "../popupLayer";
 
 export interface SelectOption {
   value: string;
@@ -15,11 +18,20 @@ interface SelectProps {
 
 /**
  * 自定义下拉框：提供标准 listbox 语义、完整键盘导航和稳定的关闭行为。
- * 关闭时仍用 display:none，避免绝对定位列表撑高外层滚动容器。
+ *
+ * 展开列表走 **createPortal 到 body**，不是就地 absolute 定位。
+ * 原因：列表贴在触发器下方，而触发器的祖先里到处是「滚动容器 + overflow:hidden」
+ * （弹窗 `.modal-panel` / `.modal-body`、画布节点卡片）。就地绝对定位会被最近的
+ * 滚动容器裁掉——表现为「下拉展开后底部几项看不见」，而且 `max-h-60` 只约束自身高度，
+ * 约束不了「还剩多少空间可见」。挂到 body 后不受任何祖先裁切。
+ *
+ * 坐标按触发器 rect 现算，并在展开期间跟随滚动 / 尺寸变化重算（见下方 effect）。
  */
 export function Select({ options, value, onChange, className = "", id }: SelectProps) {
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
+  /** 列表相对视口的定位（挂到 body 后 fixed 定位，用视口坐标） */
+  const [rect, setRect] = useState<{ left: number; top: number; width: number; maxHeight: number } | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const reactId = useId();
@@ -47,13 +59,46 @@ export function Select({ options, value, onChange, className = "", id }: SelectP
     closeList(true);
   };
 
+  /** 按触发器位置算列表坐标：下方空间不够就翻到上方，并据此限制高度（永不溢出视口） */
+  const measure = () => {
+    const trigger = triggerRef.current;
+    if (!trigger) return;
+    const r = trigger.getBoundingClientRect();
+    const gap = 4;
+    const margin = 8;
+    const below = window.innerHeight - r.bottom - gap - margin;
+    const above = r.top - gap - margin;
+    const flip = below < 160 && above > below;
+    const maxHeight = Math.max(120, Math.min(240, flip ? above : below));
+    setRect({
+      left: r.left,
+      top: flip ? Math.max(margin, r.top - gap - maxHeight) : r.bottom + gap,
+      width: r.width,
+      maxHeight,
+    });
+  };
+
+  // 展开期间登记为「有浮层」：否则按 Esc 时弹窗会抢先关掉（见 popupLayer 的说明）
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(event.target as Node)) closeList();
+    if (!open) return;
+    pushPopup();
+    return () => popPopup();
+  }, [open]);
+
+  // 展开时量一次；展开期间滚动 / 改变窗口尺寸要重算（否则列表会与触发器错位）
+  useLayoutEffect(() => {
+    if (!open) return;
+    measure();
+    const onScroll = () => measure();
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", onScroll);
+    return () => {
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onScroll);
     };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
+    // measure 只读 DOM，无需进依赖
+     
+  }, [open]);
 
   useEffect(() => {
     if (!options.length && open) {
@@ -61,6 +106,18 @@ export function Select({ options, value, onChange, className = "", id }: SelectP
       setActiveIndex(-1);
     }
   }, [open, options.length]);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Node;
+      // 列表已挂到 body，不再是 root 的后代：两处都要判
+      if (rootRef.current?.contains(target)) return;
+      if (document.getElementById(listboxId)?.contains(target)) return;
+      closeList();
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [listboxId]);
 
   const handleKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
     if (event.key === "Tab") {
@@ -129,46 +186,52 @@ export function Select({ options, value, onChange, className = "", id }: SelectP
         </svg>
       </button>
 
-      <ul
-        id={listboxId}
-        role="listbox"
-        className={`select-list absolute left-0 right-0 top-full z-20 mt-1 max-h-60 overflow-auto ${open ? "block" : "hidden"}`}
-      >
-        {options.map((option, index) => {
-          const selected = option.value === value;
-          const active = index === activeIndex;
-          return (
-            <li
-              key={option.value}
-              id={optionId(index)}
-              role="option"
-              aria-selected={selected}
-              className={`select-option ${selected ? "is-selected" : ""} ${active ? "is-active" : ""}`}
-              onMouseEnter={() => setActiveIndex(index)}
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => choose(index)}
-            >
-              <span className="truncate">{option.label}</span>
-              {selected && (
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                  className="shrink-0"
+      {open &&
+        rect &&
+        createPortal(
+          <ul
+            id={listboxId}
+            role="listbox"
+            className="select-list fixed z-[70] overflow-auto"
+            style={{ left: rect.left, top: rect.top, width: rect.width, maxHeight: rect.maxHeight }}
+          >
+            {options.map((option, index) => {
+              const selected = option.value === value;
+              const active = index === activeIndex;
+              return (
+                <li
+                  key={option.value}
+                  id={optionId(index)}
+                  role="option"
+                  aria-selected={selected}
+                  className={`select-option ${selected ? "is-selected" : ""} ${active ? "is-active" : ""}`}
+                  onMouseEnter={() => setActiveIndex(index)}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => choose(index)}
                 >
-                  <path d="M20 6 9 17l-5-5" />
-                </svg>
-              )}
-            </li>
-          );
-        })}
-      </ul>
+                  <span className="truncate">{option.label}</span>
+                  {selected && (
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                      className="shrink-0"
+                    >
+                      <path d="M20 6 9 17l-5-5" />
+                    </svg>
+                  )}
+                </li>
+              );
+            })}
+          </ul>,
+          document.body,
+        )}
     </div>
   );
 }
