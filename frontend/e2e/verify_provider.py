@@ -40,6 +40,9 @@ def check(label: str, ok: bool, extra: str = "") -> None:
 
 
 def main() -> int:
+    # CI Windows runner 默认 stdout 为 cp1252，无法编码中文（PASS/FAIL 断言名）→ 强制 UTF-8
+    # 与 verify_canvas.py 同一处理；漏了这行会在 CI 里第一条 print 就 UnicodeEncodeError。
+    sys.stdout.reconfigure(encoding="utf-8")
     with sync_playwright() as pw:
         browser = pw.chromium.launch()
         page = browser.new_page(viewport={"width": 1600, "height": 1000})
