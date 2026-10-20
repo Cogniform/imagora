@@ -5,7 +5,7 @@
 <h1>Imagora | 意象集</h1>
 
 <p>
-  <a href="https://github.com/zlZayn/imagora/actions/workflows/ci.yml"><img src="https://github.com/zlZayn/imagora/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/Cogniform/imagora/actions/workflows/ci.yml"><img src="https://github.com/Cogniform/imagora/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
   <a href=".python-version"><img src="https://img.shields.io/badge/python-3.12-3776AB?logo=python&logoColor=white" alt="Python 3.12"></a>
   <a href="frontend/package.json"><img src="https://img.shields.io/badge/react-19-61DAFB?logo=react&logoColor=black" alt="React 19"></a>
