@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { generationHistory, getConfig, getHealthDetails, isHttpError, openFolder, rememberOutputDir, writeConfig } from "./api";
 import { useGenerationTask } from "./useGenerationTask";
-import { Palette } from "lucide-react";
+import { Palette, Plug } from "lucide-react";
 import { accentForWindow, accentFromHue, hueForWindow, readAccentHue, saveAccentHue } from "./accent";
 import { clearWallpaperImage, purgeLegacyWallpaperSettings, readWallpaperImage, saveWallpaperImage } from "./wallpaperStore";
 import { readCanvasBounds, saveCanvasBounds } from "./canvasBounds";
@@ -39,6 +39,7 @@ import { ResultPanel } from "./components/ResultPanel";
 import { LogLine } from "./components/LogLine";
 import { ModalShell } from "./components/ModalShell";
 import { Select } from "./components/Select";
+import { ProviderModal } from "./components/ProviderModal";
 import { CanvasPage } from "./components/CanvasPage";
 
 const WIN_KEY = "aig-win";
@@ -607,6 +608,7 @@ function TitleBar({
   onOpenApi,
   pendingCount,
   onOpenAppearance,
+  onOpenProvider,
 }: {
   windowId: number | null;
   onNewWindow: () => void;
@@ -623,6 +625,8 @@ function TitleBar({
   pendingCount: number;
   /** 打开外观弹窗（主体色 / 我的壁纸 / 画布边界） */
   onOpenAppearance: () => void;
+  /** 打开「添加第三方供应商」弹窗 */
+  onOpenProvider: () => void;
 }) {
   /** 品牌区使用单层 Logo，悬停只改变高光与阴影，避免透视挤出造成重影。 */
   const brandRootRef = useRef<HTMLAnchorElement | null>(null);
@@ -696,6 +700,19 @@ function TitleBar({
       <button type="button" onClick={onNewWindow} className="btn-ghost ml-auto">
         ＋ 新窗口
       </button>
+      {/* 添加来源：与「改现有来源」分开一个入口。
+          这里是「造一个新 profile」（写 providers.local.json），角标里那个是「在已有
+          来源里选」（写 .env 的 ACTIVE_PROFILE）—— 两件事落盘的文件不同，合并成一个
+          按钮会让「保存」同时意味着两种心智模型。 */}
+      <button
+        type="button"
+        onClick={onOpenProvider}
+        className="btn-ghost"
+        title="添加第三方供应商"
+        aria-label="添加第三方供应商"
+      >
+        <Plug size={15} aria-hidden="true" />
+      </button>
       {/* 状态 + 入口二合一：角标本身显示当前接口，点它开设置弹窗。
           保留 api-settings-trigger 类名作为稳定的自动化选择器（scripts/smoke_api_modal.py 依赖它）。 */}
       <button
@@ -738,6 +755,8 @@ export function App() {
   /** 配置编辑器写入后刷新的文件状态（顶栏 pending 角标读它）；null = 还没写过 */
   const [fileState, setFileState] = useState<ConfigFileState | null>(null);
   const [showApiSettings, setShowApiSettings] = useState(false);
+  /** 「添加第三方供应商」弹窗：新建来源后要重新拉 /api/config（目录里多了一条） */
+  const [showProviderModal, setShowProviderModal] = useState(false);
   /** 外观弹窗（主体色 / 我的壁纸 / 画布边界）：与接口配置分开，顶栏有独立入口 */
   const [showAppearance, setShowAppearance] = useState(false);
   /** 壁纸图本体（启动时从 IndexedDB 取回）；null = 没有壁纸 */
@@ -1218,6 +1237,7 @@ useEffect(() => {
         healthIssues={visibleHealthIssues}
         pendingCount={pendingCount}
         onOpenAppearance={() => setShowAppearance(true)}
+        onOpenProvider={() => setShowProviderModal(true)}
       />
       {showAppearance && (
         <AppearanceModal
@@ -1250,6 +1270,23 @@ useEffect(() => {
           config={effectiveConfig}
           onFileState={setFileState}
           onClose={() => setShowApiSettings(false)}
+        />
+      )}
+      {showProviderModal && (
+        <ProviderModal
+          registeredNames={(fileState ?? config?.fileState)?.registeredProfiles ?? []}
+          onClose={() => setShowProviderModal(false)}
+          onCreated={(result) => {
+            // 服务端已 reload_config：重拉 /api/config 就能看到新来源，
+            // 不用重启进程（新增来源不改当前生效 profile 与模型，属安全热刷新）。
+            setFileState(result.fileState);
+            setShowProviderModal(false);
+            void getConfig(windowId ?? undefined)
+              .then((next) => setConfig(next))
+              .catch(() => {
+                /* 刷新失败不影响已创建的事实：下次重开窗口自然会读到 */
+              });
+          }}
         />
       )}
 

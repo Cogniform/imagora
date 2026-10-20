@@ -26,6 +26,7 @@ FastAPI 路由（`server.py`）与 CLI（`main.py`）共用的业务层。**不�
 - 注意：**本机覆盖通道**只开这五个键：`ACTIVE_PROFILE`（全局，不带后缀）与 `BASE_URL_` / `MODEL_` / `API_PATH_` / `API_KEY_<PROFILE 大写>`；未设环境变量时回退路径必须与没有覆盖时逐字相同（有单测锁死）。运行时取常量用 `config.xxx`，不用模块顶层 `from core.config import XXX` 的名字（那是导入时快照）
 - 注意：**`ACTIVE_PROFILE` 是其余覆盖键的父级** —— `BASE_URL_<P>` / `MODEL_<P>` 都挂在选中的来源下，所以同一次写请求里既切来源又改字段时，字段键必须按**选中**的来源拼（`MODEL_VOLC`），不能按当前生效的拼，否则切过去后覆盖对不上任何生效的键
 - 注意：`config.json` 是**出厂目录**（git 跟踪），界面永不写；本机偏好写 `.env`。见 [../docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md) 4.4
+- 注意：加载时会把 `providers.local.json` 的本机来源并进 `profiles`（见 [provider_store.py](provider_store.py)）；`reload_config()` 免重启重跑整套求值，新增来源后靠它让目录立刻可见
 
 ### [config_write.py](config_write.py)
 - 职责：配置文件的**行级原地更新**（surgical write-back）—— 只改目标行，用户的注释 / 空行 / 键顺序 / 引号风格逐字保留
@@ -43,9 +44,20 @@ FastAPI 路由（`server.py`）与 CLI（`main.py`）共用的业务层。**不�
 - 注意：令牌**不落盘**（进程内随机，重启即失效）；`GET /api/config` 不校验令牌，只有写操作校验
 - 注意：作用域仅「单人本机」；支持远程访问前必须重新设计安全层（见 [../docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md) 4.3）
 
+### [provider_store.py](provider_store.py)
+- 职责：**本机来源层**（`providers.local.json`，git 忽略）—— 界面上「添加第三方供应商」落盘的地方。`config.py` 加载时把它的 `profiles` 合并进出厂 `config.json` 的 `profiles`，于是 `resolve_profile_config` / `provider_catalog` / `describe_config` / 已注册名单**全部零改动**就认得新来源
+- 关键导出：`validate_name()` / `validate_base_url()` / `resolve_api_paths()`（校验）、`build_profile()`（表单 → profile）、`load_local_providers()` / `merge_profiles()`（读取与合并，宽容坏文件）、`add_provider()` / `remove_provider()` / `write_local_providers()`（落盘）、`PROTOCOL_PRESETS`、`LOCAL_FILE_NAME`、`ProviderError`
+- 被谁依赖：`config.py`（`_merge_local_providers`）、`server.py`（`POST /api/config/providers` 与 `/probe`）
+- 改后必测：`tests/test_core_provider_store.py` + `tests/test_server_config_providers.py`
+- 注意：**为什么单开一个文件而不写 `config.json`**：config.json 是出厂目录（git 跟踪，界面永不写），冲突解决时一句 `git checkout config.json` 会静默丢掉用户刚加的来源；而 `.env` 的覆盖通道只有四个扁平键、且都挂在**已注册** profile 下，凭空造不出新 profile
+- 注意：**密钥绝不进本文件**（只写 `.env` 的 `API_KEY_<NAME>`）—— 混在一起会让「备份配置」等于「备份密钥」，有单测锁死
+- 注意：新建来源**默认不切换**（`activate` 才写 `ACTIVE_PROFILE`）：换 profile = 换整条解析链，属「改了要重启」，与「目录多一条」是两件事
+- 注意：单价一律填 **0**（价目表属出厂目录，界面不编辑；真实单价只有用户知道，不编假数字）——费用显示 0、预算看板不统计这家
+- 注意：读取必须宽容（缺失 / 坏 JSON / 单条非 dict 都只跳过并告警），半截文件不该让服务起不来
+
 ### [api.py](api.py)
 - 职责：上游生图 API 封装（全项目唯一外部网络调用点）
-- 关键导出：`generate_image()`、`format_error()`、`resolve_size_with_ratio()`、`build_default_output_path()`、`write_file_with_retry()`
+- 关键导出：`generate_image()`、`list_models()`（探测某地址的可用模型清单，`GET {base}/models`）、`format_error()`、`resolve_size_with_ratio()`、`build_default_output_path()`、`write_file_with_retry()`
 - 被谁依赖：`server.py`（/api/generate）、`main.py`（gen 子命令）
 - 改后必测：`tests/test_core_api.py` + `tests/test_main_cli.py`
 - 注意：单测已 mock 上游，不花钱；改接口签名要同步 `server.py` 与 `main.py` 两处调用；落盘统一走 `write_file_with_retry`（Windows 杀软/云同步瞬时锁，只重试 PermissionError，见 [../docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md) 9.6）

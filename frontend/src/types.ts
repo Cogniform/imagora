@@ -101,6 +101,45 @@ export interface ConfigWriteResult {
   /** 写后的完整 fileState，前端直接替换，省一次 GET */
   fileState: ConfigFileState;
 }
+
+/** 新增第三方来源的表单（POST /api/config/providers） */
+export interface ProviderDraft {
+  /** profile 名：小写字母开头，后接小写字母/数字/下划线/连字符，最长 32 位 */
+  name: string;
+  /** 显示名称（留空则用 name） */
+  label?: string;
+  baseUrl: string;
+  /** 协议预设：openai（路径带 /v1）/ ark（base_url 已含版本号）/ custom（手填路径） */
+  protocol: "openai" | "ark" | "custom";
+  generationsPath?: string;
+  editsPath?: string;
+  /** 默认模型（留空 = 不建模型目录，界面退化为文本框） */
+  model?: string;
+  modelLabel?: string;
+  /** 密钥：只写 .env 的 API_KEY_<NAME>，绝不进 providers.local.json */
+  apiKey?: string;
+  /** 创建后立即切换为该来源（默认否：换 profile 属「改了要重启」） */
+  activate?: boolean;
+}
+
+/** 新增来源的响应 */
+export interface ProviderCreateResult {
+  ok: boolean;
+  name: string;
+  /** 落盘后的 profile 配置（含 size_options / ratios / models） */
+  profile: Record<string, unknown>;
+  /** 写到哪个文件（providers.local.json 的绝对路径） */
+  path: string;
+  /** 待重启项（切换了 profile 时含 "profile"） */
+  pending: string[];
+  fileState: ConfigFileState;
+}
+
+/** 探测上游模型清单的响应 */
+export interface ProviderProbeResult {
+  ok: boolean;
+  models: { id: string; label: string }[];
+}
 export interface AppConfig {
   sizes: SizeOption[];
   qualities: string[];

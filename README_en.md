@@ -100,6 +100,7 @@ Failed records show why they failed in the panel (missing reference images are c
 | | |
 | --- | --- |
 | Multiple providers | Endpoint, model, sizes, and prices live side by side in one config file and switch with a single line; the title bar shows which one is active |
+| Add your own gateway | Plug icon in the top bar → enter endpoint, key, and model to hook up any OpenAI-compatible API (relay, self-hosted, or official). Endpoint and model go to `providers.local.json`, the key goes to `.env` — both local, neither committed |
 | Switch config in the UI | Model chip in the top bar → config dialog: **pick** a provider and a model from the known lists, written back to your local `.env`; marked as pending restart |
 | Everything else: edit the file | Endpoint / path / key are write-once — use a text editor on `config.json` (factory catalog) and `.env` (local overrides); the dialog and the files touch the **same data**, there is no second copy in the browser |
 

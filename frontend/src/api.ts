@@ -5,6 +5,9 @@ import type {
   GenerateParams,
   GenerationTaskStatus,
   GenerationTaskSnapshot,
+  ProviderCreateResult,
+  ProviderDraft,
+  ProviderProbeResult,
   RefItem,
   WorkflowEdge,
   WorkflowNode,
@@ -92,6 +95,34 @@ export function writeConfig(payload: {
 
 function tokenHeader(): Record<string, string> {
   return configToken ? { "X-Config-Token": configToken } : {};
+}
+
+/** 新增第三方来源（写 providers.local.json + 密钥写 .env）。
+ *
+ *  与 writeConfig 分开是刻意的：那是「改现有来源的某个字段」，这是「造一个新来源」，
+ *  两者落盘的文件不同（.env vs providers.local.json），混在一条路径上迟早出错。 */
+export function createProvider(draft: ProviderDraft): Promise<ProviderCreateResult> {
+  return requestJson<ProviderCreateResult>("/api/config/providers", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...tokenHeader() },
+    body: JSON.stringify(draft),
+  });
+}
+
+/** 探测某个接口地址的可用模型（GET {baseUrl}/models，只读不落盘）。
+ *
+ *  密钥可省略：服务端会按 name 去 .env 里找已存的 API_KEY_<NAME>，
+ *  这样「先存密钥再点获取」和「边填边探」两种顺序都能用。 */
+export function probeProviderModels(payload: {
+  baseUrl: string;
+  apiKey?: string;
+  name?: string;
+}): Promise<ProviderProbeResult> {
+  return requestJson<ProviderProbeResult>("/api/config/providers/probe", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...tokenHeader() },
+    body: JSON.stringify(payload),
+  });
 }
 
 export function getHealthDetails(): Promise<{

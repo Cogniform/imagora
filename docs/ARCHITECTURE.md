@@ -47,7 +47,7 @@ Imagora 是本地单机工具，运行时分三层，方向单一：
 | `core/` | 后端核心逻辑（见 2.2），全部无 HTTP 依赖的纯业务模块；**双件**：规则层 core/AGENTS.md + 文件索引 core/README.md |
 | `frontend/` | React SPA（见 2.3）；**双件**：frontend/AGENTS.md（规则）+ frontend/README.md（索引） |
 | `scripts/` | 独立运维脚本：`migrate.py`（存储一步到最新，默认只报告、`--apply` 才落盘备份校验）；**双件**：scripts/AGENTS.md + scripts/README.md |
-| `tests/` | 后端 pytest（349 用例）+ 前端 vitest（338 用例），全部不调上游；**双件**：tests/AGENTS.md + tests/README.md（逐文件覆盖） |
+| `tests/` | 后端 pytest（412 用例）+ 前端 vitest（358 用例），全部不调上游；**双件**：tests/AGENTS.md + tests/README.md（逐文件覆盖） |
 | `docs/` | 设计圣经 `ARCHITECTURE.md`（本文档）+ `prompt-import-format.md` / `ecom-prompt-import-format.md`（格式规范）；**双件**：docs/AGENTS.md + docs/README.md |
 | `assets/` | **文档配图**（只服务 markdown 渲染，不是应用资源）：`screenshots/` 放 README「界面一览」的界面截图；**双件**：assets/AGENTS.md + assets/README.md |
 | `_ui-audit/` | 开发期 UI 审计图（本机产物，git 忽略）：由 [scripts/capture.py](../scripts/capture.py) 生成，与门面配图 `assets/screenshots/` 不是一回事 |
@@ -164,6 +164,9 @@ Imagora 是本地单机工具，运行时分三层，方向单一：
 
 - `config.json` = **出厂目录**（git 跟踪）：地址 / 模型 / 尺寸价目表 / 能力清单。界面**只读**，永不写。
 - `.env` = **本机覆盖 + 密钥**（git 忽略）：界面**只写这里**。
+- `providers.local.json` = **本机来源层**（git 忽略，`core/provider_store.py`）：用户在界面上「添加第三方供应商」造出来的整条来源（地址 / 路径 / 模型目录 / 标准价目表）。加载时并进 `config.json` 的 `profiles`，**重名时本机优先并告警**。
+
+为什么需要第三层：`config.json` 写不得（见下段），而 `.env` 的覆盖通道只有四个**扁平**键、且都挂在**已注册** profile 下——凭空造不出一个新来源。把整套来源结构塞进 `.env` 等于把 `.env` 变成第二个 config.json，还丢了 git 忽略之外的一切好处。所以单开一个文件：结构自由、git 忽略、坏掉也只是「本机来源丢失」而不会让服务起不来（读取宽容，见 `load_local_providers`）。
 
 为什么界面不写 `config.json`：它是公开仓库里的出厂数据，别人 clone 下来跑。界面写它会让每次改本机偏好都污染 git 状态；
 更严重的是冲突解决时一句 `git checkout config.json` 会**静默丢掉用户的选择**，而且要等到生成报错才发现。
@@ -178,6 +181,8 @@ Imagora 是本地单机工具，运行时分三层，方向单一：
 | 密钥 | `API_KEY_<PROFILE 大写>` |
 
 **只开这四个键**：其余（`ratios` / `size_options` / `models`）是价目表与能力清单，属出厂目录，开放环境变量覆盖会把 `_get()` 变成解析器而收益为零。
+
+**要改价目表 / 模型清单 / 新增整条来源，走 `providers.local.json`，不走环境变量**：覆盖通道只负责「把出厂来源的某一项临时换掉」，造新来源是另一件事（`POST /api/config/providers`）。新建来源的单价一律填 0 —— 真实单价只有用户知道，界面不编假数字，费用显示 0、预算看板不统计这家。
 
 `ACTIVE_PROFILE` 也可在界面切换（写 `.env`，值是 `config.json` 已注册的 profile 名，服务端校验）。它是其余覆盖键的**父级**——`BASE_URL_<PROFILE>` / `MODEL_<PROFILE>` 都挂在选中的 profile 下，所以切换它会换掉整条解析链，同样计入「待重启」。
 **未设置环境变量时回退路径与没有覆盖通道时逐字相同**（`tests/test_core_config_override.py` 锁死）。
@@ -330,6 +335,8 @@ React Flow v12（`@xyflow/react`）受控模式：`nodes` / `edges` 状态由 `C
 | GET | `/api/config` | `?win=`（沿用窗口号，缺省服务端分配） | sizes / qualities / defaultOutputDir / windowId / baseUrl / defaultModel / activeProfile / models / providers / profileView（值 + 来源）/ fileState（文件值 + mtime + pending）；**响应头带 `X-Config-Token`**（写配置用） |
 | POST | `/api/config` | { profile, changes{baseUrl?,apiPath?,model?,apiKey?}, expectedMtimes{env?,config?} } | 写 `.env`（行级原地更新 + 原子写）：{ ok, written, mtimes, pending, fileState }。`changes` 里空字符串 = 不修改该字段；mtime 与磁盘不符 → 409 `stale_file`（绝不静默覆盖） |
 | POST | `/api/config/secret` | { profile, confirm: true } | { ok, cleared, fileState }（清空密钥：把 `.env` 里那一行注释掉，手工去掉 `#` 即恢复；必须显式 confirm） |
+| POST | `/api/config/providers` | { name, label?, baseUrl, protocol(`openai`/`ark`/`custom`), generationsPath?, editsPath?, model?, apiKey?, activate? } | { ok, name, profile, path, pending, fileState }（**新增第三方来源**：profile 写 `providers.local.json`、密钥写 `.env` 的 `API_KEY_<NAME>`；重名 / 名非法 / 地址非法 → 400 `invalid_value`；`activate` 才写 `ACTIVE_PROFILE` 并计入 pending；落盘后服务端 `reload_config()`，不用重启） |
+| POST | `/api/config/providers/probe` | { baseUrl, apiKey?, name? } | { ok, models[{id,label}] }（**探测上游可用模型**：`GET {baseUrl}/models`；不带 apiKey 时按 `name` 回落到 `.env` 里已存的 `API_KEY_<NAME>`；失败 → 400 `probe_failed`；**只读，不写任何文件**） |
 | GET | `/api/window/next` | 无 | { windowId }（原子分配，与 config 共用计数器） |
 | GET | `/api/status` | 无 | { windowCounter }（只读最大已分配编号） |
 | POST | `/api/select-folder` | { current } | { path }（系统弹窗，取消返回原值） |
@@ -362,7 +369,7 @@ React Flow v12（`@xyflow/react`）受控模式：`nodes` / `edges` 状态由 `C
 
 ### 7.2 类型契约
 
-前端类型契约见 `frontend/src/types.ts`（`AppConfig` / `GenerationTaskSnapshot` / `GenerateParams` / `ResultItem` / `AssetEntry` / `WorkflowNode` / `WorkflowEdge`；`GenerationTaskSnapshot` 含可选 `submissionId`）+ `frontend/src/api.ts`（历史/成本：`GenerationHistoryItem` / `HistoryStats` / `BudgetInfo` / `BudgetCheck` / `BatchSubmitItem` / `BatchSubmitResult`），与后端返回结构一一对应。改接口必须同步改这里和对应测试。
+前端类型契约见 `frontend/src/types.ts`（`AppConfig` / `GenerationTaskSnapshot` / `GenerateParams` / `ResultItem` / `AssetEntry` / `WorkflowNode` / `WorkflowEdge`；`GenerationTaskSnapshot` 含可选 `submissionId`）+ `frontend/src/api.ts`（历史/成本：`GenerationHistoryItem` / `HistoryStats` / `BudgetInfo` / `BudgetCheck` / `BatchSubmitItem` / `BatchSubmitResult`），与后端返回结构一一对应（新增来源另有 `ProviderDraft` / `ProviderCreateResult` / `ProviderProbeResult`）。改接口必须同步改这里和对应测试。
 
 ### 7.3 路径与配置基准
 
@@ -501,8 +508,8 @@ React Flow v12（`@xyflow/react`）受控模式：`nodes` / `edges` 状态由 `C
 
 ### 10.1 单元测试
 
-- 后端 pytest：**349 用例**（Windows 含 5 个专属测试，CI 必须 `windows-latest`；默认 tmp 路径的 WinError 5 历史坑已随目录重建恢复，见 AGENTS「活跃坑」）
-- 前端 vitest：**338 用例**；`tsc --noEmit` + `vite build` 成功；`npm run lint` / `uv run ruff check .` 均零告警
+- 后端 pytest：**412 用例**（Windows 含 5 个专属测试，CI 必须 `windows-latest`；默认 tmp 路径的 WinError 5 历史坑已随目录重建恢复，见 AGENTS「活跃坑」）
+- 前端 vitest：**358 用例**；`tsc --noEmit` + `vite build` 成功；`npm run lint` / `uv run ruff check .` 均零告警
 - 文档完整性：`python scripts/check_docs.py`（相对链接可解析 + AGENTS/tests-README/ARCHITECTURE/frontend-README 的测试计数与源码一致；改任何文档后必跑，见 [scripts/README.md](../scripts/README.md)）
 - **逐文件用例 / 覆盖范围 / 变更影响路由（完整表）见 [tests/README.md](../tests/README.md) 文件索引**
 

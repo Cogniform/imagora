@@ -65,6 +65,60 @@ def build_default_output_path(output_path, output_format):
     )
 
 
+def list_models(base_url: str, api_key: str, timeout: float = 15.0) -> list[str]:
+    """探测上游的模型清单（GET {base_url}/models），返回模型 id 列表。
+
+    这是「添加第三方供应商」弹窗里「获取可用模型」的落点。放在 core/api.py 是因为
+    这里是全项目**唯一**的外部网络调用模块（见 core/README.md）——server.py 只做
+    参数校验与响应整形，不直接碰 requests。
+
+    上游兼容性：OpenAI 风格的 `{"data": [{"id": ...}]}` 最常见；也容忍
+    `{"models": [...]}` / 裸数组。拿不到任何 id 时不报错，返回空列表 —— 界面据此
+    提示「该来源没报模型，可手填」，这是合法路径而不是失败（模型清单本来就是可选的）。
+
+    Raises:
+        RuntimeError: 网络错误 / 非 200 / 响应不是 JSON。消息面向用户，可直接展示。
+    """
+    url = f"{base_url.rstrip('/')}/models"
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    try:
+        response = requests.get(url, headers=headers, timeout=timeout)
+    except requests.RequestException as e:
+        raise RuntimeError(f"连接不上该地址：{format_error(e)}") from e
+    if response.status_code != 200:
+        detail = (response.text or "").strip()[:200]
+        raise RuntimeError(f"该地址返回 HTTP {response.status_code}：{detail}")
+    try:
+        payload = response.json()
+    except ValueError as e:
+        raise RuntimeError(f"该地址返回的不是 JSON：{format_error(e)}") from e
+
+    items = []
+    if isinstance(payload, list):
+        items = payload
+    elif isinstance(payload, dict):
+        for key in ("data", "models"):
+            value = payload.get(key)
+            if isinstance(value, list):
+                items = value
+                break
+
+    ids: list[str] = []
+    for item in items:
+        if isinstance(item, str):
+            ids.append(item)
+        elif isinstance(item, dict):
+            # 兼容 {"id": ...} / {"name": ...} / {"model": ...}
+            for key in ("id", "name", "model"):
+                value = item.get(key)
+                if isinstance(value, str) and value:
+                    ids.append(value)
+                    break
+    # 去重保序：上游常把同一模型重复列出
+    seen: set[str] = set()
+    return [mid for mid in ids if not (mid in seen or seen.add(mid))]
+
+
 def write_file_with_retry(
     output_path: str,
     data: bytes,

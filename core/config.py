@@ -21,8 +21,16 @@ import sys
 import warnings
 from pathlib import Path
 
+from core import provider_store
+
 # ---------- 工作根（启动时固定一次，后续路径统一以此为基准） ----------
 WORK_ROOT = Path.cwd()
+
+# 应用根目录：config.json / .env / providers.local.json 三者同级。
+# 打包成 exe 后 cwd 可能是任意目录，此时以可执行文件所在目录为准。
+_APP_ROOT = Path(os.environ.get("IMAGORA_APP_ROOT", Path.cwd()))
+if getattr(sys, "frozen", False):
+    _APP_ROOT = Path(sys.executable).resolve().parent
 
 # ---------- 内置默认值（兜底，profile 未覆盖的字段回退到这里） ----------
 _DEFAULTS = {
@@ -86,6 +94,66 @@ def _load_config_file() -> dict:
 
 _cfg = _load_config_file()
 
+# ---------- 本机自定义来源（providers.local.json）合并进出厂 profiles ----------
+# 「添加第三方供应商」写不进 config.json（git 跟踪，界面永不写），也塞不进 .env
+# （覆盖通道只有 4 个扁平键，且都挂在已注册 profile 下，造不出新 profile）。
+# 因此本机新增的来源单独存 providers.local.json（git 忽略），在这里合并。
+#
+# 合并后 _cfg["profiles"] 就是**完整目录**：resolve_profile_config /
+# provider_catalog / describe_config / registeredProfiles 全部零改动自动认新来源。
+LOCAL_PROVIDERS_FILE = _APP_ROOT / provider_store.LOCAL_FILE_NAME
+
+
+def _merge_local_providers(cfg: dict) -> dict:
+    """把本机来源并进 cfg（返回新的 cfg，不改入参）。"""
+    if not isinstance(cfg, dict):
+        return cfg
+    local = provider_store.load_local_providers(LOCAL_PROVIDERS_FILE)
+    if not local["profiles"]:
+        return cfg
+    merged = dict(cfg)
+    merged["profiles"] = provider_store.merge_profiles(
+        cfg.get("profiles") or {}, local["profiles"]
+    )
+    return merged
+
+
+_cfg = _merge_local_providers(_cfg)
+
+
+def reload_config() -> None:
+    """重新读盘并刷新全部模块级常量（新建来源后调用，免重启）。
+
+    为什么要「免重启」：配置写入的既有语义是「一律标记待重启」（全是 import 时
+    求值的模块级常量，没有可热加载的部分，见 docs/ARCHITECTURE.md 4.4）。但新增
+    一个**来源**不同 —— 它不改变当前生效的 profile 与模型，只是让目录里多一条。
+    不刷新的话用户刚加的来源在界面上看不见，得关掉重开才出现，体验断层。
+
+    实现上就是把「导入时做过的那串求值」重跑一遍。顺序不能乱：
+    profile 解析 → 环境覆盖 → 各常量。
+    """
+    global _cfg, ACTIVE_PROFILE, _profile
+    global BASE_URL, API_PATHS, PROFILE_LABEL
+    global MODELS, RATIOS, SIZE_OPTIONS, QUALITY_OPTIONS
+    global DEFAULT_MODEL, DEFAULT_QUALITY, DEFAULT_SIZE, DEFAULT_TIER
+
+    _cfg = _merge_local_providers(_load_config_file())
+    _load_env_file()
+    ACTIVE_PROFILE, _profile = resolve_profile_config(
+        _cfg, os.environ.get("ACTIVE_PROFILE")
+    )
+    BASE_URL = _get("base_url")
+    API_PATHS = _get("api_paths")
+    PROFILE_LABEL = _get("label") if isinstance(_get("label"), str) else ""
+    MODELS = normalize_models(_get("models"))
+    RATIOS = _get("ratios")
+    SIZE_OPTIONS = _get("size_options")
+    QUALITY_OPTIONS = _get("quality_options")
+    DEFAULT_MODEL = _get("default_model")
+    DEFAULT_QUALITY = _get("default_quality")
+    DEFAULT_SIZE = _get("default_size")
+    DEFAULT_TIER = _get("default_tier")
+
 
 def resolve_profile_config(
     cfg: dict, env_active: str | None
@@ -117,9 +185,7 @@ def unknown_profile_keys(profile: dict) -> list[str]:
 
 
 # ---------- .env 加载（密钥与本地覆盖；不覆盖已存在的环境变量） ----------
-_APP_ROOT = Path(os.environ.get("IMAGORA_APP_ROOT", Path.cwd()))
-if getattr(sys, "frozen", False):
-    _APP_ROOT = Path(sys.executable).resolve().parent
+# _APP_ROOT 在文件顶部定义（providers.local.json 的合并也要用它，故提前）。
 ENV_FILE_PATH = _APP_ROOT / ".env"
 
 

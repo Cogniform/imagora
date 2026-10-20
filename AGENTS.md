@@ -22,14 +22,15 @@
 - 加/改**模块容器**（顶栏、卡片、工具栏、画布主体、弹窗这类带表面的块）→ 先按 [frontend/README.md](frontend/README.md)「样式体系」的**表面分层**归角色（`base` 骨架 / `card` 衬底 / `panel` 台面 / `float` 浮层 / `inset` 内嵌 / `plain` 中性），底色只能来自 [surface.ts](frontend/src/surface.ts)，**TSX 挂 `.surface-*` 角色类、别写 `bg-white`，也不写硬编码 `blur()`** → 跑 `npm test`（[surfaceAudit.test.ts](frontend/src/surfaceAudit.test.ts) 会红）→ 判据：改 `--accent-hue` 后该容器背景必须跟着变（画布主体除外）、采样像素离白 >6/255、`backdropFilter` 恒 `none` → 防错条见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) 9.4 第 12 条
 - 改**弹窗内的浮层 / Esc 行为**（下拉、日期选择、自绘浮层）→ 浮层开关必须配 `popupLayer` 的 push/pop，否则 Esc 会连弹窗一起关掉 → 跑 `pytest` 无关、跑 `npm test`（`popupLayer.test.ts` + `ModalShell.test.tsx`）→ 防错条见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) 9.4 第 13 条
 - 改配置加载 / 本机覆盖通道 / 配置写入接口 → 查 [core/README.md](core/README.md) 的 config.py、config_write.py、config_guard.py 三节 → 跑 `pytest tests/test_core_config.py tests/test_core_config_override.py tests/test_core_config_write.py tests/test_server_config_write.py tests/test_server_config_profile.py` → 契约同步 [docs/config-write-api-design.md](docs/config-write-api-design.md)
+- 改**本机来源层**（`providers.local.json` / 「添加第三方供应商」）→ 查 [core/README.md](core/README.md) 的 provider_store.py 节 → 跑 `pytest tests/test_core_provider_store.py tests/test_server_config_providers.py` → 前端跑 `npm test`（`ProviderModal.test.tsx`）→ **三条不许破的边界**：密钥只进 `.env` 不进本机来源文件、新建来源默认不切换、校验失败必须不落盘
 - 改 [scripts/migrate.py](scripts/migrate.py) 或存储格式 → 查 [scripts/README.md](scripts/README.md) → 跑 `pytest tests/test_core_migrate.py` → **必须先 Handoff 确认（硬边界）**
 - 改测试文件 → 查 [tests/README.md](tests/README.md) → 按模块筛选跑 → 增/删用例后更新本文档「仪表盘」数字
 
 ## 仪表盘（最近验证快照，2026-09-29，main）
 
-- 后端 pytest：**349 passed**（命令与逐文件覆盖见 [tests/README.md](tests/README.md)）
-- 前端 vitest：**338 passed**；tsc + vite build 成功；lint / ruff 零告警（命令见 [frontend/README.md](frontend/README.md)、[tests/README.md](tests/README.md)）
-- E2E [verify_canvas.py](frontend/e2e/verify_canvas.py)：**36/36 PASS**（前置：起 7860 服务，见 [frontend/README.md](frontend/README.md)）
+- 后端 pytest：**412 passed**（命令与逐文件覆盖见 [tests/README.md](tests/README.md)）
+- 前端 vitest：**358 passed**；tsc + vite build 成功；lint / ruff 零告警（命令见 [frontend/README.md](frontend/README.md)、[tests/README.md](tests/README.md)）
+- E2E [verify_canvas.py](frontend/e2e/verify_canvas.py)：**36/36 PASS**；[verify_provider.py](frontend/e2e/verify_provider.py)：**29/29 PASS**（前置：起 7860 服务，见 [frontend/README.md](frontend/README.md)）
 - 迁移（v1→v2 / .canvas→.assets / 账本回填）已完成，日常无需执行（见 [scripts/README.md](scripts/README.md)）
 
 ## 构建时机（三套构建互不相干，别混着做）

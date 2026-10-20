@@ -25,6 +25,8 @@ API:
   GET  /api/canvas/workflow/load      按名加载工作流
   POST /api/canvas/recovery/save      创建恢复快照
   GET  /api/canvas/recovery/latest    读取最近恢复快照
+  POST /api/config/providers          新增第三方来源（写 providers.local.json）
+  POST /api/config/providers/probe    探测该来源的可用模型（GET {base}/models）
 """
 
 import ctypes
@@ -44,8 +46,17 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from core import canvas, config, config_guard, config_write, cost, graphstore, history
-from core.api import format_error, generate_image
+from core import (
+    canvas,
+    config,
+    config_guard,
+    config_write,
+    cost,
+    graphstore,
+    history,
+    provider_store,
+)
+from core.api import format_error, generate_image, list_models
 from core.canvas import safe_ref_path_allowlist
 from core.config import (
     ACTIVE_PROFILE,
@@ -404,26 +415,6 @@ def _config_file_state() -> dict:
         "pending": pending,
     }
 
-    from core.config import get_api_key_source
-
-    key_name = names.get("apiKey")
-    key_in_file = bool(env_values.get(key_name or ""))
-    return {
-        "envPath": str(_env_path()),
-        "configPath": str(config._CONFIG_FILE),
-        "profile": ACTIVE_PROFILE,
-        "envNames": names,
-        "mtimes": _mtimes(),
-        "fields": {
-            "baseUrl": {"fileValue": file_value_for("baseUrl")},
-            "apiPath": {"fileValue": file_value_for("apiPath")},
-            "model": {"fileValue": file_value_for("model")},
-            # 密钥永不回传值；只报文件里有没有 + 当前生效来源
-            "apiKey": {"configured": key_in_file, "source": get_api_key_source()},
-        },
-        "pending": pending,
-    }
-
 
 @app.post("/api/config")
 def write_config(body: dict = Body(...)):
@@ -571,6 +562,111 @@ def clear_config_secret(body: dict = Body(...)):
             status_code=500, detail={"error": "write_failed", "reason": str(exc)}
         ) from exc
     return {"ok": True, "cleared": "apiKey", "fileState": _config_file_state()}
+
+
+# ---------- 第三方来源（providers.local.json） ----------
+# 为什么单开一个文件而不是写 config.json：config.json 是出厂目录（git 跟踪，界面永不写），
+# 冲突解决时一句 `git checkout config.json` 会静默丢掉用户刚加的来源。详见
+# core/provider_store.py 的模块 docstring 与 docs/ARCHITECTURE.md 4.4。
+
+
+def _provider_key_name(name: str) -> str:
+    """新来源的密钥键名（沿用 API_KEY_<PROFILE 大写> 的既有约定）。"""
+    return config_guard.profile_env_names(name)["apiKey"]
+
+
+def _reject(error: str, reason: str, status_code: int = 400) -> HTTPException:
+    return HTTPException(
+        status_code=status_code, detail={"error": error, "reason": reason}
+    )
+
+
+@app.post("/api/config/providers")
+def add_config_provider(body: dict = Body(...)):
+    """新增第三方来源：写 providers.local.json，并把密钥写进 .env。
+
+    请求体：
+      {name, label?, baseUrl, protocol?: "openai"|"ark"|"custom",
+       generationsPath?, editsPath?, model?, modelLabel?, apiKey?, activate?: bool}
+
+    响应：{ok, name, profile, path, pending, fileState}
+
+    两点刻意的设计：
+    1. **密钥单独走 .env**，不进 providers.local.json —— 两者各自备份 / 各自忽略，
+       混在一起会让「备份配置」= 备份密钥。
+    2. **默认不自动切换**（activate=false）。切换 = 写 ACTIVE_PROFILE = 换掉整条解析链，
+       属「改了要重启」的那类改动；新建来源只是让目录多一条，两件事不该捆在一起。
+       需要切换时前端传 activate=true，响应里 pending 会带上 "profile"。
+    """
+    payload = body if isinstance(body, dict) else {}
+    registered = dict(config._cfg.get("profiles") or {})
+    try:
+        name, profile, path = provider_store.add_provider(
+            config.LOCAL_PROVIDERS_FILE, payload, registered=registered
+        )
+    except provider_store.ProviderError as exc:
+        raise _reject("invalid_value", str(exc)) from exc
+    except OSError as exc:
+        raise _reject("write_failed", str(exc), 500) from exc
+
+    api_key = str(payload.get("apiKey") or "").strip()
+    if api_key:
+        env_path = config_guard.safe_profile_path(config.WORK_ROOT, name)
+        try:
+            config_write.update_env_file(env_path, {_provider_key_name(name): api_key})
+        except OSError as exc:
+            raise _reject("write_failed", str(exc), 500) from exc
+
+    if payload.get("activate") is True:
+        env_path = config_guard.safe_profile_path(config.WORK_ROOT, name)
+        try:
+            config_write.update_env_file(env_path, {"ACTIVE_PROFILE": name})
+        except OSError as exc:
+            raise _reject("write_failed", str(exc), 500) from exc
+
+    # 目录要立刻可见：重读盘刷新模块级常量（当前生效 profile 未变，属安全热刷新）
+    config.reload_config()
+    state = _config_file_state()
+    return {
+        "ok": True,
+        "name": name,
+        "profile": profile,
+        "path": str(path),
+        "pending": state["pending"],
+        "fileState": state,
+    }
+
+
+@app.post("/api/config/providers/probe")
+def probe_config_provider(body: dict = Body(...)):
+    """探测某个接口地址的可用模型（GET {baseUrl}/models）。
+
+    请求体：{baseUrl, apiKey?, name?}
+      - apiKey 省略时，按 name 去 .env / 环境变量里找已有的 API_KEY_<NAME>。
+        这样「先存好密钥再点获取模型」和「边填边探」两种顺序都能用。
+
+    响应：{ok, models: [{id, label}]}
+
+    探测失败一律 400 + 可读原因，**不写任何文件**（这个接口是只读的）。
+    网络调用落在 core/api.py（全项目唯一外部网络调用模块），server.py 只做整形。
+    """
+    payload = body if isinstance(body, dict) else {}
+    try:
+        base_url = provider_store.validate_base_url(payload.get("baseUrl"))
+    except provider_store.ProviderError as exc:
+        raise _reject("invalid_value", str(exc)) from exc
+
+    api_key = str(payload.get("apiKey") or "").strip()
+    if not api_key:
+        name = str(payload.get("name") or "").strip()
+        if name:
+            api_key = (os.environ.get(_provider_key_name(name)) or "").strip()
+
+    try:
+        ids = list_models(base_url, api_key)
+    except RuntimeError as exc:
+        raise _reject("probe_failed", str(exc)) from exc
+    return {"ok": True, "models": [{"id": mid, "label": mid} for mid in ids]}
 
 
 @app.get("/api/window/next")

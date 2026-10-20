@@ -15,7 +15,8 @@
 #    实测过：`--locked` 下 job 级 UV_INDEX_URL 覆盖不了锁里记的地址（锁里是绝对 URL，
 #    不是 index 名），因此「锁走官方 + 装走镜像」在锁定安装下做不到。
 #    本地要加速只能改本机（会同时让锁文件回到镜像源，别把那种锁提交上来）。
-# 4. E2E 目前（verify_canvas.py，36 断言）只测画布交互，不触发生成接口，
+# 4. E2E 目前（verify_canvas.py 36 断言 + verify_provider.py 29 断言）只测界面交互，
+#    不触发生成接口（verify_provider.py 会真实写 providers.local.json，但不调生图上游），
 #    因此无需 mock 上游 API。未来若 E2E 覆盖「生成→回流」链路，必须先
 #    mock core/api.py 的 generate_image（monkeypatch 返回固定图），
 #    严禁 CI 直连真实上游（花钱）。落地前为 AGENTS.md「待办」。
@@ -134,6 +135,11 @@ jobs:
               exit 1
             }
             .\.venv\Scripts\python.exe frontend\e2e\verify_canvas.py
+            # 「添加第三方供应商」回归：真实点按钮 + 真实落盘 providers.local.json。
+            # 探测模型那步刻意打一个不存在的域名（预期 400），不花外部配额。
+            # 脚本自己用随机 Provider ID，跑完不留残留（文件在 git 忽略里，但仍是干净起见）。
+            .\.venv\Scripts\python.exe frontend\e2e\verify_provider.py
+            Remove-Item providers.local.json -Force -ErrorAction SilentlyContinue
           } finally {
             Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
           }
