@@ -230,20 +230,46 @@ def main() -> int:
             page.get_by_role("button", name="删除这个来源").count() == 0,
         )
 
+        # 当前生效来源由服务端决定（.env / config.json），不能在脚本里写死名字：
+        # 换台机器、换个 ACTIVE_PROFILE 就假失败。这里现读一次。
         print("[8] 当前生效的来源不可删")
+        cfg = page.evaluate("() => fetch('/api/config?win=1').then(r => r.json())")
+        active = cfg["fileState"]["profile"]
+        active_local = any(
+            p["name"] == active and p.get("local") is True
+            for p in (cfg.get("providers") or [])
+        )
         page.locator("#cfg-profile").click()
         page.wait_for_selector('[role="listbox"]', timeout=3000)
-        page.get_by_role("option", name="api", exact=True).click()
+        page.get_by_role("option", name=active, exact=True).click()
         page.wait_for_timeout(300)
         in_use_btn = page.get_by_role("button", name="删除这个来源")
-        if in_use_btn.count() == 1:
-            check("生效中来源的删除按钮禁用", in_use_btn.is_disabled())
+        if active_local:
+            # 本机来源 + 正在生效 → 有按钮但禁用，且给出原因
+            check(f"生效中本机来源「{active}」的删除按钮禁用", in_use_btn.is_disabled())
             check(
                 "生效中来源有原因提示",
                 page.get_by_text("正在使用中，请先切换到别的来源再删除").count() >= 1,
             )
         else:
-            check("生效中来源不显示删除按钮（或已非本机来源）", True)
+            # 出厂来源 + 正在生效 → 干脆不给删除入口（出厂来源本就不可删）
+            check(f"生效中出厂来源「{active}」没有删除按钮", in_use_btn.count() == 0)
+            # 换个本机来源验证「非生效时可删」这条对照仍在（用已存在的本机来源）
+            local_names = [
+                p["name"]
+                for p in (cfg.get("providers") or [])
+                if p.get("local") is True and p["name"] != active
+            ]
+            if local_names:
+                page.locator("#cfg-profile").click()
+                page.wait_for_selector('[role="listbox"]', timeout=3000)
+                page.get_by_role("option", name=local_names[0], exact=True).click()
+                page.wait_for_timeout(300)
+                other_btn = page.get_by_role("button", name="删除这个来源")
+                check(
+                    f"非生效的本机来源「{local_names[0]}」可删（对照）",
+                    other_btn.count() == 1 and not other_btn.is_disabled(),
+                )
 
         page.screenshot(path=str(ROOT / "_ui-audit" / "provider-04-in-use.png"))
         browser.close()

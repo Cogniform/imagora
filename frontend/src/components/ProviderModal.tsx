@@ -3,6 +3,7 @@ import { useMemo, useRef, useState } from "react";
 import { createProvider, probeProviderModels } from "../api";
 import { errMessage } from "../format";
 import type { ProviderDraft, ProviderCreateResult } from "../types";
+import { Field } from "./Field";
 import { ModalShell } from "./ModalShell";
 import { Select } from "./Select";
 
@@ -48,6 +49,10 @@ interface ProviderModalProps {
  *  那个是**选择器**（在已有来源里选），这个是**添加器**（造一个新来源）。
  *  合成一个弹窗会让「保存」同时意味着「改值」和「建条目」，两种心智模型混在
  *  一个按钮上迟早误操作，所以宁可多一个入口。
+ *
+ *  排版统一走 Field：label + 控件 + 单行消息槽位。此前每个字段各写一遍
+ *  `<label>` / `<p className="text-caption">`，hint 与 error 还常常同时出现，
+ *  竖向空间被吃掉一截；Field 让「至多一行提示」成为结构保证。
  */
 export function ProviderModal({ registeredNames, onClose, onCreated }: ProviderModalProps) {
   const [name, setName] = useState("");
@@ -205,10 +210,12 @@ export function ProviderModal({ registeredNames, onClose, onCreated }: ProviderM
         {/* ID 与显示名称并排：两个都是短标识，竖着排会让整列超出可视高度，
             逼用户滚动才能看到底部的「创建后立即切换」。 */}
         <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="field-label mb-2" htmlFor="pv-name">
-              Provider ID
-            </label>
+          <Field
+            id="pv-name"
+            label="Provider ID"
+            hint=".env 里键名是 API_KEY_<ID 大写>"
+            error={nameIssue}
+          >
             <input
               id="pv-name"
               ref={nameRef}
@@ -216,17 +223,9 @@ export function ProviderModal({ registeredNames, onClose, onCreated }: ProviderM
               value={name}
               onChange={(event) => setName(event.target.value)}
               placeholder="acme-gateway"
-              aria-invalid={nameIssue !== null}
-              aria-describedby="pv-name-hint"
             />
-            <p id="pv-name-hint" className={`text-caption mt-2 ${nameIssue ? "text-red-600" : ""}`}>
-              {nameIssue ?? ".env 里键名是 API_KEY_<ID 大写>"}
-            </p>
-          </div>
-          <div>
-            <label className="field-label mb-2" htmlFor="pv-label">
-              显示名称
-            </label>
+          </Field>
+          <Field id="pv-label" label="显示名称" hint="只影响界面显示">
             <input
               id="pv-label"
               className="field-control text-sm"
@@ -234,61 +233,45 @@ export function ProviderModal({ registeredNames, onClose, onCreated }: ProviderM
               onChange={(event) => setLabel(event.target.value)}
               placeholder="留空则用 Provider ID"
             />
-            <p className="text-caption mt-2">只影响界面显示</p>
-          </div>
+          </Field>
         </div>
 
-        <div className="mt-4">
-          <label className="field-label mb-2" htmlFor="pv-url">
-            API 地址
-          </label>
+        <Field id="pv-url" label="API 地址" hint="末尾斜杠会被自动去掉" error={urlIssue} className="mt-4">
           <input
             id="pv-url"
             className="field-control text-sm font-mono"
             value={baseUrl}
             onChange={(event) => setBaseUrl(event.target.value)}
             placeholder="https://gateway.example/v1"
-            aria-invalid={urlIssue !== null}
           />
-          <p className={`text-caption mt-2 ${urlIssue ? "text-red-600" : ""}`}>
-            {urlIssue ?? "末尾斜杠会被自动去掉"}
-          </p>
-        </div>
+        </Field>
 
-        <div className="mt-4">
-          <label className="field-label mb-2" htmlFor="pv-protocol">
-            API 协议
-          </label>
+        <Field
+          id="pv-protocol"
+          label="API 协议"
+          hint={PROTOCOLS.find((item) => item.value === protocol)?.hint}
+          className="mt-4"
+        >
           <Select
             id="pv-protocol"
             options={PROTOCOLS.map((item) => ({ value: item.value, label: item.label }))}
             value={protocol}
             onChange={(value) => setProtocol(value as ProviderDraft["protocol"])}
           />
-          <p className="text-caption mt-2">
-            {PROTOCOLS.find((item) => item.value === protocol)?.hint}
-          </p>
-        </div>
+        </Field>
 
         {protocol === "custom" && (
           <div className="mt-4 grid grid-cols-2 gap-3">
-            <div>
-              <label className="field-label mb-2" htmlFor="pv-gen">
-                生成路径
-              </label>
+            <Field id="pv-gen" label="生成路径" error={pathIssue}>
               <input
                 id="pv-gen"
                 className="field-control text-sm font-mono"
                 value={generationsPath}
                 onChange={(event) => setGenerationsPath(event.target.value)}
                 placeholder="/v1/images/generations"
-                aria-invalid={pathIssue !== null}
               />
-            </div>
-            <div>
-              <label className="field-label mb-2" htmlFor="pv-edits">
-                图生图路径
-              </label>
+            </Field>
+            <Field id="pv-edits" label="图生图路径" hint="留空则同生成路径">
               <input
                 id="pv-edits"
                 className="field-control text-sm font-mono"
@@ -296,15 +279,11 @@ export function ProviderModal({ registeredNames, onClose, onCreated }: ProviderM
                 onChange={(event) => setEditsPath(event.target.value)}
                 placeholder="留空则同生成路径"
               />
-            </div>
-            {pathIssue && <p className="text-caption col-span-2 text-red-600">{pathIssue}</p>}
+            </Field>
           </div>
         )}
 
-        <div className="mt-4">
-          <label className="field-label mb-2" htmlFor="pv-key">
-            API 密钥
-          </label>
+        <Field id="pv-key" label="API 密钥" hint="只写 .env，不进版本库" className="mt-4">
           <input
             id="pv-key"
             type="password"
@@ -314,21 +293,18 @@ export function ProviderModal({ registeredNames, onClose, onCreated }: ProviderM
             placeholder="sk-...（可留空，稍后写 .env）"
             autoComplete="off"
           />
-          <p className="text-caption mt-2">只写 .env，不进版本库</p>
-        </div>
+        </Field>
 
-        <div className="mt-4">
-          <div className="mb-2 flex items-center justify-between gap-3">
-            <label className="field-label" htmlFor="pv-model">
-              默认模型
-            </label>
+        <Field
+          id="pv-model"
+          label="默认模型"
+          hint={modelHint}
+          error={probeError}
+          className="mt-4"
+          action={
             <div className="flex items-center gap-1">
               {modelOptions.length > 0 && (
-                <button
-                  type="button"
-                  className="btn-ghost btn-xs"
-                  onClick={toggleManualModel}
-                >
+                <button type="button" className="btn-ghost btn-xs" onClick={toggleManualModel}>
                   {showSelect ? "手填" : "从清单选"}
                 </button>
               )}
@@ -341,9 +317,18 @@ export function ProviderModal({ registeredNames, onClose, onCreated }: ProviderM
                 {probing ? "获取中…" : "获取可用模型"}
               </button>
             </div>
-          </div>
+          }
+        >
           {showSelect ? (
-            <Select id="pv-model" options={modelOptions} value={model} onChange={setModel} />
+            // searchable：中转站常报出几十上百个模型 ID，不给搜索就只能盲滚
+            <Select
+              id="pv-model"
+              options={modelOptions}
+              value={model}
+              onChange={setModel}
+              searchable
+              emptyLabel="没有匹配的模型 ID"
+            />
           ) : (
             <input
               id="pv-model"
@@ -353,10 +338,7 @@ export function ProviderModal({ registeredNames, onClose, onCreated }: ProviderM
               placeholder="gpt-image-2.5（可留空，稍后在生图 API 配置里填）"
             />
           )}
-          <p className={`text-caption mt-2 ${probeError ? "text-amber-700" : ""}`}>
-            {probeError ?? modelHint}
-          </p>
-        </div>
+        </Field>
 
         {error && (
           <div role="status" className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">

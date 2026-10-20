@@ -10,6 +10,9 @@ release/
 *.spec
 *.egg-info/
 .env
+# .env 的原子写备份：core/config_write.py 改 .env 前会先 copy 一份 .bak。
+# 它和 .env 一样含明文密钥，只忽略 .env 会漏掉它 —— 界面上每改一次密钥就多一个未忽略的含密文件。
+.env.bak
 
 *.log
 frontend/node_modules/

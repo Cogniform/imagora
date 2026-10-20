@@ -8,7 +8,7 @@ React 19 + TypeScript + Vite + Tailwind v4 + React Flow（`@xyflow/react`）。�
 npm install
 npm run dev        # 开发模式（热更新；需后端已启动，见下）
 npm run build      # tsc --noEmit + vite build → dist/（git 忽略，由后端服务托管）
-npm test           # vitest run（360 用例）
+npm test           # vitest run（388 用例）
 npm run lint       # eslint
 npx tsc --noEmit   # 类型检查
 ```
@@ -26,6 +26,15 @@ E2E（画布交互回归，真实浏览器；36 断言）：
 #   .\.venv\Scripts\python.exe -m pip install playwright
 #   .\.venv\Scripts\python.exe -m playwright install chromium
 .\.venv\Scripts\python.exe ..\frontend\e2e\verify_canvas.py
+```
+
+E2E 报 `Executable doesn't exist` 但机器上其实装了别的修订版 Chromium（playwright 升级后旧版不会自动删）时，用垫片跑，不改脚本：
+
+```powershell
+# 自动挑 %LOCALAPPDATA%\ms-playwright 下修订号最大的那份
+.\.venv\Scripts\python.exe ..\frontend\e2e\_run_with_local_chromium.py ..\frontend\e2e\verify_provider.py
+# 或显式指定
+$env:IMAGORA_CHROMIUM = 'C:\path\to\chrome.exe'
 ```
 
 ## 该目录特有坑
@@ -142,6 +151,16 @@ E2E（画布交互回归，真实浏览器；36 断言）：
 - `clearConfigSecret()`：清空密钥（独立出口，必须 `confirm: true`）
 - 契约见 [../docs/config-write-api-design.md](../docs/config-write-api-design.md)
 
+### [rankByName.ts](src/rankByName.ts)
+- 职责：下拉搜索的排序算法（`rankByName(items, rawQuery)`）——有序子序列匹配 + 边界加分（`boundaryBonus` 权重 8：匹配点落在 `-_. /` 或词首即加分）+ 对齐度 DP（相邻 +4、跳跃 `+1-index`、行首 `-index`），三级排序 = 前缀命中优先 → 分数降序 → 原序升序
+- 被谁依赖：`components/Select.tsx`（`searchable` 时的过滤与排序）
+- 注意：**不是 substring 过滤**。模型 ID 动辄 `gpt-image-2.5-flare`，用户打 `flare` 或 `gi25` 都要命中，substring 做不到。比对前先走 `foldModelId()` 再 `toLowerCase()`——中转站会把 `gpt‑image‑2.5` 登记成 U+2011 连字符，用户半角输入不折叠永远搜不到（`foldModelId` 取自 [apiCatalog.ts](src/apiCatalog.ts)，本模块不复制第二份）。空 query 直接返回**同一数组引用**（零开销，单测用 `toBe` 钉住）
+
+### [optionGroups.ts](src/optionGroups.ts)
+- 职责：把扁平选项按 `group: {id, label}` 归组（`groupOptions(items)` → `OptionGroup<T>[]`）；组间按 id 首次出现顺序、组内保持源顺序、行就是入参对象本身（不拷贝）
+- 被谁依赖：`components/Select.tsx`
+- 注意：无 `group` 的项归入 id `""` 的兜底组——**全部无分组时返回单个组且标题为空串**（渲染层据此不出标题）；混合分组时兜底组**排最后**。分组只影响渲染，不影响键盘导航（`activeIndex` 始终是扁平可见列表下标，上下键跨组连续、不会卡在标题上）
+
 ### [popupLayer.ts](src/popupLayer.ts)
 - 职责：**浮层计数**——`pushPopup` / `popPopup` / `hasOpenPopup` / `resetPopupCount`
 - 解决的问题：`.modal-shell` 的 Esc 监听挂在 document 的 **capture 阶段**，比浮层自己的 `onKeyDown` 先跑。不判浮层的话，展开下拉时按 Esc 会**连弹窗一起关掉** —— 用户的手感是「我只想收起下拉，结果正在填的窗口没了」。`Select` 展开时 push、收起时 pop，`ModalShell` 关窗前先问 `hasOpenPopup()`，因此需要两次 Esc（先收浮层、再关弹窗）
@@ -216,8 +235,10 @@ E2E（画布交互回归，真实浏览器；36 断言）：
 - [`HistoryGallery.tsx`](src/components/HistoryGallery.tsx) — 生成历史面板：**分页滚动加载**（首屏 60 条，滚动接近底部 600px 内自动追加、未占满视口自动续拉，按钮仅兜底，DOM 恒在单页数量级）两栏网格卡片（160px 结果图 | 提示词 2 行截断随容器宽 | 56px 参考图换行 | 按钮底部对齐横排）；提示词超 2 行时悬浮浮层补全（仅截断弹、宽固定 80vw 水平居中左/右各留 10vw、高随行数自动长、垂直跟随鼠标、无滚动条）；搜索/状态筛选重置到第 0 页；双击放大预览 / 单击新窗口开原图 / 导入当前画布；每行按钮与成败无关（复制提示词 / 打开目录 / 导入当前画布）；参考图已丢失的失败记录只给一条条数提示（无法还原，无重跑入口）
 - [`CostBoard.tsx`](src/components/CostBoard.tsx) — 成本看板条（历史面板顶部）：今日/累计花费、成功率、失败数、成功平均耗时、按尺寸分布 + 本机预算（日预算 / 单次上限，0 = 不限）编辑保存；数据来自 `/api/history/stats`，保存走 `/api/budget`
 - [`PromptImportModal.tsx`](src/components/PromptImportModal.tsx) — 粘贴导入弹窗（实时解析 + 问题标红）
-- [`ProviderModal.tsx`](src/components/ProviderModal.tsx) — **添加第三方供应商**弹窗（顶栏插头图标入口）：Provider ID（前端先按 `^[a-z][a-z0-9_-]{0,31}$` 即时提示，服务端仍会再校验）/ 显示名称 / API 地址 / API 协议（`openai` 标准 `/v1` · `ark` 已含版本号 · `custom` 手填路径）/ API 密钥（只进 `.env`）/ 默认模型（「获取可用模型」探 `GET {base}/models`，**探到即从文本框切成下拉**并选第一个，点「手填」可切回自由输入 —— 两种都要留：下拉解决「探到 7 个却看不见」，手填解决「清单外的 ID」）/ 「创建后立即切换」（默认不勾：新建来源只是目录多一条，换 profile 属「改了要重启」）。**别用 `<datalist>`**：它只提供输入建议、会按已输入内容过滤，原生渲染还随浏览器变，曾导致「上游 7 个模型只显示 2 个」
-- [`FolderPicker.tsx`](src/components/FolderPicker.tsx) / [`Select.tsx`](src/components/Select.tsx) — 目录选择 / 尺寸质量下拉
+- [`ProviderModal.tsx`](src/components/ProviderModal.tsx) — **添加第三方供应商**弹窗（顶栏插头图标入口）：Provider ID（前端先按 `^[a-z][a-z0-9_-]{0,31}$` 即时提示，服务端仍会再校验）/ 显示名称 / API 地址 / API 协议（`openai` 标准 `/v1` · `ark` 已含版本号 · `custom` 手填路径）/ API 密钥（只进 `.env`）/ 默认模型（「获取可用模型」探 `GET {base}/models`，**探到即从文本框切成下拉**并选第一个，点「手填」可切回自由输入 —— 两种都要留：下拉解决「探到 7 个却看不见」，手填解决「清单外的 ID」）/ 「创建后立即切换」（默认不勾：新建来源只是目录多一条，换 profile 属「改了要重启」）。全部字段统一走 [`Field.tsx`](src/components/Field.tsx)（label + 控件 + 单行消息槽位），模型下拉开 `searchable`（中转站常报出几十上百个 ID，不给搜索只能盲滚）。**别用 `<datalist>`**：它只提供输入建议、会按已输入内容过滤，原生渲染还随浏览器变，曾导致「上游 7 个模型只显示 2 个」
+- [`FolderPicker.tsx`](src/components/FolderPicker.tsx) — 目录选择
+- [`Select.tsx`](src/components/Select.tsx) — 通用下拉框（`options` / `value` / `onChange`，可选 `searchable` + `emptyLabel` + `option.group` 分组）。**展开列表 createPortal 到 body**：此前就地 absolute 定位会被弹窗的 `overflow:hidden` / `overflow-y:auto` 裁掉，表现为「下拉展开后底部几项看不见」。坐标按触发器 `getBoundingClientRect` 现算，展开期间监听 scroll / resize / `ResizeObserver` 重算（后者覆盖「窗口没变但触发器被挤窄」），下方空间不足自动翻到上方并据此限高。搜索框在**列表内部**顶部（不替换触发器，避免「已选值」与「搜索词」抢同一块区域），过滤走 `rankByName`。完整键盘导航（↑↓ Home End Enter Esc Space）、`aria-activedescendant` / `aria-selected` / `aria-controls`，展开时 `pushPopup()` 让 Esc 先收下拉再关弹窗（见 [popupLayer.ts](src/popupLayer.ts)）。无障碍属性由 `Field` 经 `cloneElement` 注入后**转发到触发器按钮**——按钮才是 `label` 的控件
+- [`Field.tsx`](src/components/Field.tsx) — 表单字段壳（`id` / `label` / `hint` / `error` / `action` / `children`）：`hint` 与 `error` **共用同一个消息槽位** `<p id="{id}-message">`，invalid 时 error 顶掉 hint，任何时刻至多一行提示；`aria-describedby` 只在有内容时拼 id（无内容传 `undefined` 而非空串）、`aria-invalid` 用条件展开（`exactOptionalPropertyTypes` 下不能写 `= {undefined}`）。控件本体由调用方渲染，`Field` 用 `cloneElement` 注入 aria（非单个元素时降级为原样渲染）。移植自 DeepSeek Harness（MIT）的 `SettingsValueField`
 
 ### 根文件
 

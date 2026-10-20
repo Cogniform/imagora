@@ -674,6 +674,22 @@ html[data-canvas-bounds="off"] .studio-canvas .react-flow__renderer {
 .select-option { display: flex; min-height: 34px; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 10px; border-radius: 7px; color: #3f4953; font-size: 13px; cursor: pointer; }
 .select-option.is-active { color: var(--color-brand); background: color-mix(in srgb, var(--color-brand) 7%, transparent); }
 .select-option.is-selected { color: var(--color-brand); font-weight: 600; }
+/* 搜索框：贴在列表顶部，与选项区用一条细线分开；输入框本身不要 field-control 的边框，
+   否则「框里套框」，在已经带边框的浮层里显得脏。 */
+.select-search { flex: none; padding: 2px 2px 6px; border-bottom: 1px solid rgba(31,41,55,.1); margin-bottom: 4px; }
+.select-search__input { width: 100%; height: 30px; padding: 0 9px; border: 0; border-radius: 7px; background: color-mix(in srgb, var(--color-brand) 5%, transparent); color: #17202b; font-size: 13px; }
+.select-search__input:focus { outline: 2px solid color-mix(in srgb, var(--color-brand) 32%, transparent); outline-offset: 0; }
+.select-search__input::placeholder { color: rgba(23,32,43,.34); }
+.select-empty { padding: 14px 10px; color: rgba(23,32,43,.4); font-size: 12px; text-align: center; }
+/* 分组标题：粘在滚动容器顶部，长列表滚到中段也知道自己在哪一组。
+   底色走 --surface-float（和列表同一个 token），所以它看起来就是列表的一部分；
+   代价是粘顶时下方选项会以「通透度」的比例透上来一点点 —— 表面系统要求底色只能来自
+   surface.ts（surfaceAudit 会红），所以不能为它单独写一个不透明色。 */
+.select-group__title { position: sticky; top: 0; z-index: 1; padding: 6px 10px 4px; background: var(--surface-float); color: rgba(23,32,43,.45); font-size: 11px; font-weight: 600; letter-spacing: .04em; }
+.select-group__rows { margin: 0; padding: 0; list-style: none; }
+.select-group + .select-group { margin-top: 2px; }
+.select-trigger { cursor: pointer; }
+.select-trigger:disabled { cursor: not-allowed; opacity: .55; }
 .prompt-import-preview { margin-top: 10px; max-height: 260px; }
 .prompt-import-summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: rgba(23,32,43,.58); font-size: 12px; }
 .prompt-import-summary__error,
