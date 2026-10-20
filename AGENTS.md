@@ -12,6 +12,21 @@
 - **层层递进**：同一事实只在一层书写——用户层写"怎么用"，索引层写"去哪查"，手册层写"是什么/改哪"，圣经层写"为什么/防什么"
 - 改任何文档后复查：链接可解析（可跑校验脚本）、仪表盘数字与坑不过时
 
+## 子代理并发配额（派活前先看）
+
+同一时刻**在跑**的子代理数量上限，按子代理所用的模型算：
+
+| 模型（可读名） | 同时最多 |
+| --- | --- |
+| `workbuddy/deepseek-v4.1-flash` | 4 |
+| `deepseek-flash` | 3 |
+| `trae-glm-5.3-flashx` | 3 |
+| `workbuddy-bridge/deepseek-v4.1-flash` | 2 |
+
+- 实际 id 形如 `cliproxyapi/workbuddy-deepseek-v4.1-flash`，以 `list_subagent_models(provider="cliproxyapi")` 返回的为准。
+- 表内按**并发**计（同时开着几个），不是累计；跑完一个再开一个不受限。
+- 上表没列出的模型不设额外配额。
+
 ## 变更速查（改代码前先查这里）
 
 - 改 core/ 任意文件 → 查 [core/README.md](core/README.md) 文件索引 → 跑 `pytest tests/test_core_*.py` → 如改设计同步 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
