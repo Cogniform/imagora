@@ -246,19 +246,26 @@ def fold_model_id(model_id: str | None) -> str:
 
 
 def normalize_model_id(model_id: str | None) -> str | None:
-    """把用户给的模型 ID 纠正为配置里的**真实 ID**，无法匹配则原样返回。
+    """把用户给的模型 ID 纠正为**当前 profile** 里的真实 ID，无法匹配则原样返回。
 
     背景：中转站的 `gpt‑image‑2.5` 用的是全角连字符 U+2011，与键盘能打出的
     半角 `gpt-image-2.5` 在界面上毫无区别。用户手打、或沿用历史记录时必然
     拿到半角版本，请求会被上游直接判为 model_not_found（404）。
     这里做一次折叠比对，命中已知模型就换回配置里的正确 ID。
+
+    只查当前 profile 的 `MODELS`，**不跨 profile**：模型 ID 是各家上游自己的
+    标识，同名不代表同一个东西。早先这里遍历 all_known_models()（含其它全部
+    profile），于是别的 profile 里一条用全角连字符登记的历史条目，会把本
+    profile 下用户打的半角名静默改写成那条全角 ID 再发给上游——上游只回
+    `unsupported image model`，而报错里列出的"支持的模型"看起来与用户输入的
+    一模一样，极难排查。纠正只在"本 profile 自己登记过"时才有依据。
     """
     if not model_id:
         return model_id
     folded = fold_model_id(model_id)
-    for known in all_known_models():
-        if fold_model_id(known) == folded:
-            return known
+    for known in MODELS:
+        if fold_model_id(known["id"]) == folded:
+            return known["id"]
     return model_id
 
 
