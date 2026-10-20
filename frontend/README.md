@@ -8,7 +8,7 @@ React 19 + TypeScript + Vite + Tailwind v4 + React Flow（`@xyflow/react`）。�
 npm install
 npm run dev        # 开发模式（热更新；需后端已启动，见下）
 npm run build      # tsc --noEmit + vite build → dist/（git 忽略，由后端服务托管）
-npm test           # vitest run（475 用例）
+npm test           # vitest run（534 用例）
 npm run lint       # eslint
 npx tsc --noEmit   # 类型检查
 ```
@@ -134,6 +134,11 @@ $env:IMAGORA_CHROMIUM = 'C:\path\to\chrome.exe'
 - 职责：裁剪 / 放大的**几何纯函数 + canvas I/O**。A 层纯几何（`CropRect` 归一化 0~1、`clampCrop` / `moveCrop` / `resizeCrop` / `fitCropToRatio` / `centeredSquareCrop` / `resolveUpscaleSize` / `gcdRatio`，常量 `CROP_MIN_SIZE = 0.06` / `MAX_UPSCALE_LONG_EDGE = 4096`）；B 层 canvas I/O（`loadImage` / `readImageSize` / `cropDataUrl` / `upscaleDataUrl`）
 - 注意：**比例换算必须乘框的宽高比**——`normalizedRatio = aspectRatio * boxAspect`（`boxAspect = boxHeight / boxWidth`），漏了这一步「1:1」会裁成长方形。B 层**不写单测**：jsdom 的 `canvas.getContext("2d")` 返回 `null`（不装 canvas npm 包也不许装），只由 A 层纯函数兜底。裁剪与放大全部在前端 canvas 完成，后端零参与（不新增接口、不改 `generate_image` 契约）
 
+### [dataUrlFile.ts](src/dataUrlFile.ts)
+- 职责：把前端 canvas 导出的 `data:image/png;base64,...` 转成可上传的 `File`（`dataUrlToFile`），并生成派生图文件名（`derivedImageName`，形如 `crop-红苹果-20261020-130405.png`）
+- 被谁依赖：`components/CanvasPage.tsx`（裁剪 / 放大对话框的产出落库）
+- 注意：**非法 dataUrl 必须抛错而不是返回空 File** —— 上传 0 字节会在画布上多出一个永远加载失败的红框节点，比直接报错难排查得多。转换独立成模块的理由：`canvasUpload(files: File[])` 只收 `File`，这层 `atob` / `Blob` 不该撒进 1800 行的 CanvasPage.tsx，独立后能单测。支持 base64 与百分号编码两种载荷
+
 ### [cost.ts](src/cost.ts)
 - 职责：成本展示纯函数（`formatMoney` / `formatRate` / `formatSeconds` / `budgetSummary` / `statRows`）
 - 被谁依赖：CostBoard.tsx
@@ -234,6 +239,11 @@ $env:IMAGORA_CHROMIUM = 'C:\path\to\chrome.exe'
 ### [useCanvasRecovery.ts](src/useCanvasRecovery.ts)
 - 职责：恢复快照自动保存/恢复接线
 
+### [useImageEditorViewport.ts](src/useImageEditorViewport.ts)
+- 职责：图片编辑器视口（`useImageEditorViewport(image, open)`）——缩放（1×~4×，步进 1.2）、以指针为锚点、空格/中键拖拽平移、`ResizeObserver` 跟随容器尺寸。返回 `viewportRef`（回调 ref）/ `stageRef` / `zoom` / `isPanning` / `spacePressed` / `scrollClassName` / `panHandlers` / `canZoomIn` / `canZoomOut` / `imageScale` / `zoomIn` / `zoomOut` / `resetZoom` / `contentStyle` / `stageStyle` / `mediaStyle`；纯函数部分（`fitImageToViewport` / `imageEditorContentSize` / `imageEditorAnchorAt` / `imageEditorAnchorScroll` / `isImageEditorPanGesture` 等）也全部导出可单测
+- 被谁依赖：`components/ImageCropDialog.tsx`
+- 注意：**两段式缩放**——`setZoomAround` 只记锚点再 setState，真正反算 `scrollLeft/scrollTop` 在 `useLayoutEffect` 里做（同步 setState 时拿不到新尺寸，会跳一格）；滚轮必须 `{ passive: false }` 且 `preventDefault + stopPropagation`，否则画布跟着一起缩放；空格拖拽监听挂 window capture 阶段且先 `document.activeElement.blur()`，否则输入框里打空格会触发平移。移植自 basketikun/infinite-canvas（MIT）的 `use-image-editor-viewport.ts`
+
 ### [useImageZoom.ts](src/useImageZoom.ts)
 - 职责：图片「单击开原图 / 双击放大预览」时序区分（`useImageZoom`，250ms 延时）
 - 被谁依赖：Gallery.tsx（经典表单结果图）、HistoryGallery.tsx（生产历史）
@@ -242,7 +252,9 @@ $env:IMAGORA_CHROMIUM = 'C:\path\to\chrome.exe'
 ### 组件（components/；改后跑 `npm test` + E2E）
 
 - [`CanvasPage.tsx`](src/components/CanvasPage.tsx) — 无限画布主页面（React Flow 集成、选中操作栏、操作帮助弹窗、历史面板入口、**小地图显隐** + **缩放滑杆**（塞在左下角 `<Controls>` 按钮栈里，偏好见 [minimapVisible.ts](src/minimapVisible.ts)））
-- [`CanvasNodes.tsx`](src/components/CanvasNodes.tsx) — 三类节点（图片/图片组/提示词卡）+ `ActionButton`（nodrag 胶囊按钮）；`StatusLight` 状态灯 running 恒定「生成中」，`ElapsedText` 秒数文字以 `startedAtMs` 自计时（防逐秒重渲染，见 ARCHITECTURE 5.3）
+- [`CanvasNodes.tsx`](src/components/CanvasNodes.tsx) — 三类节点（图片/图片组/提示词卡）+ `ActionButton`（nodrag 胶囊按钮）；`StatusLight` 状态灯 running 恒定「生成中」，`ElapsedText` 秒数文字以 `startedAtMs` 自计时（防逐秒重渲染，见 ARCHITECTURE 5.3）。图片节点的悬停操作栏五个按钮：预览大图 / **裁剪图片** / **放大图片** / 替换图片 / 删除图片
+- [`ImageCropDialog.tsx`](src/components/ImageCropDialog.tsx) — 裁剪对话框（`ModalShell` + [useImageEditorViewport.ts](src/useImageEditorViewport.ts) 做视口 + [imageOps.ts](src/imageOps.ts) 做几何）：八向手柄拖拽、比例预设（自由 / 1:1 / 4:3 / 3:4 / 16:9 / 9:16）、实时像素读数、确认后回传 dataUrl 给上层落库。**遮罩用 `boxShadow: 0 0 0 9999px` 而不是四块 div** —— 四块只能盖住 stage 层（图片宽度），盖不满视口留白，且 spread 型阴影不参与布局
+- [`ImageUpscaleDialog.tsx`](src/components/ImageUpscaleDialog.tsx) — 放大对话框：目标长边预设（1024 / 2048 / 3072 / 4096，默认原长边 ×2 夹在区间内）+ 自定义、算法选择（high / bilinear / nearest）、换算文案（`原 1024×768 → 2048×1536（2.0×）· 显示比例 4:3`）。目标小于原图长边时只提示不禁用（缩小也是合法诉求）。**处理期间用户仍可取消**，卸载后用 `aliveRef` 拦住迟到的结果，避免窗都关了 `onConfirm` 还被调一次
 - [`WorkflowModals.tsx`](src/components/WorkflowModals.tsx) — 保存/加载/导入弹窗 + **`ZoomModal` 全屏预览**（createPortal 到 body，画布 / 经典表单 / 生产历史共用；Portal 根截停 click 冒泡，防误关外层宿主遮罩）
 - [`ResultPanel.tsx`](src/components/ResultPanel.tsx) — 经典表单结果区 5 态容器：主图形层 absolute 居中钉死 + 副信息层底部独立生长（行增减不挤动主图形）；切换交叉淡化（swap-in/swap-out，旧层保留 200ms）；排队/生成中/失败/已取消/透传 Gallery；生成中图标本体按自身颜色呼吸光（`icon-breathe`）
 - [`Gallery.tsx`](src/components/Gallery.tsx) — 经典表单结果图（双击放大 / 单击新窗口开原图，250ms 区分，走 useImageZoom；被 ResultPanel 透传）
@@ -263,7 +275,7 @@ $env:IMAGORA_CHROMIUM = 'C:\path\to\chrome.exe'
 - [`App.tsx`](src/App.tsx) — 根组件：顶栏（品牌区 3D `brand-swing` 系、`chip` 角标、`corner-note` 镜像小字）、经典/画布模式切换、**外观弹窗**（主体色 / 我的壁纸 / 画布边界：壁纸图存 IndexedDB 后铺成整页背景，`html[data-wallpaper]` / `html[data-canvas-bounds]` 属性驱动「底色让位」与「画布边界开关」）、**生图 API 配置弹窗**（选择器：选来源 + 选模型两件事，值 + 来源由 `/api/config` 的 `profileView` 下发，改地址/密钥请改文件）与 **添加第三方供应商弹窗**（`ProviderModal`，顶栏插头图标；建新来源写 `providers.local.json`）。品牌区参数（`BRAND_LAYERS`/`TEXT_Z_STEP`/`LOGO_Z_STEP`/`LOGO_FACE*`）在 App.tsx 顶部——**标题与 logo 挤出深度分档**（logo 线条细，同深度会糊成红块）
 - [`main.tsx`](src/main.tsx) — 入口（挂载 + accent 主题注入）
 - [`index.css`](src/index.css) — **唯一样式层**（Tailwind v4）：`:root` 设计 token + `@layer components` 组件类 + 动效层；导出的 token 与公共类清单见本文「样式体系」节，组件只引用类名、不写死尺寸与颜色
-- [`verify_canvas.py`](e2e/verify_canvas.py) — 画布交互 E2E（46 断言，Playwright headless）
+- [`verify_canvas.py`](e2e/verify_canvas.py) — 画布交互 E2E（60 断言，Playwright headless）
 - [`verify_provider.py`](e2e/verify_provider.py) — 「添加第三方供应商」E2E（38 断言）：真实点顶栏插头 → 填表 → 真实落盘 `providers.local.json` → 断言文件内容（8 档尺寸单价全 0 / 7 个比例 / 模型目录 / **不含密钥** / 地址带 `/v1` 时路径不重复）→ 新来源出现在配置弹窗下拉。探测那步打一个不存在的域名（预期 400，不花外部配额）；Provider ID 用随机值，跑完不留残留
 
 ## 上下游依赖

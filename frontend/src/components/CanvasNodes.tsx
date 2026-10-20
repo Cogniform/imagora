@@ -1,6 +1,6 @@
 import { memo, useEffect, useState, type ReactNode } from "react";
 import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
-import { Eye, RefreshCw, Trash2 } from "lucide-react";
+import { Crop, Eye, Maximize2, RefreshCw, Trash2 } from "lucide-react";
 import type { CanvasGroupNodeData, CanvasImageNodeData, CanvasPromptNodeData } from "../types";
 import { generatingLabel } from "../format";
 import { FolderPicker } from "./FolderPicker";
@@ -74,6 +74,10 @@ interface ImageNodeExtraProps {
   onDelete: (nodeId: string) => void;
   /** 放大预览 */
   onZoom: (nodeId: string) => void;
+  /** 裁剪（产出新图，旧图保留） */
+  onCrop: (nodeId: string) => void;
+  /** 放大像素（产出新图，旧图保留） */
+  onUpscale: (nodeId: string) => void;
 }
 
 export function ImageNode({
@@ -84,6 +88,8 @@ export function ImageNode({
   onReplace,
   onDelete,
   onZoom,
+  onCrop,
+  onUpscale,
 }: NodeProps<ImageFlowNode> & ImageNodeExtraProps & { lod?: boolean | undefined }) {
   // lod / normal 两分支共用的三段片段（原为两份逐字相同的内联 JSX）
   const missingBadge = data.missing ? (
@@ -147,6 +153,12 @@ export function ImageNode({
       <NodeActions testId="image-action-rail">
         <ActionButton label="预览大图" onClick={() => onZoom(id)}>
           <Eye aria-hidden="true" size={14} />
+        </ActionButton>
+        <ActionButton label="裁剪图片" onClick={() => onCrop(id)}>
+          <Crop aria-hidden="true" size={14} />
+        </ActionButton>
+        <ActionButton label="放大图片" onClick={() => onUpscale(id)}>
+          <Maximize2 aria-hidden="true" size={14} />
         </ActionButton>
         <ActionButton label="替换图片" onClick={() => onReplace(id)}>
           <RefreshCw aria-hidden="true" size={14} />

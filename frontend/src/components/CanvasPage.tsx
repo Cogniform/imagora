@@ -39,6 +39,7 @@ import {
   workflowSave,
 } from "../api";
 import { createCanvasHistory } from "../canvasHistory";
+import { dataUrlToFile, derivedImageName } from "../dataUrlFile";
 import { errMessage } from "../format";
 import {
   readMinimapVisible,
@@ -83,6 +84,8 @@ import {
 import { layoutPromptResults, layoutSelection, nodeSize } from "../layout";
 import { GroupNode, ImageNode, PromptNode } from "./CanvasNodes";
 import { HistoryGallery } from "./HistoryGallery";
+import { ImageCropDialog } from "./ImageCropDialog";
+import { ImageUpscaleDialog } from "./ImageUpscaleDialog";
 import { ModalShell } from "./ModalShell";
 import { PromptImportModal } from "./PromptImportModal";
 import { WorkflowLoadModal, WorkflowSaveModal, ZoomModal } from "./WorkflowModals";
@@ -114,6 +117,18 @@ function minimapNodeColor(node: Node): string {
       return "#a8b0b8";
   }
 }
+
+/** 裁剪 / 放大对话框的加工对象：源图 url + 文件名 + 源节点 id。
+ *  带上 nodeId 是为了把产出图摆到源图右侧（用户视线自然落在加工前后的对照上），
+ *  而不是甩到视口中心让人找。 */
+interface ImageOpTarget {
+  nodeId: string;
+  url: string;
+  name: string;
+}
+
+/** 派生图相对源图节点的横向偏移：源图节点宽 128 + 缩略图内边距，留 40 给操作栏不压住 */
+const DERIVED_NODE_OFFSET_X = 200;
 
 /** 操作帮助正文：画布 / 节点 / 连线三类交互 + 全局快捷键（内容与 README「画布工作流」一致） */
 const HELP_ROWS: [string, string][] = [
@@ -293,6 +308,11 @@ export function CanvasPage({
   /** 放大预览：当前预览的图片绝对路径（null 关闭）与文件名 */
   const [zoomImage, setZoomImage] = useState<string | null>(null);
   const [zoomName, setZoomName] = useState("");
+  /** 裁剪 / 放大对话框的加工对象（null 关闭）。
+   *  产出走「上传注册表 + 源图右侧新建节点」，与「替换图片」（原地换掉）语义不同：
+   *  加工是可回溯的派生操作，原图必须留着，否则用户裁坏了没法退回。 */
+  const [cropTarget, setCropTarget] = useState<ImageOpTarget | null>(null);
+  const [upscaleTarget, setUpscaleTarget] = useState<ImageOpTarget | null>(null);
   /** 保存/加载工作流弹窗 */
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [showLoadModal, setShowLoadModal] = useState(false);
@@ -325,8 +345,8 @@ export function CanvasPage({
   }, []);
 
   const refreshHistoryControls = useCallback(() => setHistoryVersion((version) => version + 1), []);
-  const recordHistory = useCallback(() => {
-    historyRef.current.record({ nodes: nodesRef.current, edges: edgesRef.current });
+  const recordHistory = useCallback((options?: { preserveRedo?: boolean }) => {
+    historyRef.current.record({ nodes: nodesRef.current, edges: edgesRef.current }, options);
     refreshHistoryControls();
   }, [refreshHistoryControls]);
 
@@ -773,6 +793,38 @@ export function CanvasPage({
     }
   }, []);
 
+  /* ---------------- 图片加工：裁剪 / 放大（派生新图，原图保留） ---------------- */
+  /** 取加工对象：缺 url（文件缺失）的节点不弹窗，红框已经提示了原因 */
+  const readOpTarget = useCallback((nodeId: string): ImageOpTarget | null => {
+    const node = nodesRef.current.find((n) => n.id === nodeId);
+    if (node?.type !== "image" || !node.data.url) return null;
+    return { nodeId, url: node.data.url, name: node.data.name };
+  }, []);
+
+  const handleCropImage = useCallback(
+    (nodeId: string) => {
+      const target = readOpTarget(nodeId);
+      if (!target) {
+        pushLog("裁剪失败：图片文件缺失");
+        return;
+      }
+      setCropTarget(target);
+    },
+    [pushLog, readOpTarget],
+  );
+
+  const handleUpscaleImage = useCallback(
+    (nodeId: string) => {
+      const target = readOpTarget(nodeId);
+      if (!target) {
+        pushLog("放大失败：图片文件缺失");
+        return;
+      }
+      setUpscaleTarget(target);
+    },
+    [pushLog, readOpTarget],
+  );
+
   /** 默认质量：优先 high（用户要求） */
   const defaultQuality = config.qualities.includes("high") ? "high" : config.qualities[0] ?? "low";
 
@@ -794,6 +846,41 @@ export function CanvasPage({
     lastCreatePosRef.current = next;
     return position;
   }, []);
+
+  /** 派生图落地：dataUrl → File → 上传注册表 → 在源图右侧新建图片节点。
+   *
+   *  为什么不用「替换图片」原地换掉：裁剪/放大是派生加工，用户很可能对同一张原图裁
+   *  好几个比例。原地换会连原图一起丢掉，且没法从画布上回溯。新建节点的代价只是画布
+   *  多一张图，换来的是一条可撤销、可对比的加工链。
+   *
+   *  位置按源节点坐标偏移而非视口中心：加工结果紧挨原图，视线不用来回找。
+   *  源节点已被删（对话框开着时删了）就退化为视口中心。 */
+  const commitDerivedImage = useCallback(
+    async (target: ImageOpTarget, dataUrl: string, prefix: "crop" | "upscale") => {
+      try {
+        const file = dataUrlToFile(dataUrl, derivedImageName(target.name, prefix));
+        const { images } = await canvasUpload([file]);
+        const entry = images[0];
+        if (!entry) {
+          pushLog("加工失败：上传未返回图片");
+          return;
+        }
+        const source = nodesRef.current.find((n) => n.id === target.nodeId);
+        const origin = source
+          ? { x: source.position.x + DERIVED_NODE_OFFSET_X, y: source.position.y }
+          : getCreatePosition();
+        recordHistory();
+        setNodes((nds) => [
+          ...nds,
+          ...canvasEntriesToNodes([entry], nds, origin).map((n, i) => withEnterAnim(n, i)),
+        ]);
+        pushLog(`${prefix === "crop" ? "已裁剪" : "已放大"}：${entry.name}`);
+      } catch (err) {
+        pushLog(`加工失败：${errMessage(err)}`);
+      }
+    },
+    [getCreatePosition, pushLog, recordHistory, setNodes],
+  );
 
   /* ---------------- 拖放落画布（接线在 useCanvasDrop：意图解析 / 落点换算 / 示意 / 窗口守卫） ----------------
    * 这里只负责"节点怎么建"，与点击新建共用同一构建函数与去重逻辑。 */
@@ -1118,7 +1205,7 @@ export function CanvasPage({
   const handleAutoLayout = useCallback(() => {
     const selected = selectedIdsRef.current;
     if (!selected.size) return;
-    recordHistory();
+    recordHistory({ preserveRedo: true });
     setNodes(layoutSelection(nodesRef.current, edgesRef.current, selected));
     pushLog(`已整理 ${selected.size} 个选中节点`);
     fitCanvasToContent();
@@ -1131,7 +1218,7 @@ export function CanvasPage({
       pushLog("没有发现可自动连接的孤立节点");
       return;
     }
-    recordHistory();
+    recordHistory({ preserveRedo: true });
     setEdges(nextEdges);
     pushLog(`已自动补充 ${nextEdges.length - currentEdges.length} 条连线`);
   }, [pushLog, recordHistory, setEdges]);
@@ -1146,7 +1233,7 @@ export function CanvasPage({
       pushLog("所选节点中没有可自动连接的孤立节点");
       return;
     }
-    recordHistory();
+    recordHistory({ preserveRedo: true });
     setEdges(nextEdges);
     pushLog(`已自动补充 ${nextEdges.length - currentEdges.length} 条连线（仅选中节点）`);
   }, [pushLog, recordHistory, setEdges]);
@@ -1376,6 +1463,8 @@ export function CanvasPage({
           onReplace={handleReplaceImage}
           onDelete={handleDeleteNode}
           onZoom={handleZoom}
+          onCrop={handleCropImage}
+          onUpscale={handleUpscaleImage}
         />
       ),
       group: (props: object) => (
@@ -1405,6 +1494,8 @@ export function CanvasPage({
       handleDeleteNode,
       handleReplaceImage,
       handleZoom,
+      handleCropImage,
+      handleUpscaleImage,
       sizeOptions,
       qualityOptions,
       qualityEffective,
@@ -1414,7 +1505,15 @@ export function CanvasPage({
   /* ---------------- 拖放接管（useCanvasDrop：意图解析/落点示意/窗口守卫/工作区四事件） ----------------
    * 挂在整个工作区（含工具栏）：落点夹紧到画布，UI 上不再出现浏览器禁止标志；
    * 文本/无关拖拽放行；弹窗打开时暂停接管，避免误落到弹窗背后。 */
-  const modalOpen = showSaveModal || showLoadModal || showImportModal || showHistory || showHelp || zoomImage !== null;
+  const modalOpen =
+    showSaveModal ||
+    showLoadModal ||
+    showImportModal ||
+    showHistory ||
+    showHelp ||
+    zoomImage !== null ||
+    cropTarget !== null ||
+    upscaleTarget !== null;
   const { dropIntent, dropChip, dragHandlers, startToolbarDrag, hideDropChip } = useCanvasDrop({
     canvasRef,
     rfInstanceRef,
@@ -1553,7 +1652,7 @@ export function CanvasPage({
           nodeTypes={nodeTypes}
           onNodeMouseEnter={onNodeMouseEnter}
           onNodeMouseLeave={onNodeMouseLeave}
-          onNodeDragStart={recordHistory}
+          onNodeDragStart={() => recordHistory()}
           onSelectionChange={onSelectionChange}
           onMove={handleViewportMove}
           onInit={(instance) => {
@@ -1711,6 +1810,22 @@ export function CanvasPage({
       )}
       {zoomImage && (
         <ZoomModal imageUrl={zoomImage} name={zoomName} onClose={() => setZoomImage(null)} />
+      )}
+      {cropTarget && (
+        <ImageCropDialog
+          src={cropTarget.url}
+          name={cropTarget.name}
+          onClose={() => setCropTarget(null)}
+          onConfirm={(dataUrl) => commitDerivedImage(cropTarget, dataUrl, "crop")}
+        />
+      )}
+      {upscaleTarget && (
+        <ImageUpscaleDialog
+          src={upscaleTarget.url}
+          name={upscaleTarget.name}
+          onClose={() => setUpscaleTarget(null)}
+          onConfirm={(dataUrl) => commitDerivedImage(upscaleTarget, dataUrl, "upscale")}
+        />
       )}
     </div>
   );

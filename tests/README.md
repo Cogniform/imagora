@@ -50,7 +50,7 @@ cd frontend; npm test
 | [`test_main_process.py`](test_main_process.py) | 4 | 端口探测 / 祖先链回溯（Windows） |
 | [`test_main_cli.py`](test_main_cli.py) | 31 | CLI gen 子命令全链路（校验/输出解析/文生图+图生图+多参考/失败/--no-asset/比例档位）/ **`--n` 逐张请求（每次 `n=1`、各存各的账、部分失败保留已成功、默认单张行为不变）** / config 输出 |
 
-## 文件索引（前端 vitest，共 475，位于 frontend/src/）
+## 文件索引（前端 vitest，共 534，位于 frontend/src/）
 
 | 文件 | 用例 | 覆盖 |
 | --- | --- | --- |
@@ -58,15 +58,27 @@ cd frontend; npm test
 | [`workflow.test.ts`](../frontend/src/workflow.test.ts) | 48 | 自动连线 / 动画类 / 连线约束 / 落点阶梯 / 节点构建器 / **updatePromptNode 幂等（无变化不产生新引用，防 running 逐秒重渲染）** / **canConnect 连线规则（组连组中转）** / **computeCounts 组链递归聚合 + 去重口径（重复条目数）+ 防环** / **引用溯源（数据最终流到的提示词数）** / **collectIncomingImages 嵌套组链展开** |
 | [`canvasDrop.test.ts`](../frontend/src/canvasDrop.test.ts) | 14 | 拖拽意图解析 / 文件识别 / 数量统计 / 示意文案 / isInsideRect |
 | [`previewZoom.test.ts`](../frontend/src/previewZoom.test.ts) | 5 | 缩放范围 / 平移夹紧 |
-| [`canvasHistory.test.ts`](../frontend/src/canvasHistory.test.ts) | 2 | 撤销 / 恢复 / 新分支清空 |
+| [`canvasHistory.test.ts`](../frontend/src/canvasHistory.test.ts) | 5 | 撤销 / 恢复 / 新分支清空 |
 | [`canvasStyles.test.ts`](../frontend/src/canvasStyles.test.ts) | 4 | 动效 CSS 选择器约束 |
 | [`recovery.test.ts`](../frontend/src/recovery.test.ts) | 4 | 快照剥离动画类 / 运行期字段清除 |
 | [`useGenerationTask.test.ts`](../frontend/src/useGenerationTask.test.ts) | 6 | hook 稳定成员引用 + **超预算确认（409→确认→带 allowOverBudget 重提、取消则抛出、同实例只问一次、非 409 不触发确认）** |
 | [`useImageZoom.test.ts`](../frontend/src/useImageZoom.test.ts) | 4 | 单击开原图 / 双击放大时序（fake timers）/ 卸载清理 |
+| [`useImageEditorViewport.test.ts`](../frontend/src/useImageEditorViewport.test.ts) | 28 | 图片编辑器视口 hook：`fitImageToViewport` 缩放上限 1、`imageEditorContentSize` 保证居中可算、以指针为锚点的两段式缩放（先记锚点再 `useLayoutEffect` 反算 scrollLeft/scrollTop）、滚轮按 `passive:false` 注册且不冒泡、空格/中键拖拽判定、缩放边界（`canZoomIn`/`canZoomOut` 带 0.001 容差）、`ResizeObserver` 缺失守卫。**测试必须桩 `clientWidth`/`clientHeight`/`getBoundingClientRect`/`scrollLeft`**（jsdom 恒 0 且不可写），且 afterEach 先卸载实例再还原原型桩（否则多实例抢同一个 window 监听、假通过） |
 | [`logPath.test.ts`](../frontend/src/logPath.test.ts) | 6 | 日志路径词条解析（绝对/相对、正反斜杠、多路径、扩展名大小写） |
-| [`CanvasNodes.test.tsx`](../frontend/src/components/CanvasNodes.test.tsx) | 12 | 节点操作栏 / 双击行为 / 组卡去重提示渲染 |
+| [`generationPending.test.ts`](../frontend/src/generationPending.test.ts) | 11 | 渐近进度曲线单调递增并逼近 98% 但永不越过（最后 2% 留给真实完成）、首秒即从 10% 起步、非法入参（NaN / ±Infinity / 负数）按 0s 处理绝不产出 `NaN%`、文案每 2s 轮播并循环 |
+| [`imageOps.test.ts`](../frontend/src/imageOps.test.ts) | 49 | 裁剪/放大几何：`clampCrop` 最小尺寸与越界回收、`moveCrop` 与 `resizeCrop` 八向手柄、`fitCropToRatio` 保持中心收缩到能放下的最大尺寸（像素比与归一化比的换算必须乘框宽高比）、`resolveUpscaleSize` 长边上限与非法入参、`gcdRatio` 约分（含不可约分尺寸）、`centeredSquareCrop` 默认框。**B 层 canvas I/O 不测**（jsdom 的 `getContext("2d")` 返回 null） |
+| [`dataUrlFile.test.ts`](../frontend/src/dataUrlFile.test.ts) | 11 | dataUrl → `File` 转换（base64 与百分号编码两种载荷；非法输入**抛错而不是返回空 File**，0 字节上传会在画布多出永远加载失败的红框节点）、派生文件名（前缀 + 原名清洗 + 时间戳 + 扩展名，长度精确断言） |
+| [`minimapVisible.test.ts`](../frontend/src/minimapVisible.test.ts) | 16 | 画布小地图显隐与缩放滑杆偏好：默认值（小地图默认关、滑杆默认 100%）、`zoomToSliderPercent`/`sliderPercentToZoom` 互为反函数往返、NaN/±Infinity 夹到端点而不抛错、localStorage 不可用时静默降级 |
+| [`rankByName.test.ts`](../frontend/src/rankByName.test.ts) | 10 | 模糊排序：query 是 name 的大小写不敏感**有序子序列**（`gi25` 命中 `gpt-image-2.5`）、边界命中加分优先、相邻匹配加分、跳跃扣分、空 query 返回**同一数组引用**、全角 U+2011 折叠后比对 |
+| [`optionGroups.test.ts`](../frontend/src/optionGroups.test.ts) | 6 | 分组归并：组间按首次出现顺序、组内保持源顺序、无分组的项归入空标题兜底组、全部无分组时返回单组、混合时兜底组排最后 |
+| [`CanvasNodes.test.tsx`](../frontend/src/components/CanvasNodes.test.tsx) | 17 | 节点操作栏 / 双击行为 / 组卡去重提示渲染 |
+| [`Field.test.tsx`](../frontend/src/components/Field.test.tsx) | 8 | 字段壳：label 与控件经 id 关联、`hint` 与 `error` **共用同一个消息槽位**（invalid 时 error 顶掉 hint、任何时刻至多一行）、`aria-describedby` 无内容时不写空串、`aria-invalid` 条件展开、`action` 插槽渲染 |
+| [`GenerationPending.test.tsx`](../frontend/src/components/GenerationPending.test.tsx) | 7 | 生成中占位卡：`role="status"` + `aria-live` 语义、受控 `elapsed` 优先于自走表、进度条只改 `transform: scaleX()`（不给 width 做动画）、文案随秒数轮播 |
+| [`ImageCropDialog.test.tsx`](../frontend/src/components/ImageCropDialog.test.tsx) | 7 | 裁剪对话框：比例预设按钮（`aria-pressed`）、八向手柄拖拽的位移换算（先除 stage 宽高再交给 `resizeCrop`）、遮罩用 `boxShadow` spread 覆盖整块视口、确认回传 dataUrl、取消关闭。测试用 `vi.mock("../imageOps", …)` 部分替身（`vi.importActual` 展开真身、只换 `readImageSize` / `cropDataUrl` 两个 canvas I/O 函数），几何纯函数全走真实实现 |
+| [`ImageUpscaleDialog.test.tsx`](../frontend/src/components/ImageUpscaleDialog.test.tsx) | 9 | 放大对话框：目标长边预设与自定义、默认值（原长边 ×2 且夹在 [1024, 4096]）、换算文案（`原 1024×768 → 2048×1536（2.0×）· 显示比例 4:3`）、busy 时按钮文案变化**必须按 `data-testid` 查不能按文本**（文案会变导致按名查丢）、卸载后迟到的放大结果不再回调 `onConfirm` |
+| [`ProviderModal.test.tsx`](../frontend/src/components/ProviderModal.test.tsx) | 22 | 添加第三方供应商弹窗：Provider ID 正则与地址协议的即时校验、协议预设切换与路径联动、探测模型（成功切下拉并选第一个 / 失败留文本框 / 「手填」可切回自由输入）、提交与错误提示 |
 | [`ModalShell.test.tsx`](../frontend/src/components/ModalShell.test.tsx) | 5 | 弹窗基座：dialog 语义 / 面板与遮罩点击分流 / Esc 关闭与焦点归还 / **下拉展开时 Esc 先收下拉、不关弹窗** |
-| [`Select.test.tsx`](../frontend/src/components/Select.test.tsx) | 6 | 自定义下拉：listbox 语义 / 键盘导航 / 点外部关闭 / **展开列表挂到 body（不被滚动容器裁切）** |
+| [`Select.test.tsx`](../frontend/src/components/Select.test.tsx) | 10 | 自定义下拉：listbox 语义 / 键盘导航 / 点外部关闭 / **展开列表挂到 body（不被滚动容器裁切）** |
 | [`popupLayer.test.ts`](../frontend/src/popupLayer.test.ts) | 5 | 浮层计数：push/pop 配对、嵌套多层、**多余 pop 不弄成负数**（否则弹窗再也关不掉）/ reset |
 | [`ResultPanel.test.tsx`](../frontend/src/components/ResultPanel.test.tsx) | 7 | 结果区 5 态面板 / 切换交叉淡化（旧层保留至淡出移除） |
 | [`WorkflowModals.test.tsx`](../frontend/src/components/WorkflowModals.test.tsx) | 2 | ZoomModal Portal 点击隔离（点图片/空白不误关外层宿主遮罩） |
@@ -78,12 +90,12 @@ cd frontend; npm test
 | [`apiErrors.test.ts`](../frontend/src/apiErrors.test.ts) | 2 | 405 翻成人话（提示服务端是旧版本、需重开）；非 405 保持原始信息不误伤真实上游报错 |
 | [`format.test.ts`](../frontend/src/format.test.ts) | 6 | `formatBytes` 三档与 1024 边界 / `generatingLabel` 文案 / `errMessage`（Error 与非 Error、超长才截断、恰好等于上限不截、limit 可覆盖） |
 | [`accent.test.ts`](../frontend/src/accent.test.ts) | 12 | 同一编号恒定取色、`null` 回落 1 号、黄金角色相分布（含越过 360 回绕与 0 号负色相的现行为）、`brand` 与 `brandDark` 只差明度 / 色相归一到 [0,360) / NaN·Infinity 回落 0 不产出坏值 / 自定义色相与自动取色共用同一公式 / 读写往返（未设置读 `null`、存后读回、存越界先归一、传 `null` 清除、空白或非法视为未设置） |
-| [`brand/logo.test.ts`](../frontend/src/brand/logo.test.ts) | 4 | 形状与 viewBox 取自 `logo.svg` 单一源 / 源文件只有一处 fill 声明（否则换色会漏改）/ `brandLogoSvg` 只换根元素 fill / 换色不动 xmlns 与 viewBox（favicon 缺 xmlns 不显示）|
+| [`brand/logo.test.ts`](../frontend/src/brand/logo.test.ts) | 4 | 形状与 viewBox 取自 `logo.svg` 单一源 / 源文件只有一处 fill 声明（否则换色会漏改）/ `brandLogoSvg` 只换根元素 fill / 换色不动 xmlns 与 viewBox（favicon 缺 xmlns 不显示） |
 | [`windowInherit.test.ts`](../frontend/src/windowInherit.test.ts) | 10 | 写读往返且不清除、`notice` 省略即不写该键、空参考图 `filesIncluded: false`、`sessionStorage` 抛错时放弃继承不抛错、无键 / 非 JSON / 顶层形状不符 / `refs` 字段类型不符 / `notice` 非字符串一律判无继承、清除不误伤其他键 |
 | [`wallpaperStore.test.ts`](../frontend/src/wallpaperStore.test.ts) | 10 | IndexedDB 不可用降级（读 null、写 false、删不抛错）/ 全局缺失 `indexedDB` / `open` 抛异常 / `open` 触发 `onerror` 或 `onblocked` 均安静返回。成功读写路径由真机验证（jsdom 无 IndexedDB，且该全局连声明都没有，造替身必须先 `vi.stubGlobal`） |
 | [`canvasBounds.test.ts`](../frontend/src/canvasBounds.test.ts) | 9 | 画布边界开关（默认开、只有 0/false 才关、空白与非法值回落、localStorage 不可用降级） |
 | [`backgroundPreset.test.ts`](../frontend/src/backgroundPreset.test.ts) | 13 | 背景底色预设：清单 id 唯一且默认项在最前、每项标签与提示非空、不含深色预设（暗房/蓝图属独立工程）、只有跟随主体色 + 纯白两项、清单里不再有 `wallpaper` 字段（内置壁纸已移除）、两张内置壁纸与四个纹理预设的旧 id 均判为非法、`isBackgroundPresetId` 拒绝非字符串与未知 id、读写往返（每项合法预设都能往返）、非法存储值与旧 id 一律回落默认「跟随主体色」（不需要迁移脚本）、非法 id 不写进存储（不污染已有值） |
-| [`surface.test.ts`](../frontend/src/surface.test.ts) | 17 | 卡片通透度：入参钳到 [0,1] 且空值回落默认、通透度越高各档 alpha 单调变小、通透度 0 落到基准（卡片 0.9/0.68）、拉到最透仍留 >0.2 白（保证文字可读）、`blurFor` 在任何通透度下都返回 `none`（毛玻璃已彻底关闭，不许随通透度增长）、输入框有 `FIELD_ALPHA_FLOOR = 0.25` 底线而卡片不受此限、面板始终比卡片实一档、色相参与底色并被归一、NaN 色相回落 0、读写往返与坏值回落 |
+| [`surface.test.ts`](../frontend/src/surface.test.ts) | 19 | 卡片通透度：入参钳到 [0,1] 且空值回落默认、通透度越高各档 alpha 单调变小、通透度 0 落到基准（卡片 0.9/0.68）、拉到最透仍留 >0.2 白（保证文字可读）、`blurFor` 在任何通透度下都返回 `none`（毛玻璃已彻底关闭，不许随通透度增长）、输入框有 `FIELD_ALPHA_FLOOR = 0.25` 底线而卡片不受此限、面板始终比卡片实一档、色相参与底色并被归一、NaN 色相回落 0、读写往返与坏值回落 |
 | [`surfaceAudit.test.ts`](../frontend/src/surfaceAudit.test.ts) | 6 | **表面审计护栏**：解析 index.css 与全部 .tsx，未登记的写死底色 / 硬编码 blur() 直接红；豁免清单必须有理由；六个角色类与消费方齐备 |
 | [`wallpaperAdjust.test.ts`](../frontend/src/wallpaperAdjust.test.ts) | 11 | 壁纸模糊/明暗：入参钳到合法区间且空值·NaN 回落默认（模糊→0、明暗→1）、默认参数下只产出降噪不写 no-op 指令、模糊与明暗各自出现且降噪永远排最前、只调一项时另一项不出现、越界值先钳再拼绝不写进 CSS、小数保留两位、自定义降噪走同一拼装路径、写入后读回同值、写入前先钳制（存储不落越界值）、未设置/空白/非法一律回落默认 |
 | [`recentPrompts.test.ts`](../frontend/src/recentPrompts.test.ts) | 10 | 最近提示词挑选：按入参顺序取（越靠前越新）不重排、同一条反复重跑只算一次并保留最靠前那次、**按前 40 字归并近似版本**且保留最新、前 40 字不同视为两条、归并键先归一连续空白（只差空格数算同一条）、丢弃空白与缺失项、裁剪首尾空白后再去重、受 `limit` 限制且取满即停、去重后不足 limit 返回全部、空入参返回空数组 |
@@ -100,7 +112,7 @@ cd frontend; npm test
 - 改 `core/api.py` → `test_core_api.py` + `test_main_cli.py`
 - 改 `server.py` 路由 → 对应 `test_server_*.py` + 前端 `types.ts`/`api.ts`
 - 改前端纯函数 → 对应 `*.test.ts`（同目录同名）
-- 改前端组件 → 组件单测 + E2E（`../frontend/e2e/verify_canvas.py` 46 断言；改来源/配置相关再跑 `verify_provider.py` 38 断言）
+- 改前端组件 → 组件单测 + E2E（`../frontend/e2e/verify_canvas.py` 60 断言；改来源/配置相关再跑 `verify_provider.py` 38 断言）
 - **增/删用例后更新 AGENTS「当前仪表盘」数字**
 
 ## CI 要求

@@ -15,6 +15,8 @@ function nodeProps<T extends ElementType>(props: Partial<ComponentProps<T>>): Co
 }
 
 function renderImageNode(onZoom = vi.fn(), onCanvasDoubleClick = vi.fn(), lod?: boolean) {
+  const onCrop = vi.fn();
+  const onUpscale = vi.fn();
   const props = nodeProps<typeof ImageNode>({
     id: "image-1",
     type: "image",
@@ -32,6 +34,8 @@ function renderImageNode(onZoom = vi.fn(), onCanvasDoubleClick = vi.fn(), lod?: 
     onZoom,
     onReplace: vi.fn(),
     onDelete: vi.fn(),
+    onCrop,
+    onUpscale,
   });
 
   render(
@@ -41,7 +45,7 @@ function renderImageNode(onZoom = vi.fn(), onCanvasDoubleClick = vi.fn(), lod?: 
       </ReactFlowProvider>
     </div>,
   );
-  return { onZoom, onCanvasDoubleClick };
+  return { onZoom, onCanvasDoubleClick, onCrop, onUpscale };
 }
 
 describe("ImageNode", () => {
@@ -66,8 +70,20 @@ describe("ImageNode", () => {
 
     expect(screen.getByTestId("image-action-rail").className).toContain("left-full");
     expect(screen.getByRole("button", { name: "预览大图" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "裁剪图片" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "放大图片" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "替换图片" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "删除图片" })).toBeTruthy();
+  });
+
+  it("wires crop and upscale buttons to their handlers", () => {
+    const { onCrop, onUpscale } = renderImageNode();
+
+    fireEvent.click(screen.getByRole("button", { name: "裁剪图片" }));
+    expect(onCrop).toHaveBeenCalledWith("image-1");
+
+    fireEvent.click(screen.getByRole("button", { name: "放大图片" }));
+    expect(onUpscale).toHaveBeenCalledWith("image-1");
   });
 
   it("leaves handle dimensions to the zoom-aware canvas styles", () => {
@@ -193,6 +209,8 @@ describe("LOD abstract mode", () => {
     expect(onZoom).toHaveBeenCalledWith("image-1");
     expect(screen.queryByTestId("image-action-rail")).toBeNull();
     expect(screen.queryByRole("button", { name: "替换图片" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "裁剪图片" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "放大图片" })).toBeNull();
   });
 
   it("renders prompt cards as abstract read-only cards with status text", () => {

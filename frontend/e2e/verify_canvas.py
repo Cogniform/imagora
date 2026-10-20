@@ -4,7 +4,8 @@
 文件拖拽添加（落点示意跟随光标与数量、落点精确、多图批次排开、非图片过滤）、
 工具栏按钮拖出新建（提示词卡片 / 图片组，示意文案与全局跟随、松开即建）、
 真实鼠标拖拽（原生 HTML5 DnD 管线）、拖到画布外松开=取消（示意切「松开取消」，拖回画布仍新建）、
-缩放滑杆与视口双向同步、小地图开关（默认关 → 开 → 关，选择落 localStorage）。
+缩放滑杆与视口双向同步、小地图开关（默认关 → 开 → 关，选择落 localStorage）、
+图片节点裁剪与放大（入口按钮 → 对话框 → 确认后派生新节点，原图保留）。
 
 前置：本地服务已启动（uv run python -m main ui --port 7860），且已安装：
   pip install playwright && playwright install chromium
@@ -14,8 +15,10 @@
 
 import base64
 import os
+import struct
 import sys
 import tempfile
+import zlib
 
 from playwright.sync_api import sync_playwright
 
@@ -23,6 +26,43 @@ BASE = "http://127.0.0.1:7860"
 
 # 1x1 PNG（用于上传，避免依赖 output/.assets 里的真实图片）
 PNG_B64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+
+
+def write_test_png(path, width, height):
+    """手写一张渐变 PNG（纯 zlib，不依赖 PIL）。
+
+    裁剪/放大必须对真实尺寸的图操作：1×1 像素图在裁剪对话框里 stage 只有 1px，
+    裁剪框和八个手柄都缩成亚像素，既点不准，断言也失去意义。
+    """
+    raw = bytearray()
+    for y in range(height):
+        raw.append(0)  # 每行的 filter type：0 = None
+        for x in range(width):
+            raw += bytes(
+                (
+                    (x * 255) // max(1, width - 1),
+                    (y * 255) // max(1, height - 1),
+                    128,
+                )
+            )
+
+    def chunk(tag, data):
+        return (
+            struct.pack(">I", len(data))
+            + tag
+            + data
+            + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+        )
+
+    header = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    png = (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", header)
+        + chunk(b"IDAT", zlib.compress(bytes(raw), 6))
+        + chunk(b"IEND", b"")
+    )
+    with open(path, "wb") as f:
+        f.write(png)
 
 
 def vp_snap(page):
@@ -71,6 +111,9 @@ def main():
     tmp_img = os.path.join(tempfile.gettempdir(), "imagora_e2e_pixel.png")
     with open(tmp_img, "wb") as f:
         f.write(base64.b64decode(PNG_B64))
+    # 裁剪/放大段专用：240×160 的真实尺寸图（1×1 会让裁剪框与手柄缩成亚像素）
+    tmp_big = os.path.join(tempfile.gettempdir(), "imagora_e2e_240x160.png")
+    write_test_png(tmp_big, 240, 160)
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -580,6 +623,99 @@ def main():
         page.get_by_role("button", name="隐藏小地图").click()
         page.wait_for_timeout(300)
         check("再点一次小地图消失", page.locator(".react-flow__minimap").count() == 0)
+
+        # 14. 图片裁剪：入口 → 对话框 → 选 1:1 → 确认产出新节点（原图保留）
+        #     用 240×160 而不是 1×1：1px 图上 stage 只有 1px，裁剪框与八个手柄都缩成亚像素
+        before_upload = len(image_positions())
+        with page.expect_file_chooser() as fc_big:
+            page.get_by_role("button", name="上传图片").click()
+        fc_big.value.set_files(tmp_big)
+        page.wait_for_timeout(1500)
+        before_crop = len(image_positions())
+        check(
+            "上传 240×160 测试图",
+            before_crop == before_upload + 1,
+            f"{before_upload}->{before_crop}",
+        )
+
+        src_node = (
+            page.locator(".react-flow__node-image")
+            .filter(has=page.locator('img[alt="imagora_e2e_240x160.png"]'))
+            .last
+        )
+        # 不用 hover：画布上多个节点会在视口中心叠住，React Flow 还会把选中节点抬 z-index，
+        # 真实 hover 会落到别的节点上。操作栏是 opacity-0 而非 display:none，元素仍在布局里，
+        # 用 force 点击跳过命中测试直接派发到按钮上。
+        crop_btn = src_node.get_by_role("button", name="裁剪图片")
+        check("裁剪入口按钮存在", crop_btn.count() == 1)
+        crop_btn.click(force=True)
+        page.wait_for_timeout(700)
+        crop_dialog = page.locator('[data-testid="image-crop-dialog"]')
+        check("裁剪对话框打开", crop_dialog.count() == 1)
+        check("裁剪框已渲染", page.locator('[data-testid="crop-box"]').count() == 1)
+        handle_count = page.evaluate(
+            "() => document.querySelectorAll('[data-testid=\"image-crop-dialog\"] [data-handle]').length"
+        )
+        check("裁剪框八个手柄齐全", handle_count == 8, f"handles={handle_count}")
+
+        def parse_px(text):
+            body = text.replace("px", "").strip()
+            left, _, right = body.partition("×")
+            return int(left.strip()), int(right.strip())
+
+        crop_dialog.get_by_role("button", name="1:1", exact=True).click()
+        page.wait_for_timeout(300)
+        size_text = page.locator('[data-testid="crop-size"]').inner_text()
+        crop_w, crop_h = parse_px(size_text)
+        check(
+            "选 1:1 后裁剪框变成正方形",
+            crop_w > 0 and abs(crop_w - crop_h) <= 1,
+            f"size={size_text}",
+        )
+
+        crop_dialog.get_by_role("button", name="确认裁剪").click()
+        page.wait_for_timeout(2500)
+        after_crop = len(image_positions())
+        check(
+            "确认裁剪后派生新节点",
+            after_crop == before_crop + 1,
+            f"{before_crop}->{after_crop}",
+        )
+        check(
+            "裁剪后对话框关闭",
+            page.locator('[data-testid="image-crop-dialog"]').count() == 0,
+        )
+
+        # 15. 图片放大：入口 → 对话框 → 目标长边 1024 → 确认产出新节点
+        #     对裁剪产物（alt 以 crop- 开头）再放大，顺带验证派生图能被继续加工
+        crop_node = (
+            page.locator(".react-flow__node-image")
+            .filter(has=page.locator('img[alt^="crop-"]'))
+            .last
+        )
+        check("裁剪产物已出现在画布上", crop_node.count() == 1)
+        crop_node.get_by_role("button", name="放大图片").click(force=True)
+        page.wait_for_timeout(700)
+        up_dialog = page.locator('[data-testid="image-upscale-dialog"]')
+        check("放大对话框打开", up_dialog.count() == 1)
+        check("原图预览已渲染", up_dialog.locator('img[alt="原图预览"]').count() == 1)
+        up_dialog.get_by_role("button", name="1024", exact=True).click()
+        page.wait_for_timeout(400)
+        up_text = up_dialog.inner_text()
+        check("放大换算文案给出目标尺寸", "1024" in up_text, f"text={up_text[:80]}")
+        before_up = len(image_positions())
+        page.locator('[data-testid="image-upscale-confirm"]').click()
+        page.wait_for_timeout(3000)
+        after_up = len(image_positions())
+        check(
+            "确认放大后派生新节点",
+            after_up == before_up + 1,
+            f"{before_up}->{after_up}",
+        )
+        check(
+            "放大后对话框关闭",
+            page.locator('[data-testid="image-upscale-dialog"]').count() == 0,
+        )
 
         browser.close()
 
