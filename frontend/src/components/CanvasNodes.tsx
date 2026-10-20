@@ -360,10 +360,9 @@ export const PromptNode = memo(function PromptNode({
           <Trash2 aria-hidden="true" size={14} />
         </ActionButton>
       </NodeActions>
-      <div
-        className="mb-2 truncate text-xs font-semibold text-brand-dark"
-        title={data.title ?? "提示词生成"}
-      >
+      {/* 标题只做定位标签：完整提示词就在下方 textarea 里可见可编辑，
+          不再挂 title —— 原生 tooltip 画在顶层，会压住 z-index 1001 的 hover 操作栏。 */}
+      <div className="mb-2 truncate text-xs font-semibold text-brand-dark">
         {data.title ?? "提示词生成"}
       </div>
       <textarea

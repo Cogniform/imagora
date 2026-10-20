@@ -75,16 +75,3 @@ export function saveAccentHue(hue: number | null): void {
     /* 隐私模式等场景下 localStorage 不可用：不持久化，不影响本次会话 */
   }
 }
-
-/** 预设色相：九色，从红到紫铺开（外观面板一点即用） */
-export const ACCENT_PRESETS: { hue: number; label: string }[] = [
-  { hue: 0, label: "红" },
-  { hue: 28, label: "橙" },
-  { hue: 48, label: "黄" },
-  { hue: 96, label: "黄绿" },
-  { hue: 152, label: "绿" },
-  { hue: 190, label: "青" },
-  { hue: 224, label: "蓝" },
-  { hue: 276, label: "紫" },
-  { hue: 320, label: "品红" },
-];

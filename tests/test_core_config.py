@@ -94,6 +94,43 @@ def test_unknown_profile_keys_detects_typos():
     assert config.unknown_profile_keys({"base_url": "https://x"}) == []
 
 
+# ---------- normalize_model_id：只在当前 profile 内纠正 ----------
+
+
+def test_normalize_model_id_folds_hyphen_within_active_profile(monkeypatch):
+    """本 profile 自己登记过全角 ID 时，半角输入被纠正成它（原有能力不退化）。"""
+    monkeypatch.setattr(
+        config, "MODELS", [{"id": "gpt\u2011image\u20112.5", "label": "x"}]
+    )
+    assert config.normalize_model_id("gpt-image-2.5") == "gpt\u2011image\u20112.5"
+
+
+def test_normalize_model_id_does_not_borrow_from_other_profiles(monkeypatch):
+    """本 profile 没登记该 ID 时原样返回，不被别的 profile 的同名条目劫持。
+
+    回归：早先遍历 all_known_models()（含全部 profile），`wanwu` 里用 U+2011
+    登记的历史条目会把本 profile 下用户打的半角名静默改写成全角 ID 再发上游，
+    上游只回 `unsupported image model`（HTTP 400），而报错里列出的支持模型
+    看起来与输入一模一样，极难排查。
+    """
+    monkeypatch.setattr(
+        config, "MODELS", [{"id": "doubao-seedream-5-0-pro", "label": "x"}]
+    )
+    # 模拟"别的 profile 里有全角条目"：all_known_models() 仍能看见它
+    monkeypatch.setattr(
+        config, "all_known_models", lambda: ["gpt\u2011image\u20112.5", "other-model"]
+    )
+    assert config.normalize_model_id("gpt-image-2.5") == "gpt-image-2.5"
+
+
+def test_normalize_model_id_passthrough_when_no_models(monkeypatch):
+    """profile 没配 models（单模型模式）时不做任何改写，避免无依据的纠正。"""
+    monkeypatch.setattr(config, "MODELS", [])
+    monkeypatch.setattr(config, "all_known_models", lambda: ["gpt\u2011image\u20112.5"])
+    assert config.normalize_model_id("gpt-image-2.5") == "gpt-image-2.5"
+    assert config.normalize_model_id(None) is None
+
+
 def test_get_api_key_follows_active_profile(monkeypatch, tmp_path):
     """ACTIVE_PROFILE=other 时优先读 API_KEY_OTHER"""
     monkeypatch.setattr(config, "ENV_FILE_PATH", tmp_path / "no.env")
@@ -257,6 +294,40 @@ def test_build_provider_catalog_tolerates_broken_profiles():
     assert config.build_provider_catalog({}) == []
     assert config.build_provider_catalog({"profiles": ["x"]}) == []
     assert config.build_provider_catalog({"profiles": {"bad": "x"}}) == []
+
+
+def test_build_provider_catalog_marks_local_sources(monkeypatch, tmp_path):
+    """`local` 标记：只有 providers.local.json 里的来源为 True，出厂来源为 False。
+
+    界面据此决定「删除这个来源」按钮出不出现 —— 出厂来源写死在 config.json 里，
+    删了下次 git pull 又回来，所以不给删。这个标记错了会让用户对着删不掉的按钮点。
+    """
+    import json
+
+    local_file = tmp_path / "providers.local.json"
+    local_file.write_text(
+        json.dumps(
+            {"version": 1, "profiles": {"mine": {"base_url": "https://m.example"}}}
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(config, "LOCAL_PROVIDERS_FILE", local_file)
+    cfg = {
+        "profiles": {
+            "factory": {"base_url": "https://f.example"},
+            "mine": {"base_url": "https://m.example"},
+        }
+    }
+    by_name = {item["name"]: item for item in config.build_provider_catalog(cfg)}
+    assert by_name["factory"]["local"] is False
+    assert by_name["mine"]["local"] is True
+
+
+def test_build_provider_catalog_without_local_file(monkeypatch, tmp_path):
+    """没有 providers.local.json 时一律标 False（不能因为读不到文件就全变可删）。"""
+    monkeypatch.setattr(config, "LOCAL_PROVIDERS_FILE", tmp_path / "absent.json")
+    (item,) = config.build_provider_catalog({"profiles": {"only": {}}})
+    assert item["local"] is False
 
 
 def test_provider_catalog_matches_local_config_json():

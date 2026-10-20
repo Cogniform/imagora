@@ -19,7 +19,22 @@ dev = [
 ]
 
 [tool.uv]
-index-url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+# 默认索引显式钉在官方 PyPI（**提交物**，必须对所有人中性）。
+#
+# 为什么不能用 `index-url = tuna`：uv.lock 会把 registry **固化到每个包**，连
+# sdist/wheels 的绝对下载 URL 一起记（锁里存的是镜像站物理地址）。于是
+# `uv sync --frozen/--locked` 只认 lock 里记的地址，job 级 env 的 UV_INDEX_URL
+# 会被忽略 —— 海外 runner 去连国内镜像必然超时（连续两次挂在 uv sync：
+# 先 packaging 后 charset-normalizer）。
+#
+# 同理，生成锁文件的机器若配了镜像，锁也会被写成镜像地址。所以索引这件事
+# 必须由仓库自己钉死，不能依赖「跑命令那台机器的全局配置」。
+#
+# 本地要加速不改这里：见 README 的「本地加速」一节（改本机全局 uv.toml）。
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.org/simple"
+default = true
 
 [tool.ruff]
 target-version = "py311"

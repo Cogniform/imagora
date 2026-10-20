@@ -21,8 +21,16 @@ import sys
 import warnings
 from pathlib import Path
 
+from core import provider_store
+
 # ---------- 工作根（启动时固定一次，后续路径统一以此为基准） ----------
 WORK_ROOT = Path.cwd()
+
+# 应用根目录：config.json / .env / providers.local.json 三者同级。
+# 打包成 exe 后 cwd 可能是任意目录，此时以可执行文件所在目录为准。
+_APP_ROOT = Path(os.environ.get("IMAGORA_APP_ROOT", Path.cwd()))
+if getattr(sys, "frozen", False):
+    _APP_ROOT = Path(sys.executable).resolve().parent
 
 # ---------- 内置默认值（兜底，profile 未覆盖的字段回退到这里） ----------
 _DEFAULTS = {
@@ -86,6 +94,66 @@ def _load_config_file() -> dict:
 
 _cfg = _load_config_file()
 
+# ---------- 本机自定义来源（providers.local.json）合并进出厂 profiles ----------
+# 「添加第三方供应商」写不进 config.json（git 跟踪，界面永不写），也塞不进 .env
+# （覆盖通道只有 4 个扁平键，且都挂在已注册 profile 下，造不出新 profile）。
+# 因此本机新增的来源单独存 providers.local.json（git 忽略），在这里合并。
+#
+# 合并后 _cfg["profiles"] 就是**完整目录**：resolve_profile_config /
+# provider_catalog / describe_config / registeredProfiles 全部零改动自动认新来源。
+LOCAL_PROVIDERS_FILE = _APP_ROOT / provider_store.LOCAL_FILE_NAME
+
+
+def _merge_local_providers(cfg: dict) -> dict:
+    """把本机来源并进 cfg（返回新的 cfg，不改入参）。"""
+    if not isinstance(cfg, dict):
+        return cfg
+    local = provider_store.load_local_providers(LOCAL_PROVIDERS_FILE)
+    if not local["profiles"]:
+        return cfg
+    merged = dict(cfg)
+    merged["profiles"] = provider_store.merge_profiles(
+        cfg.get("profiles") or {}, local["profiles"]
+    )
+    return merged
+
+
+_cfg = _merge_local_providers(_cfg)
+
+
+def reload_config() -> None:
+    """重新读盘并刷新全部模块级常量（新建来源后调用，免重启）。
+
+    为什么要「免重启」：配置写入的既有语义是「一律标记待重启」（全是 import 时
+    求值的模块级常量，没有可热加载的部分，见 docs/ARCHITECTURE.md 4.4）。但新增
+    一个**来源**不同 —— 它不改变当前生效的 profile 与模型，只是让目录里多一条。
+    不刷新的话用户刚加的来源在界面上看不见，得关掉重开才出现，体验断层。
+
+    实现上就是把「导入时做过的那串求值」重跑一遍。顺序不能乱：
+    profile 解析 → 环境覆盖 → 各常量。
+    """
+    global _cfg, ACTIVE_PROFILE, _profile
+    global BASE_URL, API_PATHS, PROFILE_LABEL
+    global MODELS, RATIOS, SIZE_OPTIONS, QUALITY_OPTIONS
+    global DEFAULT_MODEL, DEFAULT_QUALITY, DEFAULT_SIZE, DEFAULT_TIER
+
+    _cfg = _merge_local_providers(_load_config_file())
+    _load_env_file()
+    ACTIVE_PROFILE, _profile = resolve_profile_config(
+        _cfg, os.environ.get("ACTIVE_PROFILE")
+    )
+    BASE_URL = _get("base_url")
+    API_PATHS = _get("api_paths")
+    PROFILE_LABEL = _get("label") if isinstance(_get("label"), str) else ""
+    MODELS = normalize_models(_get("models"))
+    RATIOS = _get("ratios")
+    SIZE_OPTIONS = _get("size_options")
+    QUALITY_OPTIONS = _get("quality_options")
+    DEFAULT_MODEL = _get("default_model")
+    DEFAULT_QUALITY = _get("default_quality")
+    DEFAULT_SIZE = _get("default_size")
+    DEFAULT_TIER = _get("default_tier")
+
 
 def resolve_profile_config(
     cfg: dict, env_active: str | None
@@ -117,9 +185,7 @@ def unknown_profile_keys(profile: dict) -> list[str]:
 
 
 # ---------- .env 加载（密钥与本地覆盖；不覆盖已存在的环境变量） ----------
-_APP_ROOT = Path(os.environ.get("IMAGORA_APP_ROOT", Path.cwd()))
-if getattr(sys, "frozen", False):
-    _APP_ROOT = Path(sys.executable).resolve().parent
+# _APP_ROOT 在文件顶部定义（providers.local.json 的合并也要用它，故提前）。
 ENV_FILE_PATH = _APP_ROOT / ".env"
 
 
@@ -129,18 +195,38 @@ _ENV_FILE_KEYS: set[str] = set()
 
 
 def _load_env_file():
-    """读取 .env（KEY=VALUE，# 注释），已存在的环境变量不覆盖"""
-    if not ENV_FILE_PATH.exists():
-        return
-    for line in ENV_FILE_PATH.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        name = key.strip()
-        if name and name not in os.environ:
+    """读取 .env（KEY=VALUE，# 注释），真正来自系统环境变量的键不覆盖。
+
+    「已存在」必须区分来源，否则热加载永远不生效：首次导入时本函数已经把 .env
+    的值灌进了 os.environ，reload_config() 再调本函数时每个键都「已存在」→ 一个
+    都不更新，界面刚写进 .env 的地址/模型/密钥永远读不到（表现就是「填了 API Key
+    却提示要重启」）。所以判据是 `name in os.environ and name not in _ENV_FILE_KEYS`
+    —— 只有用户自己 export 的系统环境变量才享有优先权。
+
+    反过来也要处理：上一轮来自 .env、这一轮文件里被删掉或被注释掉的键，必须从
+    os.environ 撤掉。否则「清空密钥」（config_write 是注释掉而不是删除）之后热加载
+    仍能读到旧值，等于没清。
+    """
+    previous = set(_ENV_FILE_KEYS)
+    _ENV_FILE_KEYS.clear()
+    seen: set[str] = set()
+    if ENV_FILE_PATH.exists():
+        for line in ENV_FILE_PATH.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            name = key.strip()
+            if not name:
+                continue
+            # 用户自己 export 的变量优先，不被 .env 覆盖
+            if name in os.environ and name not in previous:
+                continue
             os.environ[name] = value.strip().strip('"').strip("'")
             _ENV_FILE_KEYS.add(name)
+            seen.add(name)
+    for name in previous - seen:
+        os.environ.pop(name, None)
 
 
 _load_env_file()
@@ -155,9 +241,62 @@ for _k in unknown_profile_keys(_profile):
     )
 
 
+# ---------- 本机覆盖（.env）：可被界面写入的三个字段 ----------
+# 沿用既有的 API_KEY_<PROFILE> 命名约定（见 .env.example）：
+#   config.json = 出厂目录（git 跟踪，界面永不写）
+#   .env        = 本机覆盖 + 密钥（git 忽略，界面只写这里）
+#
+# 为什么只有这三个：它们是「我这台机器用哪家接口/哪个模型」的本机偏好；
+# ratios / size_options / quality_options / models 是目录数据（价目表与能力清单），
+# 开放环境变量覆盖会把 _get 变成解析器，收益为零。
+# 未设置环境变量时 _env_override_value 一律返回 None，_get 的回退路径与改动前逐字相同。
+_ENV_OVERRIDE_KEYS = {
+    "base_url": "BASE_URL",
+    "default_model": "MODEL",
+    "api_paths": "API_PATH",
+}
+
+
+def env_override_name(key: str) -> str | None:
+    """当前 profile 下该键对应的环境变量名（不读取值）。"""
+    prefix = _ENV_OVERRIDE_KEYS.get(key)
+    if not prefix or not ACTIVE_PROFILE:
+        return None
+    return f"{prefix}_{ACTIVE_PROFILE.upper()}"
+
+
+def _env_override_value(key: str) -> str | None:
+    """本机 .env 覆盖的**实际值**；未设置（缺失或空白）返回 None。
+
+    空白值视为未设置：宁可回落到出厂值，也不要"配了个空地址"。
+    """
+    name = env_override_name(key)
+    if not name:
+        return None
+    return (os.environ.get(name) or "").strip() or None
+
+
 def _get(key: str):
-    """取当前 profile 的配置项，缺失回退内置默认"""
-    return _profile.get(key, _DEFAULTS[key])
+    """取当前 profile 的配置项：.env 本机覆盖 > profile > 内置默认。
+
+    环境变量未设置时，下面两行回退路径与改动前完全一致。
+    """
+    override = _env_override_value(key)
+    if override is None:
+        return _profile.get(key, _DEFAULTS[key])
+    if key == "api_paths":
+        # 单路径覆盖同时用于 generations 与 edits（界面只暴露"接口路径"一项）
+        return {"generations": override, "edits": override}
+    return override
+
+
+def source_of_value(key: str) -> str:
+    """某个键当前生效值的来源标签（供 /api/config 的 profileView 使用）。"""
+    if _env_override_value(key) is not None:
+        name = env_override_name(key)
+        assert name is not None
+        return f".env {name}" if name in _ENV_FILE_KEYS else f"环境变量 {name}"
+    return _SRC_PROFILE if key in _profile else _SRC_FALLBACK
 
 
 # ---------- 接口 ----------
@@ -246,19 +385,26 @@ def fold_model_id(model_id: str | None) -> str:
 
 
 def normalize_model_id(model_id: str | None) -> str | None:
-    """把用户给的模型 ID 纠正为配置里的**真实 ID**，无法匹配则原样返回。
+    """把用户给的模型 ID 纠正为**当前 profile** 里的真实 ID，无法匹配则原样返回。
 
     背景：中转站的 `gpt‑image‑2.5` 用的是全角连字符 U+2011，与键盘能打出的
     半角 `gpt-image-2.5` 在界面上毫无区别。用户手打、或沿用历史记录时必然
     拿到半角版本，请求会被上游直接判为 model_not_found（404）。
     这里做一次折叠比对，命中已知模型就换回配置里的正确 ID。
+
+    只查当前 profile 的 `MODELS`，**不跨 profile**：模型 ID 是各家上游自己的
+    标识，同名不代表同一个东西。早先这里遍历 all_known_models()（含其它全部
+    profile），于是别的 profile 里一条用全角连字符登记的历史条目，会把本
+    profile 下用户打的半角名静默改写成那条全角 ID 再发给上游——上游只回
+    `unsupported image model`，而报错里列出的"支持的模型"看起来与用户输入的
+    一模一样，极难排查。纠正只在"本 profile 自己登记过"时才有依据。
     """
     if not model_id:
         return model_id
     folded = fold_model_id(model_id)
-    for known in all_known_models():
-        if fold_model_id(known) == folded:
-            return known
+    for known in MODELS:
+        if fold_model_id(known["id"]) == folded:
+            return known["id"]
     return model_id
 
 
@@ -505,20 +651,32 @@ def build_provider_catalog(cfg: dict) -> list[dict]:
     把各 profile 的 base_url + sizes + models 一并下发，前端才能按地址自己换表；
     profile 增删来源时前端零改动。
 
-    每项：{name, label, baseUrl, defaultModel, defaultQuality, defaultSize, sizes, models}
+    每项：{name, label, baseUrl, apiPath, defaultModel, defaultQuality, defaultSize, sizes, models, local}
+
+    `local` 标记这条来源是否只存在于本机的 `providers.local.json`：界面据此决定
+    能不能删（出厂来源写死在 config.json 里，删了下次 `git pull` 又回来，界面不提供）。
     """
     profiles = cfg.get("profiles")
     if not isinstance(profiles, dict):
         return []
+    local_names = provider_store.load_local_providers(LOCAL_PROVIDERS_FILE)["profiles"]
     catalog: list[dict] = []
     for name, profile in profiles.items():
         if not isinstance(profile, dict):
             continue
+        paths = profile.get("api_paths")
+        if not isinstance(paths, dict):
+            paths = _DEFAULTS["api_paths"]
         catalog.append(
             {
                 "name": str(name),
                 "label": str(profile.get("label") or name),
                 "baseUrl": str(profile.get("base_url") or _DEFAULTS["base_url"]),
+                # 供配置编辑器在切换 profile 时预览该来源的接口路径
+                # （不带上它，前端切了 profile 只能沿用上一个来源的路径）
+                "apiPath": str(
+                    paths.get("generations") or _DEFAULTS["api_paths"]["generations"]
+                ),
                 "defaultModel": str(
                     profile.get("default_model") or _DEFAULTS["default_model"]
                 ),
@@ -530,6 +688,7 @@ def build_provider_catalog(cfg: dict) -> list[dict]:
                 ),
                 "sizes": list(profile.get("size_options") or _DEFAULTS["size_options"]),
                 "models": normalize_models(profile.get("models")),
+                "local": str(name) in local_names,
             }
         )
     return catalog

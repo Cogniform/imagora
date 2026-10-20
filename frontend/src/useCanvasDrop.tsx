@@ -19,7 +19,7 @@ import {
  * 职责：落点示意（跟随光标小胶囊）的显隐/定位/文案、拖放意图解析、window 级兜底守卫、
  * 工作区四事件（dragenter/over/leave/drop）。纯逻辑在 canvasDrop.ts，落点换算在 dropPointFromEvent。
  * 高频 dragover 移动只写 DOM（transform/文案），不经 React 状态；状态仅在拖拽起止等低频事件变化。
- * 工具栏拖出：落画布容器内松手才新建，画布外（工具栏/帮助栏/空白）松手取消（示意文案相应切换）。 */
+ * 工具栏拖出：落画布容器内松手才新建，画布外（工具栏/空白）松手取消（示意文案相应切换）。 */
 
 /** 落点示意未拖拽时的占位文案（实际文案在拖拽开始/进入时写入，见 showDropChip） */
 const DROP_CHIP_PLACEHOLDER = "松开添加图片";
@@ -112,7 +112,7 @@ export function useCanvasDrop<N extends Node = Node, E extends Edge = Edge>({
     chip.style.transform = `translate(${Math.max(DROP_CHIP_MARGIN, x)}px, ${Math.max(DROP_CHIP_MARGIN, y)}px)`;
   }, []);
 
-  /** 拖放落点换算：屏幕坐标 → 画布坐标；落点在工作区但画布外（工具栏/帮助栏）时夹紧到画布边缘，
+  /** 拖放落点换算：屏幕坐标 → 画布坐标；落点在工作区但画布外（工具栏）时夹紧到画布边缘，
    *  保证节点始终落在可见画布内（实例未就绪回退视口中心定位）。 */
   const dropPointFromEvent = useCallback(
     (clientX: number, clientY: number): { x: number; y: number } => {
@@ -216,7 +216,7 @@ export function useCanvasDrop<N extends Node = Node, E extends Edge = Edge>({
       event.preventDefault();
       dragDepthRef.current = 0;
       hideDropChip();
-      // 工具栏拖出：只有落在画布容器内才新建；画布外（工具栏/帮助栏/空白）松手即取消——
+      // 工具栏拖出：只有落在画布容器内才新建；画布外（工具栏/空白）松手即取消——
       // drop 派发到工作区根节点（整体接管 preventDefault）后才走到这里，画布外直接 return 不再夹紧放置。
       if (kind !== "images") {
         const el = canvasRef.current;
@@ -267,7 +267,7 @@ export function useCanvasDrop<N extends Node = Node, E extends Edge = Edge>({
         >
           <div
             ref={dropChipInnerRef}
-            className={`canvas-drop-chip flex items-center gap-2 rounded-full border border-brand/40 bg-white/95 px-3 py-1.5 text-sm font-medium text-neutral-700 shadow-md ${dropIntent ? "show" : ""}`}
+            className={`canvas-drop-chip surface-float flex items-center gap-2 rounded-full border border-brand/40 px-3 py-1.5 text-sm font-medium text-neutral-700 shadow-md ${dropIntent ? "show" : ""}`}
           >
             <span className="drop-chip-icon drop-chip-icon--create">
               {dropIntent === "prompt" ? (

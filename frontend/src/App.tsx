@@ -1,26 +1,37 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { generationHistory, getConfig, getHealthDetails, openFolder, readPersonalApiPresets, readPersonalApiSettings, rememberOutputDir, savePersonalApiPresets, savePersonalApiSettings } from "./api";
+import { deleteProvider, generationHistory, getConfig, getHealthDetails, isHttpError, openFolder, rememberOutputDir, writeConfig } from "./api";
 import { useGenerationTask } from "./useGenerationTask";
-import { Palette } from "lucide-react";
-import { ACCENT_PRESETS, accentForWindow, accentFromHue, hueForWindow, readAccentHue, saveAccentHue } from "./accent";
+import { Palette, Plug } from "lucide-react";
+import { accentForWindow, accentFromHue, hueForWindow, readAccentHue, saveAccentHue } from "./accent";
 import { clearWallpaperImage, purgeLegacyWallpaperSettings, readWallpaperImage, saveWallpaperImage } from "./wallpaperStore";
 import { readCanvasBounds, saveCanvasBounds } from "./canvasBounds";
 import {
-  DEFAULT_BACKGROUND_PRESET,
-  PRESET_MATERIALS,
-  PRESET_WALLPAPERS,
-  presetWallpaperOf,
+  BACKGROUND_PRESETS,
   readBackgroundPreset,
   saveBackgroundPreset,
   type BackgroundPresetId,
 } from "./backgroundPreset";
-import { SURFACE_TRANSPARENCY_DEFAULT, SURFACE_TRANSPARENCY_LIMITS, readSurfaceTransparency, saveSurfaceTransparency, surfaceTokens } from "./surface";
-import type { AppConfig, ConfigProfileView, GenerationTaskStatus, ModelOption, PersonalApiPreset, PersonalApiSettings, ProviderCatalog, RefItem, ResultItem } from "./types";
+import {
+  SURFACE_TRANSPARENCY_LIMITS,
+  readSurfaceTransparency,
+  saveSurfaceTransparency,
+  surfaceTokens,
+  surfaceVarList,
+} from "./surface";
+import {
+  WALLPAPER_BLUR_LIMITS,
+  WALLPAPER_BRIGHTNESS_LIMITS,
+  readWallpaperBlur,
+  readWallpaperBrightness,
+  saveWallpaperBlur,
+  saveWallpaperBrightness,
+  wallpaperFilter,
+} from "./wallpaperAdjust";
+import type { AppConfig, ConfigFileState, GenerationTaskStatus, RefItem, ResultItem } from "./types";
 import { errMessage, generatingLabel } from "./format";
 import { clearInheritedState, readInheritedState, saveInheritedState } from "./windowInherit";
 import { pickRecentPrompts } from "./recentPrompts";
-import { applyProviderToForm } from "./providerSwitch";
-import { findProvider as findCatalogProvider, priceSummary, qualityAppliesTo, resolveSizes } from "./apiCatalog";
+import { findProvider as findCatalogProvider, qualityAppliesTo, resolveSizes } from "./apiCatalog";
 import { BRAND_LOGO_PATH, BRAND_LOGO_VIEWBOX, brandLogoSvg } from "./brand/logo";
 import { UploadZone } from "./components/UploadZone";
 import { FolderPicker } from "./components/FolderPicker";
@@ -28,6 +39,7 @@ import { ResultPanel } from "./components/ResultPanel";
 import { LogLine } from "./components/LogLine";
 import { ModalShell } from "./components/ModalShell";
 import { Select } from "./components/Select";
+import { ProviderModal } from "./components/ProviderModal";
 import { CanvasPage } from "./components/CanvasPage";
 
 const WIN_KEY = "aig-win";
@@ -87,9 +99,12 @@ function AppearanceModal({
   onBackgroundPresetChange,
   surfaceTransparency,
   onSurfaceTransparencyChange,
+  wallpaperBlur,
+  onWallpaperBlurChange,
+  wallpaperBrightness,
+  onWallpaperBrightnessChange,
   canvasBounds,
   onCanvasBoundsChange,
-  onReset,
   onClose,
 }: {
   /** 自定义主体色相；null 表示未自定义（回到按窗口自动配色） */
@@ -110,11 +125,17 @@ function AppearanceModal({
   surfaceTransparency: number;
   /** 改通透度 */
   onSurfaceTransparencyChange: (value: number) => void;
+  /** 壁纸模糊半径 px（0 = 原图） */
+  wallpaperBlur: number;
+  /** 改壁纸模糊 */
+  onWallpaperBlurChange: (value: number) => void;
+  /** 壁纸明暗（1 = 原样，>1 提亮，<1 压暗） */
+  wallpaperBrightness: number;
+  /** 改壁纸明暗 */
+  onWallpaperBrightnessChange: (value: number) => void;
   /** 画布是否显示自己的边界（边框 + 底色） */
   canvasBounds: boolean;
   onCanvasBoundsChange: (visible: boolean) => void;
-  /** 一键恢复默认外观（主体色回自动、背景回默认纯白、壁纸清空、通透度与画布边界回默认） */
-  onReset: () => void;
   onClose: () => void;
 }) {
   /** Esc 关闭（与图片预览弹窗同一套行为：模态开了就该能用 Esc 退出来） */
@@ -125,15 +146,6 @@ function AppearanceModal({
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onClose]);
-
-  /** 外观是否已经等于「没设置过」的样子：用来把「恢复默认」置灰。
-   *  置灰而不是隐藏——用户遇到问题时会先来找这个按钮，藏起来等于没做。 */
-  const isDefaultAppearance =
-    accentHue === null &&
-    backgroundPreset === DEFAULT_BACKGROUND_PRESET &&
-    !wallpaper.hasImage &&
-    Math.abs(surfaceTransparency - SURFACE_TRANSPARENCY_DEFAULT) < 1e-6 &&
-    canvasBounds;
 
   return (
     <ModalShell title="外观" onClose={onClose} className="modal-panel--md corner-rings">
@@ -146,28 +158,13 @@ function AppearanceModal({
 
         {/* 内容区走 .modal-body：加了壁纸与画布开关后内容变高，超出时自己滚动并预留滚动条位 */}
         <div className="modal-body space-y-4">
-          {/* 九色预设：点一个即整页换主色（按钮/角标/选中态/连线/聚焦环全部跟随） */}
-          <div>
-            <p className="field-label mb-2">主体色</p>
-            <div className="accent-swatches">
-              {ACCENT_PRESETS.map((preset) => (
-                <button
-                  key={preset.hue}
-                  type="button"
-                  title={preset.label}
-                  aria-label={preset.label}
-                  aria-pressed={accentHue === preset.hue}
-                  className={`accent-swatch ${accentHue === preset.hue ? "is-on" : ""}`}
-                  style={{ background: accentFromHue(preset.hue).brand }}
-                  onClick={() => onAccentHueChange(preset.hue)}
-                />
-              ))}
-            </div>
-          </div>
-
+          {/* 主体色：只有一条色相滑杆，排版与下面的「卡片通透度」逐行对齐。
+              九色预设方块已移除（2026-10-03）：滑杆本身就能到任意色相，方块是重复入口；
+              而且方块行 + 「色相微调」行说的是同一件事，两行并列反而让人不确定以哪个为准。
+              原「当前 / 生效范围」两张只读行也一并删去——值已经在滑杆右侧，范围写进下面一句说明。 */}
           <div>
             <label className="field-label mb-2" htmlFor="accent-hue">
-              色相微调
+              主体色
             </label>
             <div className="flex items-center gap-3">
               <input
@@ -177,91 +174,54 @@ function AppearanceModal({
                 max={359}
                 value={accentHue ?? 0}
                 onChange={(e) => onAccentHueChange(Number(e.target.value))}
-                className="accent-hue"
+                className="accent-hue flex-1"
               />
               <span className="text-muted w-16 text-right text-xs">
                 {accentHue === null ? "自动" : `${Math.round(accentHue)}°`}
               </span>
             </div>
+            <p className="text-caption mt-2">
+              {accentHue === null
+                ? "当前按窗口编号自动配色；拖动滑杆即改为自定义，对所有窗口生效。"
+                : "按钮、角标、选中态与聚焦环都跟随这个色相，对所有窗口生效。"}
+            </p>
+            {accentHue !== null && (
+              <button type="button" className="btn-ghost btn-sm mt-2" onClick={() => onAccentHueChange(null)}>
+                恢复自动配色
+              </button>
+            )}
           </div>
 
-          <div className="spec-list">
-            <div className="spec-list__row">
-              <span className="spec-list__key">当前</span>
-              <span className="spec-list__val">
-                {accentHue === null ? "按窗口编号自动配色" : `自定义色相 ${Math.round(accentHue)}°`}
-              </span>
-            </div>
-            <div className="spec-list__row">
-              <span className="spec-list__key">生效范围</span>
-              <span className="spec-list__val">所有窗口</span>
-            </div>
-          </div>
-
-          {accentHue !== null && (
-            <button type="button" className="btn-ghost btn-sm" onClick={() => onAccentHueChange(null)}>
-              恢复自动配色
-            </button>
-          )}
-
-          {/* 背景：两种铺法分开写清——上面是材质（repeat 的纯色/纹理），下面是内置壁纸（cover 大图） */}
+          {/* 背景底色：只有两项预置（跟随主体色 / 纯白）。与下面的「我的壁纸」互斥——
+              壁纸铺在整页最底层，材质底色会被它整个盖掉，两者并存等于「看着能选、实际无效」，
+              所以壁纸生效时这一栏直接禁用，并把原因写在下面。 */}
           <div className="border-t border-neutral-200/80 pt-4">
-            <p className="field-label mb-2">背景材质</p>
-            <div className="bg-swatches">
-              {PRESET_MATERIALS.map((preset) => (
+            <div className="mb-2 flex items-baseline justify-between">
+              <p className="field-label">背景材质</p>
+              {wallpaper.hasImage && <span className="text-caption">已被壁纸取代</span>}
+            </div>
+            <div className={`bg-swatches ${wallpaper.hasImage ? "opacity-45" : ""}`}>
+              {BACKGROUND_PRESETS.map((preset) => (
                 <button
                   key={preset.id}
                   type="button"
-                  title={preset.hint}
+                  disabled={wallpaper.hasImage}
+                  title={wallpaper.hasImage ? "有壁纸时改不了背景材质" : preset.hint}
                   aria-label={preset.label}
-                  aria-pressed={backgroundPreset === preset.id}
-                  className={`bg-swatch bg-swatch--${preset.id} ${backgroundPreset === preset.id ? "is-on" : ""}`}
+                  aria-pressed={backgroundPreset === preset.id && !wallpaper.hasImage}
+                  className={`bg-swatch bg-swatch--${preset.id} ${
+                    backgroundPreset === preset.id && !wallpaper.hasImage ? "is-on" : ""
+                  }`}
                   onClick={() => onBackgroundPresetChange(preset.id)}
                 />
               ))}
             </div>
 
-            {/* 第二组标签：不复用 .field-label 的 mt-4，避免与 Tailwind 工具类的层叠顺序打架 */}
-            <div className="mt-4 mb-2">
-              <p className="field-label">预设壁纸</p>
-            </div>
-            <div className="bg-walls">
-              {PRESET_WALLPAPERS.map((preset) => (
-                <button
-                  key={preset.id}
-                  type="button"
-                  title={preset.hint}
-                  aria-label={preset.label}
-                  aria-pressed={backgroundPreset === preset.id}
-                  className={`bg-wall bg-wall--${preset.id} ${backgroundPreset === preset.id ? "is-on" : ""}`}
-                  onClick={() => onBackgroundPresetChange(preset.id)}
-                >
-                  <span className="bg-wall__name">{preset.label}</span>
-                </button>
-              ))}
-            </div>
-
             <p className="text-caption mt-2">
-              {PRESET_MATERIALS.concat(PRESET_WALLPAPERS).find((preset) => preset.id === backgroundPreset)?.hint ?? ""}
+              {wallpaper.hasImage
+                ? "删掉下面的壁纸后，这里就能重新选了。"
+                : (BACKGROUND_PRESETS.find((preset) => preset.id === backgroundPreset)?.hint ?? "")}
             </p>
-            {presetWallpaperOf(backgroundPreset) !== null && wallpaper.hasImage && (
-              <p className="text-caption mt-1">预设壁纸盖住了你的自选壁纸；删掉自选壁纸也还是这张预设图。</p>
-            )}
-            {/* 选了材质却又存着自选壁纸：材质其实生效了，只是被整页壁纸层压在下面。
-                不写这句，用户会以为「点材质没反应」（实际发生过），所以连一键删除一起给。 */}
-            {presetWallpaperOf(backgroundPreset) === null && wallpaper.hasImage && (
-              <div className="mt-1 flex flex-wrap items-center gap-2">
-                <p className="text-caption">自选壁纸整页盖在材质上面，所以换材质看不出变化。</p>
-                <button
-                  type="button"
-                  className="btn-ghost btn-xs btn-danger"
-                  disabled={wallpaper.busy}
-                  onClick={onWallpaperClear}
-                >
-                  删除自选壁纸
-                </button>
-              </div>
-            )}
           </div>
 
           {/* 我的壁纸：按原图直接铺满，不缩放、不模糊、不压暗（图本体存 IndexedDB，只在本机） */}
@@ -296,8 +256,55 @@ function AppearanceModal({
               )}
             </div>
 
+            {/* 模糊 / 明暗：壁纸自身的显式属性，与「卡片通透度」互不影响。
+                默认 0 与 1 即原图——用户自己权衡可读性，系统不替他决定。 */}
+            <div className="mt-4 flex flex-col gap-4">
+              <div>
+                <label className="field-label mb-2" htmlFor="wallpaper-blur">
+                  壁纸模糊
+                </label>
+                <div className="flex items-center gap-3">
+                  <input
+                    id="wallpaper-blur"
+                    type="range"
+                    className="range-field flex-1"
+                    min={WALLPAPER_BLUR_LIMITS.min}
+                    max={WALLPAPER_BLUR_LIMITS.max}
+                    step={0.5}
+                    value={wallpaperBlur}
+                    onChange={(e) => onWallpaperBlurChange(Number(e.target.value))}
+                  />
+                  <span className="text-muted w-14 text-right text-xs">
+                    {wallpaperBlur.toFixed(1)}px
+                  </span>
+                </div>
+              </div>
+              <div>
+                <label className="field-label mb-2" htmlFor="wallpaper-brightness">
+                  壁纸明暗
+                </label>
+                <div className="flex items-center gap-3">
+                  <input
+                    id="wallpaper-brightness"
+                    type="range"
+                    className="range-field flex-1"
+                    min={WALLPAPER_BRIGHTNESS_LIMITS.min}
+                    max={WALLPAPER_BRIGHTNESS_LIMITS.max}
+                    step={0.05}
+                    value={wallpaperBrightness}
+                    onChange={(e) => onWallpaperBrightnessChange(Number(e.target.value))}
+                  />
+                  <span className="text-muted w-14 text-right text-xs">
+                    {wallpaperBrightness.toFixed(2)}
+                  </span>
+                </div>
+              </div>
+            </div>
+
             <p className="text-caption mt-2">
-              选一张本地图片当整页背景，按原图铺满、不做任何处理（只存本机，不上传）。
+              选一张本地图片当整页背景，只存本机、不上传。模糊与明暗只改壁纸本身，不影响卡片通透度；
+              默认 0 与 1 即原图。
+              壁纸与上面的背景材质只能二选一：设了壁纸，材质就停用；删掉壁纸，材质自动恢复。
             </p>
             {wallpaper.notice !== null && <p className="text-caption mt-1">{wallpaper.notice}</p>}
           </div>
@@ -339,566 +346,344 @@ function AppearanceModal({
               aria-label="显示画布边界"
             />
           </div>
-
-          {/* 一键恢复默认外观：这一屏每一项都清回「没设置过」的样子（默认背景 = 纯白）。
-              放在最底部，与上面各分区同一条分隔线语言。 */}
-          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-neutral-200/80 pt-4">
-            <div>
-              <p className="field-label">恢复默认外观</p>
-              <p className="text-caption mt-0.5">
-                {isDefaultAppearance
-                  ? "当前已是默认外观（纯白底、无壁纸）"
-                  : "主体色回自动、背景回纯白、壁纸清空、通透度与画布边界回默认"}
-              </p>
-            </div>
-            <button
-              type="button"
-              className="btn-ghost btn-sm"
-              onClick={onReset}
-              disabled={isDefaultAppearance || wallpaper.busy}
-            >
-              恢复默认
-            </button>
-          </div>
         </div>
       </ModalShell>
   );
 }
 
-function PersonalApiModal({
-  settings,
-  defaults,
-  profileView,
-  models,
-  providers,
-  onSave,
+/** 配置切换 —— 在两份已知清单里**选**，不在这里**写**配置。
+ *
+ * 需要的功能只有两件：换来源（profile）、换该来源下的模型。两者都是从清单里挑，
+ * 适合 UI；而接口地址 / 接口路径 / 密钥是「这个来源**是什么**」的定义性内容，
+ * 写一次就不动，用文本编辑器改更直接（也符合已定的分层：config.json = 出厂目录、
+ * .env = 本机覆盖）。把「选择」和「编辑」混在一个弹窗里，正是旧版让人别扭的根因。
+ *
+ * 其余要点（详见 docs/config-editor-ui-design.md）：
+ * - 保存按钮 = 与磁盘值有差异才亮（与文本编辑器 Ctrl+S 同构）；保存**不关窗**
+ * - 待重启：写进文件但进程未重载，标 pending；顶栏另有汇总
+ * - 并发：写前带 expectedMtimes，服务端发现文件被外部改过就 409，绝不静默覆盖
+ */
+function ConfigEditorModal({
+  config,
   onClose,
+  onFileState,
+  onDeleted,
 }: {
-  settings: PersonalApiSettings | null;
-  /** /api/config 当前 profile 派生：baseUrl / apiPath / model（个人配置为空时的默认值） */
-  defaults: PersonalApiSettings;
-  /** 配置来源视图：后端配置只读展示（值 + 来自哪一层），让人看清自己覆盖的是哪一层 */
-  profileView?: ConfigProfileView | undefined;
-  /** 后端下发的可选模型清单（每个带尺寸/价格）；模型名称字段据此渲染为下拉框 */
-  models?: ModelOption[] | undefined;
-  /** 全部来源目录（各 profile 的地址 + 尺寸 + 模型）：价格按「这套接口」解析 */
-  providers?: ProviderCatalog[] | undefined;
-  onSave: (settings: PersonalApiSettings | null) => void;
+  config: AppConfig;
   onClose: () => void;
+  /** 写入成功后把新的 fileState 交回上层（顶栏 pending 角标要用） */
+  onFileState: (next: ConfigFileState) => void;
+  /** 删掉本机来源后通知上层重拉 /api/config（目录少了一条，下拉要跟着变） */
+  onDeleted: (next: ConfigFileState) => void;
 }) {
-  /** Esc 关闭（与图片预览弹窗同一套行为：模态开了就该能用 Esc 退出来） */
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose]);
+  const fileState = config.fileState;
+  /** 当前**生效**的 profile（进程正在用的那套） */
+  const activeProfile = fileState?.profile ?? config.activeProfile ?? "";
 
-  /** 页签职责：看（当前生效）/ 改（个人配置）/ 管（我的接口）——三件事互不干扰 */
-  const [tab, setTab] = useState<"active" | "edit" | "presets">("active");
-  const [form, setForm] = useState<PersonalApiSettings>(settings ?? defaults);
-  /** 「我的接口」记录（复用 presets 存储键，兼容老数据） */
-  const [presets, setPresets] = useState<PersonalApiPreset[]>(() => readPersonalApiPresets());
+  /** 选项都来自服务端下发的清单，前端不硬编码 */
+  const profileOptions = (fileState?.registeredProfiles ?? []).map((name) => ({
+    value: name,
+    label: name,
+  }));
+  const providerOf = (name: string) => (config.providers ?? []).find((p) => p.name === name);
 
-  /** 当前真正生效的一份：个人配置优先，否则用后端 profile 派生的默认值 */
-  const usingPersonal = Boolean(settings);
-  const activeSettings = settings ?? defaults;
+  /** 磁盘基线：文件里选的是哪个 profile、哪个模型。这是「有没有改动」的比较基准。 */
+  const fileProfile = fileState?.fileProfile ?? activeProfile;
+  const fileModel = fileState?.fields.model.fileValue ?? config.defaultModel ?? "";
 
-  /** 一键切换到某条记录：直接生效并关闭弹窗（无需再进「个人配置」页） */
-  const switchToPreset = (preset: PersonalApiPreset) => {
-    savePersonalApiSettings(preset.settings);
-    onSave(preset.settings);
-    onClose();
+  const [pickedProfile, setPickedProfile] = useState(fileProfile);
+  const [pickedModel, setPickedModel] = useState(fileModel);
+  const [baseline, setBaseline] = useState({ profile: fileProfile, model: fileModel });
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<{ kind: "ok" | "err" | "conflict"; text: string } | null>(null);
+  const [pending, setPending] = useState<string[]>(fileState?.pending ?? []);
+  /** 保存成功后的短暂反馈：2 秒后回到无变化态 */
+  const [justSaved, setJustSaved] = useState(false);
+  const savedTimer = useRef<number | null>(null);
+  /** 删除二次确认：null = 没在确认；否则是待删的来源名 */
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+
+  useEffect(() => () => {
+    if (savedTimer.current !== null) window.clearTimeout(savedTimer.current);
+  }, []);
+
+  /** 选中来源的模型清单：必须跟着**选中**的 profile 走。
+   *  用 config.models（当前生效 profile 的）会出现「选着 wanwu、下拉里列的是 volc 的模型」。 */
+  const pickedProvider = providerOf(pickedProfile);
+  const modelOptions = (pickedProvider?.models ?? []).map((m) => ({ value: m.id, label: m.label }));
+  const activeProvider = providerOf(activeProfile);
+
+  /** 选中的这条是不是本机来源（界面建的），以及能不能删。
+   *  出厂来源删不掉（config.json 里写死，删了下次 git pull 又回来），
+   *  正在生效的也删不掉（删了进程仍在用旧配置，下次启动静默回落，报错时联想不到原因）。 */
+  const pickedIsLocal = pickedProvider?.local === true;
+  const pickedInUse = pickedProfile === activeProfile;
+  const canDelete = pickedIsLocal && !pickedInUse && !busy;
+
+  /** 切来源时把模型一起带到该来源的默认值：否则模型还停在上一个来源的 id，
+   *  保存下去就是一个「新来源 + 旧模型」的无效组合。 */
+  const changeProfile = (name: string) => {
+    setPickedProfile(name);
+    const next = providerOf(name);
+    if (next) setPickedModel(next.defaultModel);
   };
-  const removePreset = (id: string) => {
-    const next = presets.filter((item) => item.id !== id);
-    setPresets(next);
-    savePersonalApiPresets(next);
-  };
-  const clearPersonal = () => {
-    savePersonalApiSettings(null);
-    onSave(null);
-    onClose();
-  };
-  /** 把一份配置记进「我的接口」：按 baseUrl+model+key 去重，命中则更新 lastUsed 并置顶。
-   *  name 为空时自动生成（来源标签 + 模型），用户无需手动命名。 */
-  const recordUsage = (settings: PersonalApiSettings) => {
-    const key = `${settings.baseUrl}|${settings.model}|${settings.apiKey}`;
-    const name = autoName(settings);
-    const existing = presets.find(
-      (p) => `${p.settings.baseUrl}|${p.settings.model}|${p.settings.apiKey}` === key,
-    );
-    const entry: PersonalApiPreset = {
-      id: existing?.id ?? `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      name: existing?.name || name,
-      settings,
-      lastUsed: Date.now(),
-    };
-    // 最近使用置顶（去重后的列表，最新在前）
-    const next = [entry, ...presets.filter((p) => p.id !== entry.id)];
-    setPresets(next);
-    savePersonalApiPresets(next);
-    return entry;
-  };
-  const saveAndUse = () => {
-    const next = { ...form, baseUrl: form.baseUrl.trim().replace(/\/$/, "") };
-    savePersonalApiSettings(next);
-    recordUsage(next); // 自动记进「我的接口」，方便随时切回
-    onSave(next);
-    onClose();
-  };
-  /** 后端各字段的「值 + 来源」（由 /api/config 的 profileView 提供，前端不自行推断分层规则） */
-  const backendField = (key: string) => profileView?.fields.find((field) => field.key === key);
-  /** 使用中这套接口的尺寸表：按地址命中来源、按模型取档位 —— 价目表按来源分家，
-   *  切到中转站就该显示中转站的价（见 apiCatalog.ts）。命中不了就不显示，不猜价。 */
-  const activeCatalogProvider = findCatalogProvider(providers, activeSettings.baseUrl);
-  const activeCatalogSizes = resolveSizes({
-    providers,
-    baseUrl: activeSettings.baseUrl,
-    modelId: activeSettings.model,
-  });
-  /** 生效值：标签 → 值（等宽只用在真正要逐字核对的地址 / 路径 / Key 上）。
-   *  来源只在**与主流来源不同**时才显示 —— 同一句「个人配置」重复四遍纯属噪音。 */
-  const dominantSource = usingPersonal ? "个人配置" : (backendField("baseUrl")?.source ?? "");
-  const activeRows = [
-    { key: "接口地址", value: activeSettings.baseUrl, mono: true, source: usingPersonal ? "个人配置" : (backendField("baseUrl")?.source ?? "") },
-    { key: "接口路径", value: activeSettings.apiPath, mono: true, source: usingPersonal ? "个人配置" : (backendField("apiPath")?.source ?? "") },
-    { key: "模型", value: activeSettings.model, mono: false, source: usingPersonal ? "个人配置" : (backendField("model")?.source ?? "") },
-    ...(activeCatalogSizes.length
-      ? [
-          {
-            key: "尺寸单价",
-            value: priceSummary(activeCatalogSizes),
-            mono: false,
-            // 价目表来自哪家：挪到下方「可选尺寸」标题里说，行内再标一次会撑宽这一行
-            source: "",
-          },
-        ]
-      : []),
-    {
-      key: "API Key",
-      // 不写「（本机浏览器）」——顶部已经说过「仅本机浏览器」，同一件事说两遍
-      value: usingPersonal
-        ? (activeSettings.apiKey ? "已保存" : "未填写")
-        : (backendField("apiKey")?.configured ? "已配置" : "未配置"),
-      mono: false,
-      source: usingPersonal ? "个人配置" : (backendField("apiKey")?.source ?? ""),
-    },
-  ];
-  /** 服务来源预设：选定后自动带出接口地址 / 路径 / 模型，用户只需填 API Key。
-   *  两个来源互斥：豆包 Seedream 走火山官方；其余 OpenAI 兼容服务走 wanwu 中转站。
-   *  modelList 是该来源支持的模型（下拉框选项），首项为默认模型。 */
-  const PROVIDERS: {
-    id: string;
-    label: string;
-    baseUrl: string;
-    apiPath: string;
-    model: string;
-    hint: string;
-    modelList: { value: string; label: string; note: string }[];
-  }[] = [
-    {
-      id: "doubao",
-      label: "豆包 Seedream（火山方舟官方）",
-      baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
-      apiPath: "/images/generations",
-      model: "doubao-seedream-5-0-pro-260628",
-      hint: "填入火山方舟控制台获取的 ark- 开头 Key",
-      // 豆包主流生图模型（火山方舟官方 ID，均经账号可用性核验）
-      // 排在前面的是「建议用」：5.0 系列分辨率最全、支持 4K 之外的 1.5K 档；4.0 系列唯一可出 4K
-      modelList: [
-        { value: "doubao-seedream-5-0-pro-260628", label: "Seedream 5.0 pro", note: "1K/1.5K/2K，画质最细腻，仅文生图/单图" },
-        { value: "doubao-seedream-5-0-flash-260915", label: "Seedream 5.0 flash", note: "1K/1.5K/2K，更快更省，批量出图首选" },
-        { value: "doubao-seedream-4-0-20260415", label: "Seedream 4.0（2026版）", note: "1K/2K/4K，要 4K 选它，仅 jpeg" },
-        { value: "doubao-seedream-5-0-260128", label: "Seedream 5.0", note: "1K/1.5K/2K（退役中，建议换 5.0 pro）" },
-        { value: "doubao-seedream-4-5-251128", label: "Seedream 4.5", note: "2K/4K，仅 jpeg（退役中，建议换 4.0 2026版）" },
-        { value: "doubao-seedream-4-0-250828", label: "Seedream 4.0", note: "1K/2K/4K，仅 jpeg（退役中，建议换 4.0 2026版）" },
-      ],
-    },
-    {
-      id: "wanwu",
-      label: "wanwu 中转站（OpenAI 兼容）",
-      baseUrl: "https://2api.aiwanwu.cc",
-      apiPath: "/v1/images/generations",
-      model: "gpt-image-2.5-flare",
-      hint: "填入中转站获取的 sk- 开头 Key",
-      modelList: [
-        { value: "gpt-image-2.5-flare", label: "GPT Image 2.5 Flare", note: "1K/2K，中转站主力（已实测可用）" },
-        { value: "gpt-image-2.5-sunburst", label: "GPT Image 2.5 Sunburst", note: "1K/2K，中转站变体" },
-        { value: "gpt‑image‑2", label: "GPT Image 2", note: "1K/2K，仅登记别名，调用会报错" },
-        { value: "gpt‑image‑2.5", label: "GPT Image 2.5", note: "1K/2K，仅登记别名，调用会报错" },
-      ],
-    },
-  ];
-  /** 按 baseUrl 反推当前选中的来源（用户手改地址后可能对不上任何预设） */
-  const matchProvider = (url: string) =>
-    PROVIDERS.find((p) => url.trim().replace(/\/$/, "") === p.baseUrl)?.id ?? "";
-  /** 来源展示名：命中预设用其 label，否则用域名（用户手填的自定义地址） */
-  const providerLabelOf = (url: string) => {
-    const hit = PROVIDERS.find((p) => url.trim().replace(/\/$/, "") === p.baseUrl);
-    if (hit) return hit.label.replace(/（.*?）/g, "");
+
+  const changed = useMemo(() => {
+    const out: string[] = [];
+    if (pickedProfile !== baseline.profile) out.push("profile");
+    if (pickedModel !== baseline.model) out.push("model");
+    return out;
+  }, [pickedProfile, pickedModel, baseline]);
+
+  const canSave = changed.length > 0 && !busy;
+
+  const save = async (opts?: { force?: boolean }) => {
+    setBusy(true);
+    setNotice(null);
     try {
-      return new URL(url).host;
-    } catch {
-      return url || "自定义接口";
+      const changes: Record<string, string> = {};
+      for (const field of changed) {
+        changes[field] = field === "profile" ? pickedProfile : pickedModel;
+      }
+      const result = await writeConfig({
+        profile: activeProfile,
+        changes,
+        // force = 用户看过冲突提示后选择「仍然覆盖」：不带 mtime，服务端不再拦
+        ...(opts?.force ? {} : { expectedMtimes: fileState?.mtimes ?? {} }),
+      });
+      setPending(result.pending);
+      onFileState(result.fileState);
+      // 写完把基线推进到刚写下的值，按钮立刻回灰（Ctrl+S 心智）
+      const nextProfile = result.fileState.fileProfile ?? pickedProfile;
+      const nextModel = result.fileState.fields.model.fileValue ?? pickedModel;
+      setBaseline({ profile: nextProfile, model: nextModel });
+      setJustSaved(true);
+      if (savedTimer.current !== null) window.clearTimeout(savedTimer.current);
+      savedTimer.current = window.setTimeout(() => setJustSaved(false), 2000);
+    } catch (err) {
+      if (isHttpError(err) && err.status === 409) {
+        setNotice({ kind: "conflict", text: "文件已被外部修改，你的修改尚未写入" });
+      } else {
+        setNotice({ kind: "err", text: errMessage(err) });
+      }
+    } finally {
+      setBusy(false);
     }
-  };
-  /** 自动命名：来源 + 模型（用户不填名字时用），便于在列表里一眼认出 */
-  const autoName = (settings: PersonalApiSettings) =>
-    [providerLabelOf(settings.baseUrl), settings.model].filter(Boolean).join(" · ");
-  /** 接口主机（列表第二行用）：预设名里只有「来源标签」，主机名才能区分同标签的不同地址 */
-  const hostOf = (url: string) => {
-    try {
-      return new URL(url).host;
-    } catch {
-      return url || "—";
-    }
-  };
-  /** 相对时间：刚刚 / N 分钟前 / N 小时前 / N 天前 */
-  const formatRelativeTime = (ts: number) => {
-    const diff = Date.now() - ts;
-    const min = Math.floor(diff / 60000);
-    if (min < 1) return "刚刚使用";
-    if (min < 60) return `${min} 分钟前`;
-    const hour = Math.floor(min / 60);
-    if (hour < 24) return `${hour} 小时前`;
-    return `${Math.floor(hour / 24)} 天前`;
-  };
-  /** 当前来源的模型选项：命中预设用其内置清单（切换来源即切换模型列表）；
-   *  未命中（自定义地址）则回退后端 /api/config 下发的 models。 */
-  const currentModelChoices = () => {
-    const provider = PROVIDERS.find((p) => p.id === providerId);
-    if (provider) return provider.modelList;
-    return (models ?? []).map((m) => ({
-      value: m.id,
-      label: m.label,
-      note: (m.note || "") + (m.output_formats?.length ? `，输出 ${m.output_formats.join("/")}` : ""),
-    }));
-  };
-  /** 把模型清单转成 Select 选项：标签带「模型名 ｜ 能力说明」 */
-  const modelOptionsFor = (list: { value: string; label: string; note?: string }[]) =>
-    list.map((m) => ({ value: m.value, label: m.note ? `${m.label} ｜ ${m.note}` : m.label }));
-  const [providerId, setProviderId] = useState(() => matchProvider(form.baseUrl));
-  /** API Key 是否明文显示（默认密文，点小眼睛才露出） */
-  const [showApiKey, setShowApiKey] = useState(false);
-  /** 打开弹窗时是否带着「已保存的 Key」——用于给出提示，避免用户以为是占位符。
-   *  只在来源与已保存配置一致时算「载入的」，换了来源后就不该再这么说。 */
-  const loadedSavedKey =
-    Boolean(settings?.apiKey) && form.apiKey === settings?.apiKey && form.baseUrl === settings?.baseUrl;
-  /** 选来源：一键带出地址 / 路径 / 模型。
-   *  Key 规则见 applyProviderToForm：换了来源就清空（两套 Key 不通用）。 */
-  const applyProvider = (id: string) => {
-    const provider = PROVIDERS.find((p) => p.id === id);
-    if (!provider) {
-      setProviderId(id);
-      return;
-    }
-    setForm((prev) => applyProviderToForm(prev, provider, providerId));
-    if (providerId !== id) setShowApiKey(false);
-    setProviderId(id);
   };
 
-  /** 字段统一形态：label（.field-label）+ 控件（.field-control），与经典表单同源。
-   *  标签只留最短的可辨认词（"图片接口路径" → "接口路径"），少占一行宽度、少一处换行。 */
-  const fields: { id: string; label: string; key: "baseUrl" | "apiKey" | "model" | "apiPath"; mono?: boolean; type?: string; placeholder?: string }[] = [
-    { id: "api-base-url", label: "接口地址", key: "baseUrl", placeholder: "https://api.example.com" },
-    { id: "api-key", label: "API Key", key: "apiKey", mono: true, type: "password", placeholder: "sk-..." },
-    { id: "api-model", label: "模型", key: "model" },
-    { id: "api-path", label: "接口路径", key: "apiPath", mono: true },
-  ];
+  /** 删掉选中的本机来源。二次确认走行内展开，不用 window.confirm（原生弹窗会阻塞
+   *  整个页面，也让「取消」变成浏览器的事而非弹窗的事）。 */
+  const removeProvider = async (name: string) => {
+    setBusy(true);
+    setNotice(null);
+    try {
+      const result = await deleteProvider(name);
+      setConfirmDelete(null);
+      onDeleted(result.fileState);
+      // 删掉的正是下拉里选中的那条：退回当前生效的来源，避免停在一个已不存在的名字上
+      setPickedProfile(result.fileState.profile ?? "");
+      const back = providerOf(result.fileState.profile ?? "");
+      setPickedModel(back?.defaultModel ?? "");
+      setBaseline({
+        profile: result.fileState.profile ?? "",
+        model: result.fileState.fields.model.fileValue ?? back?.defaultModel ?? "",
+      });
+      setPending(result.pending);
+      setNotice({
+        kind: "ok",
+        text: result.cleared.length > 0
+          ? `已删除来源「${name}」，密钥 ${result.cleared.join("、")} 已在 .env 里注释掉`
+          : `已删除来源「${name}」`,
+      });
+    } catch (err) {
+      setNotice({ kind: "err", text: errMessage(err) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
-    <ModalShell title="生图 API 设置" onClose={onClose} className="modal-panel--md api-settings-modal corner-rings">
-        <div className="mb-3 flex items-baseline justify-between">
-          <h2 className="text-base font-medium">生图 API 设置</h2>
-          {/* 一处隐私说明就够（覆盖三个页签），不再在每个页签里重复 */}
-          <span className="text-xs text-neutral-400">仅本机浏览器</span>
-        </div>
+    <ModalShell title="生图 API 配置" onClose={onClose} testId="config-editor">
+      <header className="modal-header">
+        <h3 className="modal-title">生图 API 配置</h3>
+        <p className="modal-subtitle">选一套来源与模型。地址与密钥等改文件即可。</p>
+      </header>
 
-        {/* 分段控件：看 / 改 / 管 各占一页（与顶栏模式切换同一套视觉，尺寸走 --h-ctl） */}
-        <div className="tabs mb-4" role="tablist">
-          {([["active", "使用中"], ["edit", "个人配置"], ["presets", "我的接口"]] as const).map(([id, label]) => (
-            <button
-              key={id}
-              type="button"
-              role="tab"
-              aria-selected={tab === id}
-              className="tabs__item"
-              onClick={() => setTab(id)}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+      {/* 内容区走 .modal-body：面板是 overflow:hidden 的 flex 列，不包这一层的话
+          内容超出时会被静默裁掉且滚不动。 */}
+      <div className="modal-body">
+        {profileOptions.length > 0 && (
+          <div>
+            <label className="field-label mb-2" htmlFor="cfg-profile">配置来源</label>
+            <Select
+              id="cfg-profile"
+              options={profileOptions}
+              value={pickedProfile}
+              onChange={changeProfile}
+            />
+            <p className="text-caption mt-2">
+              {pickedProvider?.label && pickedProvider.label !== pickedProfile
+                ? pickedProvider.label
+                : "换来源 = 换地址、模型与尺寸价目表"}
+            </p>
 
-        {/* 内容区：全模态只此一处滚动——页签内容再长也不会把操作栏顶出视口。
-            三页共用同一固定高度（见 index.css 的 .api-settings-modal .modal-body）：
-            高度随页签变化会让弹窗「跳大小」、底部按钮跟着上下窜，所以这里不按内容自适应。 */}
-        <div className="modal-body pr-1">
-          {tab === "active" && (
-            /* 整页撑满固定高度：规格清单在上，来源说明用 mt-auto 压到底部 ——
-               内容少的时候留白集中在中间一段，不会出现"上面挤成一条、下面空一大片" */
-            <div key="active" className="tab-panel flex h-full flex-col gap-2.5">
-              {/* 生效状态一行说清。后端生效时把 profile 名并进这一行 ——
-                  原来它在底部又占一行，和这句说的是同一件事 */}
-              <p className="flex items-center gap-2 text-[13px] text-neutral-500">
-                <span
-                  className={`inline-block h-2 w-2 shrink-0 rounded-full ${
-                    usingPersonal ? "bg-[var(--color-brand)]" : "bg-neutral-300"
-                  }`}
-                />
-                {usingPersonal
-                  ? "个人配置生效中"
-                  : `后端配置生效中（${
-                      profileView?.nameSource?.startsWith(".env") ? ".env" : "config.json"
-                    }${profileView?.name ? ` · profile ${profileView.name}` : ""}）`}
-              </p>
-
-              <dl className="spec-list spec-list--roomy">
-                {activeRows.map((row) => (
-                  <div key={row.key} className="spec-list__row">
-                    <dt className="spec-list__key">{row.key}</dt>
-                    <dd className={`spec-list__val ${row.mono ? "spec-list__val--mono" : ""}`}>
-                      <span className="flex items-baseline justify-end gap-2">
-                        <span className="min-w-0 truncate">{row.value}</span>
-                        {row.source && row.source !== dominantSource && (
-                          <span className="shrink-0 text-[11px] text-neutral-400">{row.source}</span>
-                        )}
-                      </span>
-                    </dd>
+            {/* 删除入口只对本机来源出现：出厂来源写死在 config.json 里，删了下次
+                git pull 又回来；正在生效的也不给删（服务端同样拒绝），先把路堵在界面上。 */}
+            {pickedIsLocal && (
+              <div className="mt-3">
+                {confirmDelete === pickedProfile ? (
+                  <div className="rounded-lg bg-red-50 px-3 py-2">
+                    <p className="text-xs text-red-700">
+                      删除「{pickedProfile}」？地址与模型目录会从本机移除，.env 里的密钥会注释掉（可反悔）。
+                    </p>
+                    <div className="mt-2 flex gap-2">
+                      <button
+                        type="button"
+                        className="btn-ghost btn-xs"
+                        onClick={() => setConfirmDelete(null)}
+                      >
+                        取消
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-danger btn-xs"
+                        disabled={busy}
+                        onClick={() => void removeProvider(pickedProfile)}
+                      >
+                        {busy ? "删除中…" : "确认删除"}
+                      </button>
+                    </div>
                   </div>
-                ))}
-              </dl>
-
-              {/* 这台接口能出哪些尺寸：省得回主界面翻下拉。价目来自哪家也在这里交代 */}
-              {activeCatalogSizes.length > 0 && (
-                <div>
-                  <p className="mb-1 text-[12px] text-neutral-400">
-                    可选尺寸
-                    {activeCatalogProvider && (
-                      <span className="text-neutral-300"> · 价目来自 {activeCatalogProvider.label}</span>
-                    )}
-                  </p>
-                  <div className="size-pills">
-                    {activeCatalogSizes.map((s) => (
-                      <span key={s.value} className="size-pill">{s.value}</span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <div className="mt-auto space-y-1.5">
-                <p className="text-[12px] text-neutral-400">
-                  获取 Key：
-                  <a className="link ml-1" href="https://www.aiwanwu.cc/" target="_blank" rel="noreferrer">aiwanwu 中转站 ↗</a>
-                  <span className="mx-1.5 text-neutral-300">·</span>
-                  <a className="link" href="https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey" target="_blank" rel="noreferrer">火山方舟控制台 ↗</a>
-                </p>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn-danger btn-xs"
+                    disabled={!canDelete}
+                    title={pickedInUse ? "正在使用中，请先切换到别的来源" : "从本机移除这个来源"}
+                    onClick={() => setConfirmDelete(pickedProfile)}
+                  >
+                    删除这个来源
+                  </button>
+                )}
+                {pickedInUse && (
+                  <p className="text-caption mt-1">正在使用中，请先切换到别的来源再删除</p>
+                )}
               </div>
-            </div>
+            )}
+          </div>
+        )}
+
+        <div className="mt-4">
+          <label className="field-label mb-2" htmlFor="cfg-model">默认模型</label>
+          {modelOptions.length > 0 ? (
+            <Select id="cfg-model" options={modelOptions} value={pickedModel} onChange={setPickedModel} />
+          ) : (
+            <input
+              id="cfg-model"
+              className="field-control text-sm"
+              value={pickedModel}
+              onChange={(e) => setPickedModel(e.target.value)}
+            />
           )}
-
-          {tab === "edit" && (
-            <div key="edit" className="tab-panel space-y-3">
-              <div>
-                {/* 「我的接口」按钮已去掉：顶部页签就是它，同一个入口没必要出现两次 */}
-                <label className="field-label text-[13px]" htmlFor="api-provider">来源</label>
-                <Select
-                  id="api-provider"
-                  className="mt-1"
-                  options={[
-                    { value: "", label: "请选择来源" },
-                    ...PROVIDERS.map((p) => ({ value: p.id, label: p.label })),
-                  ]}
-                  value={providerId}
-                  onChange={applyProvider}
-                />
-              </div>
-
-              {/* 来源提示不再单占一行：Key 为空时它就是 Key 字段的填写指引（见下方 helper）*/}
-
-              {fields.map((field) => {
-                // 来源选定后，地址 / 路径 / 模型由预设带出——Key 仍需用户填，故不禁用
-                const autoFilled =
-                  providerId !== "" && (field.key === "baseUrl" || field.key === "apiPath" || field.key === "model");
-                // 模型名称：有模型清单时渲染为下拉框，避免手打错模型 ID
-                const isModelField = field.key === "model";
-                const isKeyField = field.key === "apiKey";
-                const modelChoices = isModelField ? modelOptionsFor(currentModelChoices()) : [];
-                return (
-                  <div key={field.id}>
-                    <label className="field-label text-[13px]" htmlFor={field.id}>{field.label}</label>
-                    {modelChoices.length > 0 ? (
-                      <Select
-                        id={field.id}
-                        className="mt-1"
-                        options={[
-                          // 当前值不在清单里时也保留一行（用户手填过自定义模型）
-                          ...(modelChoices.some((m) => m.value === form.model)
-                            ? []
-                            : [{ value: form.model, label: form.model || "—" }]),
-                          ...modelChoices,
-                        ]}
-                        value={form.model}
-                        onChange={(model) => setForm({ ...form, model })}
-                      />
-                    ) : isKeyField ? (
-                      // Key 字段：右侧挂小眼睛，按一下切换明文/密文
-                      <div className="relative mt-1">
-                        <input
-                          id={field.id}
-                          className={`field-control ${field.mono ? "font-mono" : ""} pr-9`}
-                          type={showApiKey ? "text" : "password"}
-                          value={form.apiKey}
-                          autoComplete="off"
-                          spellCheck={false}
-                          onChange={(e) => setForm({ ...form, apiKey: e.target.value })}
-                          {...(field.placeholder ? { placeholder: field.placeholder } : {})}
-                        />
-                        <button
-                          type="button"
-                          className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-neutral-600"
-                          aria-label={showApiKey ? "隐藏密钥" : "显示密钥"}
-                          aria-pressed={showApiKey}
-                          title={showApiKey ? "隐藏密钥" : "显示密钥"}
-                          onClick={() => setShowApiKey((v) => !v)}
-                        >
-                          {showApiKey ? (
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                              <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 10 8 10 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
-                              <path d="M6.61 6.61A18.15 18.15 0 0 0 2 12s3 8 10 8a9.12 9.12 0 0 0 5.39-1.61" />
-                              <line x1="2" y1="2" x2="22" y2="22" />
-                            </svg>
-                          ) : (
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                              <path d="M2 12s3-8 10-8 10 8 10 8-3 8-10 8-10-8-10-8Z" />
-                              <circle cx="12" cy="12" r="3" />
-                            </svg>
-                          )}
-                        </button>
-                      </div>
-                    ) : (
-                      <input
-                        id={field.id}
-                        className={`field-control mt-1 ${field.mono ? "font-mono" : ""}`}
-                        type={field.type ?? "text"}
-                        value={form[field.key]}
-                        readOnly={autoFilled}
-                        onChange={(e) => setForm({ ...form, [field.key]: e.target.value })}
-                        {...(field.placeholder ? { placeholder: field.placeholder } : {})}
-                      />
-                    )}
-                    {/* Key 的填写指引就挂在这一行：来源的 Key 前缀提示（如 ark- / sk-）在
-                        Key 为空时最有价值，单独占一行纯属浪费 */}
-                    {isKeyField && (
-                      <p className="mt-1.5 flex items-center gap-1.5 text-xs text-neutral-400">
-                        <span>
-                          {form.apiKey
-                            ? loadedSavedKey
-                              ? "已载入本机保存的 Key"
-                              : "已填入"
-                            : (PROVIDERS.find((p) => p.id === providerId)?.hint ?? "请粘贴你的 API Key")}
-                        </span>
-                        {form.apiKey && (
-                          <button
-                            type="button"
-                            className="shrink-0 underline decoration-dotted underline-offset-2 transition-colors hover:text-[var(--color-brand)]"
-                            onClick={() => {
-                              setForm({ ...form, apiKey: "" });
-                              setShowApiKey(false);
-                            }}
-                          >
-                            清空
-                          </button>
-                        )}
-                      </p>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {tab === "presets" && (
-            <div key="presets" className="tab-panel space-y-3">
-              <p className="text-xs text-neutral-400">「切换」即时启用。</p>
-
-              {presets.length === 0 ? (
-                <p className="rounded-xl border border-dashed border-neutral-200 px-3 py-8 text-center text-xs text-neutral-400">
-                  还没有记录。到「个人配置」保存一次就会出现在这里。
-                </p>
-              ) : (
-                <ul className="space-y-2">
-                  {[...presets]
-                    .sort((a, b) => (b.lastUsed ?? 0) - (a.lastUsed ?? 0))
-                    .map((preset) => {
-                      const active =
-                        settings != null &&
-                        `${settings.baseUrl}|${settings.model}|${settings.apiKey}` ===
-                          `${preset.settings.baseUrl}|${preset.settings.model}|${preset.settings.apiKey}`;
-                      return (
-                        <li
-                          key={preset.id}
-                          className={`rounded-xl border px-3 py-2 ${
-                            active ? "border-[var(--color-brand)]/40 bg-[var(--color-brand)]/5" : "border-neutral-200/80"
-                          }`}
-                        >
-                          <div className="flex items-center justify-between gap-3">
-                            <span className="flex min-w-0 items-baseline gap-2">
-                              <span className="truncate text-[13px] font-medium text-neutral-700">{preset.name}</span>
-                              {active && (
-                                <span className="shrink-0 rounded-full bg-[var(--color-brand)]/10 px-2 py-0.5 text-xs font-medium text-[var(--color-brand)]">
-                                  使用中
-                                </span>
-                              )}
-                            </span>
-                            <span className="flex shrink-0 gap-1">
-                              <button
-                                type="button"
-                                className="btn-ghost btn-xs"
-                                onClick={() => switchToPreset(preset)}
-                              >
-                                切换
-                              </button>
-                              <button type="button" className="btn-ghost btn-xs btn-danger" onClick={() => removePreset(preset.id)}>删除</button>
-                            </span>
-                          </div>
-                          {/* 第二行只补名字里没有的：接口主机 + 最近使用时间。
-                              名字本身已是「来源 · 模型」，再重复一遍纯属噪音 */}
-                          <p className="mt-0.5 truncate text-xs text-neutral-400">
-                            {hostOf(preset.settings.baseUrl)}
-                            {preset.lastUsed ? ` · ${formatRelativeTime(preset.lastUsed)}` : ""}
-                          </p>
-                        </li>
-                      );
-                    })}
-                </ul>
-              )}
-            </div>
-          )}
+          <p className="text-caption mt-2">
+            {pickedModel && pickedProvider?.models.find((m) => m.id === pickedModel)?.note
+              ? pickedProvider.models.find((m) => m.id === pickedModel)?.note
+              : "该来源下的可选模型"}
+          </p>
         </div>
 
-        {/* 操作栏：跨页签常驻，与内容滚动解耦 */}
-        <div className="mt-4 flex items-center justify-between gap-2 border-t border-neutral-200/80 pt-4">
-          <button type="button" className="btn-ghost btn-sm" disabled={!settings} onClick={clearPersonal}>清除个人配置</button>
-          <div className="flex gap-2">
-            <button type="button" className="btn-ghost btn-sm" onClick={onClose}>取消</button>
-            <button
-              type="button"
-              className="btn-primary btn-sm"
-              disabled={!form.baseUrl.trim() || !form.apiKey.trim()}
-              onClick={saveAndUse}
-            >
-              保存并使用
-            </button>
+        {/* 生效中：只读事实。改文件才动它，这里只用来对照「保存后会不会变」 */}
+        <div className="mt-5 border-t border-neutral-200/80 pt-4">
+          <p className="field-label mb-2">生效中</p>
+          <div className="spec-list">
+            <div className="spec-list__row">
+              <span className="spec-list__key">来源</span>
+              <span className="spec-list__val">{activeProfile || "—"}</span>
+            </div>
+            <div className="spec-list__row">
+              <span className="spec-list__key">模型</span>
+              <span className="spec-list__val truncate">{config.defaultModel || "—"}</span>
+            </div>
+            <div className="spec-list__row">
+              <span className="spec-list__key">API Key</span>
+              <span className="spec-list__val">
+                {fileState?.fields.apiKey.configured ? "● 已设置" : "○ 未配置"}
+              </span>
+            </div>
+            {activeProvider?.baseUrl && (
+              <div className="spec-list__row">
+                <span className="spec-list__key">接口地址</span>
+                <span className="spec-list__val truncate font-mono text-xs">{activeProvider.baseUrl}</span>
+              </div>
+            )}
           </div>
         </div>
-      </ModalShell>
+
+        {pending.length > 0 && (
+          <p className="mt-4 flex flex-wrap items-center gap-2 text-xs text-neutral-500">
+            <span className="chip chip--sm chip--pending">待重启</span>
+            <span>{pending.map(labelOfField).join(" / ")} 已写入文件，重启工作台后生效</span>
+          </p>
+        )}
+
+        {notice && (
+          <div
+            role="status"
+            className={`mt-4 rounded-lg px-3 py-2 text-xs ${
+              notice.kind === "ok"
+                ? "bg-neutral-100 text-neutral-700"
+                : notice.kind === "conflict"
+                  ? "bg-amber-50 text-amber-800"
+                  : "bg-red-50 text-red-700"
+            }`}
+          >
+            <p>{notice.text}</p>
+            {notice.kind === "conflict" && (
+              <div className="mt-2 flex gap-2">
+                <button type="button" className="btn-ghost btn-xs" onClick={onClose}>
+                  放弃我的修改
+                </button>
+                <button
+                  type="button"
+                  className="btn-danger btn-xs"
+                  disabled={busy}
+                  onClick={() => void save({ force: true })}
+                >
+                  仍然覆盖
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="mt-5 flex items-center justify-between gap-3 border-t border-neutral-200/80 pt-4">
+        <span className="text-caption min-w-0 truncate">
+          {fileState?.envPath ? "config.json · .env" : ""}
+        </span>
+        <div className="flex shrink-0 items-center gap-3">
+          <button type="button" className="btn-ghost btn-sm" onClick={onClose}>取消</button>
+          <button
+            type="button"
+            className="btn-primary btn-sm"
+            disabled={!canSave}
+            onClick={() => void save()}
+          >
+            {busy ? "写入中…" : justSaved ? "✓ 已保存" : "保存"}
+          </button>
+        </div>
+      </div>
+    </ModalShell>
   );
 }
 
+/** 字段 key → 界面用词（「待重启」提示文案里用） */
+function labelOfField(key: string): string {
+  return { profile: "配置来源", model: "默认模型" }[key] ?? key;
+}
 
-/** 顶部标题区：logo + 标题 + 窗口徽章 + 配置徽章（当前 profile·模型，确认切换中转站生效）+ 模式切换 + 新窗口按钮 */
+
+/** 顶部标题区：logo + 标题 + 窗口徽章 + 状态徽章（未配置 API Key / 自检问题 / 当前 profile·模型）+ 模式切换 + 新窗口按钮 */
 function TitleBar({
   windowId,
   onNewWindow,
@@ -906,9 +691,11 @@ function TitleBar({
   onModeChange,
   activeProfile,
   defaultModel,
+  healthIssues,
   onOpenApi,
-  personalApi,
+  pendingCount,
   onOpenAppearance,
+  onOpenProvider,
 }: {
   windowId: number | null;
   onNewWindow: () => void;
@@ -918,13 +705,40 @@ function TitleBar({
   activeProfile?: string | undefined;
   /** 当前 profile 的默认模型 */
   defaultModel?: string | undefined;
+  /** 启动自检问题（未配置 API Key / 前端未构建 / 输出不可写 / 自检失败）——状态徽章的数据源 */
+  healthIssues: string[];
   onOpenApi: () => void;
-  personalApi: PersonalApiSettings | null;
+  /** 待重启生效的配置项数（配置编辑器写入后由 fileState 提供；0 = 无） */
+  pendingCount: number;
   /** 打开外观弹窗（主体色 / 我的壁纸 / 画布边界） */
   onOpenAppearance: () => void;
+  /** 打开「添加第三方供应商」弹窗 */
+  onOpenProvider: () => void;
 }) {
   /** 品牌区使用单层 Logo，悬停只改变高光与阴影，避免透视挤出造成重影。 */
   const brandRootRef = useRef<HTMLAnchorElement | null>(null);
+
+  /* 状态徽章的取值顺序：没配 Key 时「模型 ID」这个槽位本身没有意义（生图根本不可用），
+     于是直接改说原因，模型名让位；其余自检问题没有各自的入口，聚合在这个槽位里。 */
+  const apiKeyMissing = healthIssues.some((issue) => issue.includes("未配置 API Key"));
+  const otherIssues = healthIssues.filter((issue) => !issue.includes("未配置 API Key"));
+
+  /* 「当前在用什么接口」角标 = 状态 + 入口（点它开配置编辑器）。
+     顶栏只留这一个控件：正常显示模型名，异常时改说原因，待重启时追加计数。
+     文字一律走主题色，状态由角标底色区分。 */
+  const apiChipLabel = apiKeyMissing
+    ? "未配置 API Key"
+    : otherIssues.length > 0
+      ? `自检 ${otherIssues.length} 项`
+      : defaultModel || activeProfile || "未选择模型";
+  const apiChipTitle = apiKeyMissing
+    ? "未配置 API Key，生图任务暂不可用 —— 点击配置"
+    : otherIssues.length > 0
+      ? otherIssues.join("；")
+      : `当前生效：${activeProfile ? `profile「${activeProfile}」` : ""}${defaultModel ? ` · 模型 ${defaultModel}` : ""} —— 点击配置`;
+  /* 待重启是这个界面最有辨识度的状态：改了文件但进程没重载。
+     顶栏承担「跳出弹窗也能看到」的提醒责任。 */
+  const chipPending = pendingCount > 0;
 
   return (
     <header className="studio-header enter-up mb-4 flex flex-wrap items-center gap-x-3 gap-y-2">
@@ -944,16 +758,10 @@ function TitleBar({
         </span>
       </a>
       {windowId !== null && <span className="chip chip--brand window-chip">⌘{String(windowId).padStart(2, "0")}</span>}
-      {activeProfile && (
-        <span
-          className="chip chip--quiet profile-chip"
-          title={`当前配置：profile「${activeProfile}」${defaultModel ? ` · 默认模型 ${defaultModel}` : ""}`}
-        >
-          {activeProfile}
-          {defaultModel ? ` · ${defaultModel}` : ""}
-        </span>
-      )}
-      {/* 模式切换：胶囊分段控件（高度/圆角/字号统一由 .mode-switch 提供，与顶栏其它控件等高） */}
+
+      {/* 模式切换：胶囊分段控件（高度/圆角/字号统一由 .mode-switch 提供，与顶栏其它控件等高）。
+          它是「我在哪个工作区」，属于身份的一部分，所以留在左侧紧跟窗口号，
+          不与右侧的设置类控件混在一起。 */}
       <div className="mode-switch">
         <button
           type="button"
@@ -974,11 +782,36 @@ function TitleBar({
           无限画布
         </button>
       </div>
+      {/* 右侧只有两件事：开新窗口（动作），以及两项设置（接口 / 外观）。
+          动作排最左，设置项按「多久调一次」从低频到高频：接口配一次就不动，外观最常调。 */}
       <button type="button" onClick={onNewWindow} className="btn-ghost ml-auto">
         ＋ 新窗口
       </button>
-      <button type="button" onClick={onOpenApi} className={`api-settings-trigger btn-ghost ${personalApi ? "is-active" : ""}`}>
-        {personalApi ? "个人 API 已启用" : "生图 API"}
+      {/* 添加来源：与「改现有来源」分开一个入口。
+          这里是「造一个新 profile」（写 providers.local.json），角标里那个是「在已有
+          来源里选」（写 .env 的 ACTIVE_PROFILE）—— 两件事落盘的文件不同，合并成一个
+          按钮会让「保存」同时意味着两种心智模型。 */}
+      <button
+        type="button"
+        onClick={onOpenProvider}
+        className="btn-ghost"
+        title="添加第三方供应商"
+        aria-label="添加第三方供应商"
+      >
+        <Plug size={15} aria-hidden="true" />
+      </button>
+      {/* 状态 + 入口二合一：角标本身显示当前接口，点它开设置弹窗。
+          保留 api-settings-trigger 类名作为稳定的自动化选择器（scripts/smoke_api_modal.py 依赖它）。 */}
+      <button
+        type="button"
+        onClick={onOpenApi}
+        className={`api-settings-trigger chip chip--quiet profile-chip cursor-pointer transition-colors hover:text-brand ${
+          chipPending ? "is-pending" : ""
+        }`}
+        title={chipPending ? `${apiChipTitle}\n（${pendingCount} 项待重启生效）` : apiChipTitle}
+      >
+        {apiChipLabel}
+        {chipPending && <span className="ml-1.5">· {pendingCount} 项待重启</span>}
       </button>
       {/* 外观独立入口：接口配置配一次就不动，外观是高频调节，分开才容易发现 */}
       <button type="button" onClick={onOpenAppearance} className="btn-ghost" title="外观" aria-label="外观">
@@ -1006,14 +839,20 @@ export function App() {
     setAccentHue(hue);
     saveAccentHue(hue);
   };
-  const [personalApi, setPersonalApi] = useState<PersonalApiSettings | null>(() => readPersonalApiSettings());
+  /** 配置编辑器写入后刷新的文件状态（顶栏 pending 角标读它）；null = 还没写过 */
+  const [fileState, setFileState] = useState<ConfigFileState | null>(null);
   const [showApiSettings, setShowApiSettings] = useState(false);
+  /** 「添加第三方供应商」弹窗：新建来源后要重新拉 /api/config（目录里多了一条） */
+  const [showProviderModal, setShowProviderModal] = useState(false);
   /** 外观弹窗（主体色 / 我的壁纸 / 画布边界）：与接口配置分开，顶栏有独立入口 */
   const [showAppearance, setShowAppearance] = useState(false);
   /** 壁纸图本体（启动时从 IndexedDB 取回）；null = 没有壁纸 */
   const [wallpaperBlob, setWallpaperBlob] = useState<Blob | null>(null);
   /** 铺底用的 object URL：直接指向原图；null = 不铺底 */
   const [wallpaperUrl, setWallpaperUrl] = useState<string | null>(null);
+  /** 壁纸自身的模糊半径 px（0 = 原图）与明暗（1 = 原样）；只存本机浏览器 */
+  const [wallpaperBlur, setWallpaperBlur] = useState<number>(() => readWallpaperBlur());
+  const [wallpaperBrightness, setWallpaperBrightness] = useState<number>(() => readWallpaperBrightness());
   const [wallpaperBusy, setWallpaperBusy] = useState(false);
   /** 需要用户知道的一句话（如本地存储不可用）；null = 不显示 */
   const [wallpaperNotice, setWallpaperNotice] = useState<string | null>(null);
@@ -1059,20 +898,9 @@ export function App() {
     };
   }, [wallpaperBlob]);
 
-  /** 预设壁纸（内置大图）的 URL；选的是材质时为 null */
-  const presetWallpaperUrl = presetWallpaperOf(backgroundPreset);
-
-  /**
-   * 铺在整页底下的那张图：**预设壁纸优先于我的壁纸**。
-   *
-   * 优先级为什么这么定：预设壁纸是「用户刚点的那一下」，自选壁纸是更早留下的文件。
-   * 点了预设却看不到任何变化，会让人以为坏了；反过来（自选盖住预设）至少用户知道
-   * 自己存过一张图，弹窗里也有一句话告诉他怎么回到预设。
-   *
-   * 两者铺的是**同一层、同一套处理**（cover 原图 + 降噪 + 卡片文字描边 + 卡片全透），
-   * 所以「内置预设」和「我的壁纸」观感完全一致，不额外分叉。
-   */
-  const pageWallpaperUrl = presetWallpaperUrl ?? wallpaperUrl;
+  /** 铺在整页底下的那张图：只剩「我的壁纸」这一条来源（内置预设壁纸已移除）。
+   *  按原图 cover 铺底 + 降噪滤镜，可读性处理全在 index.css 的 .imagora-wallpaper 一层里。 */
+  const pageWallpaperUrl = wallpaperUrl;
   const pageWallpaperActive = pageWallpaperUrl !== null;
 
   /** 有壁纸（预设或自选）时：页面底色让位于壁纸（CSS 读 html[data-wallpaper]），前景元素照旧跟随主体色。
@@ -1137,23 +965,6 @@ export function App() {
     saveSurfaceTransparency(value);
   };
 
-  /**
-   * 恢复默认外观：把「外观」这一屏的每一项都清回未设置状态。
-   *
-   * 为什么要一个总开关：这几项此前只能逐项手动点回去，而且「背景材质」里当时没有纯白档
-   * ——用户调花了之后**没有任何路径回到白底**，只能翻 localStorage。这一键就是那条路径。
-   *
-   * 壁纸无条件清（不看 wallpaperActive）：IndexedDB 里可能留着图而内存 blob 还没到位，
-   * 清一次是幂等的，漏清反而会留下「说好恢复了却还铺着图」的状态。
-   */
-  const handleAppearanceReset = () => {
-    handleAccentHueChange(null);
-    handleBackgroundPresetChange(DEFAULT_BACKGROUND_PRESET);
-    handleWallpaperClear();
-    handleSurfaceTransparencyChange(SURFACE_TRANSPARENCY_DEFAULT);
-    handleCanvasBoundsChange(true);
-  };
-
   /** 动态 favicon：标签页图标跟随窗口主体色（与顶栏 logo / 菜单边框同色），多开一眼可辨 */
 useEffect(() => {
   const svg = brandLogoSvg(accent.brand);
@@ -1169,6 +980,21 @@ useEffect(() => {
 useEffect(() => {
   document.documentElement.style.setProperty("--accent-hue", String(backgroundHue));
 }, [backgroundHue]);
+
+/** 运行时 token 同样写到根元素：弹窗经 createPortal 挂在 body 上，落在 .imagora-app 之外，
+ *  只写在 .imagora-app 内联样式里的话，弹窗内一律退化成 @theme 兜底值——表现为
+ *  弹窗外是主题色、弹窗内却是石板灰 #475569，卡片表面与通透度也一并失效。
+ *  .imagora-app 那份保留：它在首帧就生效，避免刷新时先闪一下兜底灰。两处取值同源，不会漂。 */
+useEffect(() => {
+  const root = document.documentElement.style;
+  root.setProperty("--color-brand", accent.brand);
+  root.setProperty("--color-brand-dark", accent.brandDark);
+  // 遍历 surfaceVarList：新增角色时 .imagora-app 与根元素两处一起生效，不会漏一处
+  // （弹窗走 Portal 挂在 body 下，读不到 .imagora-app 上的变量 —— 见 ARCHITECTURE 9.4 第 9 条）
+  for (const [name, value] of surfaceVarList(surface)) {
+    root.setProperty(name, value);
+  }
+}, [accent.brand, accent.brandDark, surface]);
   /** 界面模式：经典表单 / 无限画布（?mode=canvas 直达画布） */
   const [mode, setMode] = useState<"classic" | "canvas">(() =>
     new URLSearchParams(window.location.search).get("mode") === "canvas" ? "canvas" : "classic",
@@ -1272,8 +1098,9 @@ useEffect(() => {
   // （火山官方 0.2/0.3 元，中转站 0.05/0.1 元），沿用 default_profile 那张表就会出现
   // 「用着中转站的接口、显示豆包的价」，还会列出该模型不支持的档位。解析见 apiCatalog.ts。
   const providerCatalog = config?.providers;
-  const activeApiBaseUrl = personalApi?.baseUrl ?? config?.baseUrl ?? "";
-  const activeModelId = personalApi?.model || config?.defaultModel || "";
+  // 配置只有一份（在文件里，服务端读），前端不再有覆盖层
+  const activeApiBaseUrl = config?.baseUrl ?? "";
+  const activeModelId = config?.defaultModel ?? "";
   const activeProvider = useMemo(
     () => findCatalogProvider(providerCatalog, activeApiBaseUrl),
     [providerCatalog, activeApiBaseUrl],
@@ -1329,10 +1156,12 @@ useEffect(() => {
     };
   }, [config, activeSizes, activeProvider]);
 
-  // 后端自检只知道项目默认 Key；启用个人 API 后，个人 Key 同样可以满足生图条件。
-  const visibleHealthIssues = personalApi
-    ? healthIssues.filter((issue) => !issue.includes("未配置 API Key"))
-    : healthIssues;
+  // 配置只有一份（在文件里），不再有浏览器覆盖层，自检问题原样呈现
+  const visibleHealthIssues = healthIssues;
+
+  /** 待重启生效的项数：配置编辑器写入后由 fileState 提供；
+   *  首屏也从 /api/config 的 fileState 读（进程启动后文件被外部改过时同样要提示）。 */
+  const pendingCount = (fileState ?? config?.fileState)?.pending.length ?? 0;
 
   /** 订阅当前任务状态：queued/running 驱动按钮，终态落结果 / 日志 / 结果区状态面板。
    *  过程状态（排队/生成中）由右栏 ResultPanel 呈现，日志区只收终态与操作反馈——不写过程行。 */
@@ -1433,18 +1262,6 @@ useEffect(() => {
     }, 300);
   };
 
-  /** 个人 API 的默认值 = 后端当前 profile（config.json / .env 合并结果）：
-   *  前端不硬编码中转站 / 模型 / 接口路径，改 config.json 即全局生效（唯一真相源）。 */
-  const apiDefaults = useMemo<PersonalApiSettings>(
-    () => ({
-      baseUrl: config?.baseUrl ?? "",
-      apiKey: "",
-      model: config?.defaultModel ?? "",
-      apiPath: config?.apiPath ?? "",
-    }),
-    [config],
-  );
-
   /** 新窗口：参考图已存服务端，只把元信息 + 参数写入 sessionStorage 后开窗（提示词不保留）。
    *  继承失败的提示随状态带到新窗口，显示在新窗口的日志区（而非原窗口）。 */
   const handleNewWindow = () => {
@@ -1476,10 +1293,7 @@ useEffect(() => {
         {
           "--color-brand": accent.brand,
           "--color-brand-dark": accent.brandDark,
-          "--surface-card": surface.card,
-          "--surface-panel": surface.panel,
-          "--field-bg": surface.field,
-          "--surface-blur": surface.blur,
+          ...Object.fromEntries(surfaceVarList(surface)),
         } as CSSProperties
       }
     >
@@ -1488,7 +1302,14 @@ useEffect(() => {
           两者共用这一层，因此观感完全一致——别为预设图另开一层，否则可读性处理会分叉。 */}
       {pageWallpaperUrl !== null && (
         <div className="imagora-wallpaper" aria-hidden="true">
-          <div className="imagora-wallpaper__image" style={{ backgroundImage: `url("${pageWallpaperUrl}")` }} />
+          <div
+            className="imagora-wallpaper__image"
+            style={{
+              backgroundImage: `url("${pageWallpaperUrl}")`,
+              // 整条 filter 由 JS 拼好再注入：CSS 里嵌 var() 会被构建期压缩器丢弃
+              filter: wallpaperFilter(wallpaperBlur, wallpaperBrightness),
+            }}
+          />
         </div>
       )}
       <TitleBar
@@ -1499,14 +1320,27 @@ useEffect(() => {
         activeProfile={activeProvider?.name ?? config?.activeProfile}
         defaultModel={activeModelId || config?.defaultModel}
         onOpenApi={() => setShowApiSettings(true)}
-        personalApi={personalApi}
+
+        healthIssues={visibleHealthIssues}
+        pendingCount={pendingCount}
         onOpenAppearance={() => setShowAppearance(true)}
+        onOpenProvider={() => setShowProviderModal(true)}
       />
       {showAppearance && (
         <AppearanceModal
           accentHue={accentHue}
           onAccentHueChange={handleAccentHueChange}
           wallpaper={{ hasImage: wallpaperActive, busy: wallpaperBusy, notice: wallpaperNotice }}
+          wallpaperBlur={wallpaperBlur}
+          onWallpaperBlurChange={(value) => {
+            setWallpaperBlur(value);
+            saveWallpaperBlur(value);
+          }}
+          wallpaperBrightness={wallpaperBrightness}
+          onWallpaperBrightnessChange={(value) => {
+            setWallpaperBrightness(value);
+            saveWallpaperBrightness(value);
+          }}
           onWallpaperFile={(file) => void handleWallpaperFile(file)}
           onWallpaperClear={handleWallpaperClear}
           backgroundPreset={backgroundPreset}
@@ -1515,26 +1349,42 @@ useEffect(() => {
           onSurfaceTransparencyChange={handleSurfaceTransparencyChange}
           canvasBounds={canvasBounds}
           onCanvasBoundsChange={handleCanvasBoundsChange}
-          onReset={handleAppearanceReset}
           onClose={() => setShowAppearance(false)}
         />
       )}
-      {showApiSettings && (
-        <PersonalApiModal
-          settings={personalApi}
-          defaults={apiDefaults}
-          profileView={config?.profileView}
-          models={config?.models}
-          providers={providerCatalog}
-          onSave={setPersonalApi}
+      {showApiSettings && effectiveConfig && (
+        <ConfigEditorModal
+          config={effectiveConfig}
+          onFileState={setFileState}
+          onDeleted={(next) => {
+            // 服务端已 reload_config：重拉 /api/config 让来源目录少掉那一条，
+            // 弹窗保持打开（用户可能接着删下一条或切来源）。
+            setFileState(next);
+            void getConfig(windowId ?? undefined)
+              .then((fresh) => setConfig(fresh))
+              .catch(() => {
+                /* 刷新失败不影响已删除的事实：下次重开窗口自然会读到 */
+              });
+          }}
           onClose={() => setShowApiSettings(false)}
         />
       )}
-
-      {visibleHealthIssues.length > 0 && (
-        <div className="health-alert mb-3 border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-          {visibleHealthIssues.map((issue) => <div key={issue}>{issue}</div>)}
-        </div>
+      {showProviderModal && (
+        <ProviderModal
+          registeredNames={(fileState ?? config?.fileState)?.registeredProfiles ?? []}
+          onClose={() => setShowProviderModal(false)}
+          onCreated={(result) => {
+            // 服务端已 reload_config：重拉 /api/config 就能看到新来源，
+            // 不用重启进程（新增来源不改当前生效 profile 与模型，属安全热刷新）。
+            setFileState(result.fileState);
+            setShowProviderModal(false);
+            void getConfig(windowId ?? undefined)
+              .then((next) => setConfig(next))
+              .catch(() => {
+                /* 刷新失败不影响已创建的事实：下次重开窗口自然会读到 */
+              });
+          }}
+        />
       )}
 
       {/* 无限画布：首次进入后保持挂载，切换模式仅显隐（内容保留，退出窗口才清空） */}

@@ -13,31 +13,12 @@
  *
  * 各预设只定义三个变量：--bg-color / --bg-image / --bg-size。
  *
- * 默认 = 纯白（2026-10-07 维护者要求「不设置时就是正常网页的白底」）：
- * :root 的兜底值必须与 default 预设（plain）一致，否则 JS 挂载前会先闪一层别的底色。
- * 旧的「跟随主体色」材质挪到 html[data-bg="accent"]，作为可选项保留。
- *
  * 注意：光晕改用 hsl(var(--accent-hue) ...) 而不是 var(--color-brand)。
  * --color-brand 由 App 写在 .imagora-app 内联样式上，**CSS 变量只向下继承**，
  * body 读不到它（body 只能读到 :root 的兜底灰 #475569）——
  * 也就是说这里以前那两层光晕一直是灰的、并没跟着主体色走。用 --accent-hue 才对。
  */
 :root {
-  --bg-color: #ffffff;
-  --bg-image: none;
-  --bg-size: auto;
-}
-
-html[data-bg="plain"],
-.bg-swatch--plain {
-  --bg-color: #ffffff;
-  --bg-image: none;
-  --bg-size: auto;
-}
-
-/* 跟随主体色：不是纯白，底色与光晕都跟着主体色相走（默认已改为 plain，此项仍可选） */
-html[data-bg="accent"],
-.bg-swatch--accent {
   --bg-color: hsl(var(--accent-hue, 0) 32% 93%);
   --bg-image:
     radial-gradient(circle at 10% -14%, hsl(var(--accent-hue, 0) 55% 42% / 0.22), transparent 46rem),
@@ -46,33 +27,12 @@ html[data-bg="accent"],
   --bg-size: auto, auto, auto;
 }
 
-/* 纸纤维 / 雾面共用的噪点纹理（fractalNoise 拉伸成纤维状）；雾面版把浓度调淡 */
-html[data-bg="paper"],
-.bg-swatch--paper {
-  --bg-color: #eae4d8;
-  --bg-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='320' height='320'%3E%3Cfilter id='p'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.012 .3' numOctaves='3'/%3E%3C/filter%3E%3Crect width='320' height='320' filter='url(%23p)' opacity='.5'/%3E%3C/svg%3E");
-  --bg-size: 320px 320px;
-}
-html[data-bg="wood"],
-.bg-swatch--wood {
-  --bg-color: #e7d8bd;
-  --bg-image:
-    repeating-linear-gradient(92deg, rgba(120, 86, 44, 0.055) 0 2px, transparent 2px 9px),
-    repeating-linear-gradient(88deg, rgba(120, 86, 44, 0.03) 0 1px, transparent 1px 13px),
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='320' height='320'%3E%3Cfilter id='p'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.012 .3' numOctaves='3'/%3E%3C/filter%3E%3Crect width='320' height='320' filter='url(%23p)' opacity='.34'/%3E%3C/svg%3E");
-  --bg-size: auto, auto, 320px 320px;
-}
-html[data-bg="cool"],
-.bg-swatch--cool {
-  --bg-color: #f5f6f7;
+/* 纯白：不带纹理，也不跟主体色 */
+html[data-bg="plain"],
+.bg-swatch--plain {
+  --bg-color: #fff;
   --bg-image: none;
   --bg-size: auto;
-}
-html[data-bg="mist"],
-.bg-swatch--mist {
-  --bg-color: #eef0f2;
-  --bg-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='320' height='320'%3E%3Cfilter id='p'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.012 .3' numOctaves='3'/%3E%3C/filter%3E%3Crect width='320' height='320' filter='url(%23p)' opacity='.22'/%3E%3C/svg%3E");
-  --bg-size: 320px 320px;
 }
 
 body {
@@ -105,58 +65,20 @@ body {
   background-repeat: repeat;
   transition: transform 0.12s ease, box-shadow 0.15s ease;
 }
-.bg-swatch:hover {
+.bg-swatch:hover:not(:disabled) {
   transform: translateY(-1px);
+}
+/* 停用态（另一项背景已生效时）：不可点、不响应 hover 抬升 */
+.bg-swatch:disabled {
+  cursor: not-allowed;
 }
 .bg-swatch.is-on {
   box-shadow: 0 0 0 2px #fff, 0 0 0 4px rgba(23, 32, 43, 0.45);
 }
 
-/* 预设壁纸：与材质色块并列的「大图」按钮。
- * 图片是 public/wallpapers 下的静态文件（走站点根路径），构建期原样拷进 dist，
- * 不经打包器改写，所以这里可以直接写字面量路径。
- * 尺寸刻意比色块大：材质要的是「底色是什么感觉」，壁纸要的是「这张图长什么样」，
- * 34px 的方片看不出龙和神兽的区别。
- * 高亮框与 .bg-swatch.is-on 同一套（白内圈 + 墨外圈），两类选择器观感统一。 */
-.bg-walls {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-.bg-wall {
-  position: relative;
-  aspect-ratio: 16 / 9;
-  overflow: hidden;
-  padding: 0;
-  border: 1px solid rgba(0, 0, 0, 0.14);
-  border-radius: var(--r-control);
-  background-color: #dfe3e8;
-  background-position: center;
-  background-size: cover;
-  background-repeat: no-repeat;
-  cursor: pointer;
-  transition: transform 0.12s ease, box-shadow 0.15s ease;
-}
-.bg-wall:hover { transform: translateY(-1px); }
-.bg-wall.is-on {
-  box-shadow: 0 0 0 2px #fff, 0 0 0 4px rgba(23, 32, 43, 0.45);
-}
-/* 名字压在图上：底部渐隐黑条保证任何亮度的图上都读得出（不做 hover 才显示，触屏没有 hover） */
-.bg-wall__name {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  padding: 12px 8px 5px;
-  background: linear-gradient(to top, rgba(12, 16, 22, 0.72), transparent);
-  color: #fff;
-  font-size: 11px;
-  line-height: 1.2;
-  letter-spacing: 0.02em;
-  text-align: left;
-}
-.bg-wall--dragon { background-image: url("/wallpapers/dragon.jpg"); }
-.bg-wall--tiger { background-image: url("/wallpapers/tiger.jpg"); }
+/* 内置预设壁纸（.bg-walls / .bg-wall / .bg-wall--dragon / --tiger）已删除（2026-10-03）：
+ * 两张近 800 KB 的图常驻仓库、且具体题材不适合当所有人的默认选项。
+ * 整页背景图现在只走「我的壁纸」一条路（用户自己上传，原图存 IndexedDB，不入库）。 */
 
 /* ============ 滚动条：一处定义，全站统一（页面 / 模态 / 列表共用） ============
  * 轨道一律 transparent：滚动条的「背景」就是它所在的容器底色——
@@ -201,6 +123,9 @@ html {
   --r-pill: 999px;
   --r-card: 16px;
   --r-control: 10px;
+  /* 待重启（配置已写入文件但进程尚未重载）：琥珀色，白底上可读且不刺眼。
+     刻意不复用语义警告的 amber —— 那是「出错了」，这是「还没生效」。 */
+  --color-pending: #b45309;
   --pad-card: 20px;
 }
 
@@ -221,25 +146,51 @@ html {
   --mark-ink: 8%;        /* 编号水印浓度（很低，隐隐约约）*/
   --chip-sm-h: 18px;     /* 小角标高度 */
 
-  /* —— 表面（容器底色）——同级容器共用同一套 150deg 微渐变：同角度、同色系、同强度量级，
-   * 层次只靠档位区分（卡片 --surface-card < 面板 --surface-panel），
-   * 不再出现「同排有的纯白、有的渐变」或角度各异（145deg / 160deg）的观感断层。
-   * 卡片用半透明（透出 body 底色，更轻）；面板用近实色（承载图与日志，需稳定底色）。
+  /* —— 表面（容器底色）——六档角色，全部由 src/surface.ts 算好后内联注入。
    *
-   * 两个表面都掺入主色相（--accent-hue，App 换色时写到根元素）：
-   * 卡片占整页大部分面积，只调 body 底色收益很小，把表面也带上主色才是「整页有色」的关键。
-   * 明度压在 96% 以上，仍近白，因此正文与图片的对比不受影响。 */
-  --surface-card: linear-gradient(
-    150deg,
-    hsl(var(--accent-hue, 0) 26% 99.2% / 0.66),
-    hsl(var(--accent-hue, 0) 30% 96.8% / 0.46)
-  );
-  --surface-panel: linear-gradient(
-    150deg,
-    hsl(var(--accent-hue, 0) 30% 98.4% / 0.72),
-    hsl(var(--accent-hue, 0) 34% 94.8% / 0.54)
-  );
+   * 这里的值是**兜底**（JS 注入前的那一帧）：按 hue 0 / 通透度 0 算出来的，
+   * 与 surface.ts 同源，数字由脚本复算生成，别手改。
+   *
+   * 两个正交的轴（详见 surface.ts 文件头）：
+   *   tint（掺色）决定「这个面是什么色」，按角色分配：外壳多、内容区少、画布为 0；
+   *   alpha（不透明度）由用户的「通透度」滑杆统一拉动。
+   *
+   * 老实现的坑：token 写 hsl(hue 30% 98.4% / a)，98.4% 亮度 + 30% 饱和度算出来离纯白
+   * 只有 2/255 —— **数学上不可见**，看到的"跟色"全来自 alpha 低、页面底色透上来。
+   * 于是任何需要不透明的面（弹窗、列表行）颜色就消失，同屏出现"左卡是粉的、右台面是白的"。
+   * 现在改为解出真实 RGB，掺色量有了直观含义（0.10 ≈ 离白 15/255）。
+   *
+   * 嵌套不变量：**内层不许比外层更透**，否则壁纸从容器中间透出一个洞。
+   * 默认通透度下 卡片 0.47 < 台面 0.85 < 浮层 0.94（surface.test.ts 锁住这条）。 */
+  --surface-base: linear-gradient(150deg, rgba(253, 240, 240, 0.92), rgba(253, 234, 234, 0.78));
+  --surface-card: linear-gradient(150deg, rgba(253, 240, 240, 0.9), rgba(253, 235, 235, 0.68));
+  --surface-panel: linear-gradient(150deg, rgba(253, 240, 240, 0.97), rgba(253, 234, 234, 0.92));
+  --surface-float: linear-gradient(150deg, rgba(254, 247, 247, 0.99), rgba(254, 244, 244, 0.96));
+  --surface-inset: linear-gradient(150deg, rgba(255, 251, 251, 0.9), rgba(254, 250, 250, 0.9));
+  --surface-plain: linear-gradient(150deg, rgba(255, 255, 255, 0.94), rgba(255, 255, 255, 0.9));
+
+  /* 毛玻璃：恒 none（壁纸要原样，见 surface.ts 的 blurFor）。任何容器都不许硬编码 blur()。 */
+  --surface-blur: none;
+
+  /* —— 遮罩（弹窗背后的隔离层）——不掺主体色：它是"压暗"，带色会让弹窗底色发脏。
+   * 曾有两条各写各的（弹窗 blur(10px)/冷色 .62，生成历史 blur(6px)/暖色 .48），
+   * 同一个应用里两种遮罩观感，属历史遗留；现统一为这一组。
+   * 模糊只在这里用：它是"把注意力切走"的隔离手段，与"容器不许糊壁纸"不冲突。 */
+  --scrim-bg: rgba(20, 26, 31, 0.62);
+  --scrim-bg-nested: rgba(20, 26, 31, 0.44);
+  --scrim-blur: blur(10px) saturate(0.9);
 }
+
+/* —— 表面角色类 ——
+ * TSX 里要给一个容器上表面时，挂这几个类，**不要写 Tailwind 的 bg-white / bg-neutral-* **：
+ * bg-* 生成的是 background-color，接不了渐变 token，而且写死颜色就不再跟随主体色。
+ * 角色怎么选见 src/surface.ts 的 ROLES 与 SURFACE_ROLE_DOC。 */
+.surface-base { background: var(--surface-base); }
+.surface-card { background: var(--surface-card); }
+.surface-panel { background: var(--surface-panel); }
+.surface-float { background: var(--surface-float); }
+.surface-inset { background: var(--surface-inset); }
+.surface-plain { background: var(--surface-plain); }
 
 /* 字段标签统一块级：inline 时标签盒随父级基线漂移，左右两栏首行会错开数 px
  * （实测左栏比右栏低 3px）；块级后标签顶部即内容起点，跨栏自然对齐。 */
@@ -305,7 +256,9 @@ html {
   pointer-events: none;
 }
 
-/* —— 角标家族（一套尺寸 + 三色修饰）：顶栏默认 28px；内容区小角标加 --sm —— */
+/* —— 角标家族（一套尺寸 + 三色修饰）：顶栏默认 28px；内容区小角标加 --sm ——
+ * font-family 显式继承：角标也用在 <button> 上（顶栏状态角标），按钮默认不继承页面字体，
+ * 不写就会「同一个角标两种字体」。.chip--sm 的等宽声明在其后，仍然照旧生效。 */
 .chip {
   display: inline-flex;
   align-items: center;
@@ -313,6 +266,7 @@ html {
   height: var(--h-ctl);
   padding: 0 11px;
   border-radius: var(--r-pill);
+  font-family: inherit;
   font-size: 12px;
   font-weight: 500;
   white-space: nowrap;
@@ -328,6 +282,12 @@ html {
 .chip--brand { background: color-mix(in srgb, var(--color-brand) 12%, transparent); color: var(--color-brand); }
 .chip--danger { background: #dc2626; color: #fff; }
 .chip--quiet { background: rgba(31, 41, 55, 0.06); color: rgba(23, 32, 43, 0.62); }
+/* 待重启是**状态**不是警告，所以单独给一个色，不复用语义警告的 amber。
+   混用会让真正的警告（成本超限 / 参考图丢失）失去含义。 */
+.chip--pending {
+  background: color-mix(in srgb, var(--color-pending) 14%, transparent);
+  color: var(--color-pending);
+}
 
 /* ============ 最近用过的提示词（结果区空态） ============
  * 整行按钮，一条一行：提示词常达数百字，这里单行截断，完整内容走 title 悬停。
@@ -339,7 +299,8 @@ html {
   padding: 7px 10px;
   border-radius: var(--r-control);
   border: 1px solid rgba(31, 41, 55, 0.12);
-  background: rgba(255, 255, 255, 0.6);
+  /* 浮层档：它叠在结果台面之上 */
+  background: var(--surface-float);
   color: rgba(23, 32, 43, 0.72);
   font-size: 11.5px;
   line-height: 1.5;
@@ -355,33 +316,14 @@ html {
   color: var(--color-brand);
 }
 
-/* ============ 主体色板（设置弹窗「外观」页签） ============
- * 九色预设方块 + 色相滑杆。色块底色由组件按 accentFromHue 现算并内联，
- * 这里只管形状、选中态与滑杆外观。 */
-.accent-swatches {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.accent-swatch {
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  border-radius: 8px;
-  border: 1px solid rgba(0, 0, 0, 0.12);
-  cursor: pointer;
-  transition: transform 0.12s ease, box-shadow 0.15s ease;
-}
-.accent-swatch:hover {
-  transform: translateY(-1px);
-}
-.accent-swatch.is-on {
-  box-shadow: 0 0 0 2px #fff, 0 0 0 4px rgba(23, 32, 43, 0.45);
-}
+/* ============ 主体色滑杆（设置弹窗「外观」） ============
+ * 只有一条滑杆：九色预设方块（.accent-swatches / .accent-swatch）已删除（2026-10-03）。
+ * 宽度交给容器（配合 flex-1），与「卡片通透度」的 .range-field 同形；
+ * 唯一的区别是轨道底色 —— 这里是色相彩虹，那只属于「选色」，别的参数不跟着花。 */
 .accent-hue {
   appearance: none;
   -webkit-appearance: none;
-  width: 200px;
+  width: 100%;
   height: 10px;
   border-radius: var(--r-pill);
   border: 1px solid rgba(0, 0, 0, 0.1);
@@ -420,8 +362,10 @@ html {
 /* ============ 我的壁纸（整页背景层） ============
  * 固定铺满视口、画在内容之下（z-index: -1 —— 在 body 底色之上、所有内容之下）、
  * pointer-events: none：它只是背景，绝不能挡住任何交互。
- * **就用用户的原图**：cover 铺满，不缩放、不模糊、不压暗、不重编码
- * （曾做过模糊/压暗/缩放三个滑杆，维护者要求只保留原图，相关参数与取样逻辑已一并删除）。 */
+ * cover 铺满、不缩放、不重编码；模糊与明暗是**用户的显式调节**（外观弹窗两条滑杆，
+ * 默认 0 / 1 即原图），整条 filter 由 JS 拼好内联注入 —— CSS 里嵌 var() 会被压缩器丢弃。
+ * 历史：曾把模糊做成「随卡片通透度自动涨到 80px」，整卡糊成奶白雾、壁纸被洗成灰白，已归零；
+ * 现在这两条是壁纸自身的属性，与卡片通透度完全解耦，由用户自己权衡可读性。 */
 .imagora-wallpaper {
   position: fixed;
   inset: 0;
@@ -435,10 +379,8 @@ html {
   background-position: center;
   background-repeat: no-repeat;
   background-size: cover;
-  /* 降噪：抽掉一部分颜色、轻微压对比，让画面安静下来，前景文字才读得清。
-   * **不是遮挡**：不加白纱、不压暗、不改尺寸、不重编码——壁纸的细节与纵深全部保留。
-   * 数值与原因见 surface.ts 的 WALLPAPER_IMAGE_FILTER（那边是唯一事实来源）。 */
-  filter: saturate(0.62) contrast(0.94);
+  /* filter 由 JS 内联注入（含固定降噪 + 用户可调的模糊/明暗），
+   * 这里不再写死值——见 wallpaperAdjust.ts 的 wallpaperFilter（唯一事实来源）。 */
 }
 /* 壁纸生效时页面底色让位于壁纸：body 的「掺主色相浅色底」收掉（图未解码完时也不闪主色底）。
  * 主色只留给前景元素（按钮 / 角标 / 选中态 / 聚焦环），由 --color-brand 承担。 */
@@ -460,63 +402,23 @@ html[data-wallpaper="on"] select {
   text-shadow: none;
 }
 
-/* ============ 画布页快捷键面板（操作帮助右侧的 ?） ============
- * 原生 details/summary，无需组件状态；面板绝对定位浮在画布上沿之上。 */
-.help-more { position: relative; }
-.help-more__btn {
-  cursor: pointer;
-  list-style: none;
-  height: var(--chip-sm-h);
-  width: var(--chip-sm-h);
-  padding: 0;
-  justify-content: center;
-  font-weight: 700;
-  user-select: none;
-}
-.help-more__btn::-webkit-details-marker { display: none; }
-.help-more[open] .help-more__btn {
-  background: color-mix(in srgb, var(--color-brand) 12%, transparent);
-  color: var(--color-brand);
-}
-.help-more__panel {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 8px);
-  z-index: 50;
-  width: 560px;
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  padding: 12px 14px;
-  border-radius: var(--r-card);
-  background: var(--surface-card);
-  border: 1px solid rgba(31, 41, 55, 0.13);
-  box-shadow: 0 10px 28px rgba(31, 41, 55, 0.12);
-  font-size: 11.5px;
-  line-height: 1.65;
-  color: rgba(23, 32, 43, 0.66);
-}
-.help-more__panel b {
-  display: inline-block;
-  min-width: 46px;
-  margin-right: 6px;
-  color: rgba(23, 32, 43, 0.82);
-  font-weight: 600;
-}
+/* 画布操作帮助（2026-10-03）：入口是左下角控件组里的 ControlButton，内容走统一弹窗基座
+ * （ModalShell：Portal + Esc/点击遮罩关闭 + 焦点圈闭与归还），因此这里不再需要浮层样式。
+ * 旧写法（.help-more 的 details/summary 浮层）已删除——它 z-index:50 却处在 z-index:auto 的
+ * 层叠上下文里，被带 isolation:isolate 的画布整体盖住，透出来只剩一层淡影，读不清也点不到。 */
 .window-chip,
 .profile-chip {
   border: 1px solid color-mix(in srgb, var(--color-brand) 15%, rgba(255,255,255,.65));
   background: color-mix(in srgb, var(--color-brand) 7%, rgba(255,255,255,.62));
   box-shadow: inset 0 1px rgba(255,255,255,.8), 0 3px 12px rgba(35,42,50,.045);
-  backdrop-filter: blur(12px) saturate(125%);
+  -webkit-backdrop-filter: var(--surface-blur, none);
+  backdrop-filter: var(--surface-blur, none);
 }
+/* 窗口角标窗口号：曾单独走等宽 11px/650 + 字距，结果顶栏里只有它一个字体不一样
+ * （2026-10-03 统一）——回到 .chip 基底即可，只保留固定宽度让窗口号位置稳定。 */
 .window-chip {
   min-width: 42px;
   padding-inline: 10px;
-  font-family: var(--mono);
-  font-size: 11px;
-  font-weight: 650;
-  letter-spacing: .02em;
 }
 .profile-chip {
   color: color-mix(in srgb, var(--color-brand) 72%, #17202b);
@@ -528,9 +430,14 @@ html[data-wallpaper="on"] select {
   padding: 10px 14px;
   border: 1px solid rgba(31, 41, 55, 0.08) !important;
   border-radius: var(--r-card);
-  background: rgba(255, 255, 255, 0.72);
+  /* 表面走 token：顶栏是骨架容器，与经典三卡同级（此前硬编码纯白，
+     换个主体色整条顶栏纹丝不动，跟下面几张紫调卡并排就露馅）。 */
+  background: var(--surface-card);
   box-shadow: 0 10px 34px rgba(28, 34, 43, 0.06), inset 0 1px rgba(255, 255, 255, 0.92);
-  backdrop-filter: blur(16px);
+  /* 毛玻璃同样走 token（当前恒为 none）：此前硬编码 blur(16px)，
+     与「壁纸不糊」的既定取舍冲突——铺了壁纸只有顶栏把它糊掉。 */
+  -webkit-backdrop-filter: var(--surface-blur, none);
+  backdrop-filter: var(--surface-blur, none);
 }
 /* 顶栏控件等高：品牌区 / 徽章 / 分段切换 / 幽灵按钮统一 28px，共用一条水平基线 */
 .studio-header .btn-ghost,
@@ -551,9 +458,11 @@ html[data-wallpaper="on"] select {
   padding: 9px 10px;
   border: 1px solid rgba(31, 41, 55, 0.09);
   border-radius: 13px;
-  background: rgba(255, 255, 255, 0.58);
+  /* 与顶栏同为骨架容器 → 卡片级表面（此前是另一档硬编码白，比顶栏还透） */
+  background: var(--surface-card);
   box-shadow: 0 6px 20px rgba(31, 41, 55, 0.045);
-  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: var(--surface-blur, none);
+  backdrop-filter: var(--surface-blur, none);
 }
 .studio-toolbar > div:first-child {
   padding-right: 10px;
@@ -561,17 +470,15 @@ html[data-wallpaper="on"] select {
 }
 .studio-toolbar .btn-ghost { color: rgba(23, 32, 43, 0.72); }
 .studio-toolbar .btn-ghost:hover:not(:disabled) { color: #fff; }
-.studio-help {
-  margin: 0 4px;
-  min-height: 20px;
-  color: rgba(23, 32, 43, 0.43) !important;
-  letter-spacing: 0.01em;
-}
-.studio-help .font-medium { color: rgba(23, 32, 43, 0.66) !important; letter-spacing: 0.08em; }
 .studio-canvas {
   border-color: rgba(31, 41, 55, 0.12) !important;
   border-radius: 18px !important;
-  background: rgba(252, 252, 250, 0.72) !important;
+  /* 画布主体是**看图的台面** —— 唯一有意不跟随主体色的容器。
+     带色会干扰对生成图本身颜色的判断（同屏比对两张图时尤其明显），
+     所以走中性档 `--surface-plain`（掺色为 0，只受通透度影响）。
+     此前是硬编码暖白 rgba(252,252,250,.72)：既不跟随、也不是刻意的中性，
+     只是个漏网的写死值；现在把"不跟随"变成显式选择，并用测试锁住。 */
+  background: var(--surface-plain) !important;
   box-shadow: 0 18px 45px rgba(31, 41, 55, 0.09), inset 0 1px rgba(255, 255, 255, 0.9) !important;
 }
 .studio-canvas .react-flow__renderer {
@@ -587,7 +494,7 @@ html[data-wallpaper="on"] select {
   width: 30px;
   height: 30px;
   border: 0;
-  background: rgba(255, 255, 255, 0.84);
+  background: var(--surface-float);
   color: #52606f;
 }
 .studio-canvas .react-flow__controls-button:hover { background: color-mix(in srgb, var(--color-brand) 10%, white); color: var(--color-brand); }
@@ -618,10 +525,10 @@ html[data-canvas-bounds="off"] .studio-canvas .react-flow__renderer {
   -webkit-backdrop-filter: var(--surface-blur, none);
   backdrop-filter: var(--surface-blur, none);
 }
-/* 输入框：半透明白 + 毛玻璃。底色由 App 按「通透度」内联注入（--field-bg），
+/* 输入框：半透明白 + 毛玻璃。底色由 App 按「通透度」内联注入（--surface-inset），
    缺省值仅供 JS 加载前兜底。 */
-.field-control { border-color: rgba(31, 41, 55, 0.14); background: var(--field-bg, rgba(255, 255, 255, 0.7)); }
-/* 输入框在有壁纸时也直接读 --field-bg（全透时接近透明），
+.field-control { border-color: rgba(31, 41, 55, 0.14); background: var(--surface-inset, rgba(255, 255, 255, 0.7)); }
+/* 输入框在有壁纸时也直接读 --surface-inset（全透时接近透明），
    靠 1px 描边 + 聚焦环标出边界，不再叠一层白底挡住壁纸。 */
 .field-control:focus { box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-brand) 13%, transparent); }
 .btn-primary { border-radius: 11px; box-shadow: 0 8px 18px color-mix(in srgb, var(--color-brand) 18%, transparent); }
@@ -666,7 +573,7 @@ html[data-canvas-bounds="off"] .studio-canvas .react-flow__renderer {
 .classic-result-panel .result-gallery > a {
   border-radius: 12px;
   padding: 7px;
-  background: rgba(255, 255, 255, .72);
+  background: var(--surface-float);
   border-color: rgba(31, 41, 55, .12);
 }
 .classic-result-panel .result-gallery p,
@@ -676,31 +583,35 @@ html[data-canvas-bounds="off"] .studio-canvas .react-flow__renderer {
 .classic-result-panel .log-box { background: rgba(23, 32, 43, .045); border-color: rgba(23, 32, 43, .08); }
 /* 此处原为深色主题的浅灰白，落在浅底上几乎不可见——归并到同一套次要文字色 */
 .classic-result-panel .result-gallery + * { color: rgba(23, 32, 43, .55); }
-.health-alert { border-radius: 12px; box-shadow: 0 6px 16px rgba(160,110,20,.08); }
 
-/* Dark inspector strip used by both canvas selection and parameter surfaces. */
-.studio-inspector {
-  border-color: rgba(255,255,255,.12) !important;
-  background: rgba(29,36,42,.9) !important;
-  box-shadow: 0 12px 26px rgba(20,25,30,.18) !important;
-}
-.studio-inspector .btn-ghost { color: #d7e0e1; }
-.studio-inspector .btn-ghost:hover:not(:disabled) { color: #20262c; }
+/* 画布选中操作栏（.studio-inspector）：颜色一律交给统一样式，本文件不再覆盖。
+ * 表面走组件声明的半透明毛玻璃（bg-white/20 + border-white/40 + backdrop-blur-md，见 CanvasPage.tsx），
+ * 按钮走全局 btn-ghost / btn-danger / btn-primary（常态主体色文字，hover 涟漪填充 + 反白）。
+ * 历史坑（2026-10-03 修）：此处曾用 !important 把面板涂成深色条 rgba(29,36,42,.9)，
+ * 并把 ghost 文字钉死 #d7e0e1、hover 钉死 #20262c——浅色界面里凭空浮出一条黑条，
+ * 且 hover 时「主体色涟漪 + 近黑文字」自相矛盾；该 0,2,0 选择器还把 btn-danger 的红字一并吃掉
+ * （「删除所选」在暗条里退化成灰字）。与 [ARCHITECTURE 5.4 / 8.4](../../docs/ARCHITECTURE.md) 的既定描述对齐。
+ * 限宽与横向滚动隐藏在文件后段单独定义（本类仍保留）。 */
 .studio-canvas .node-pop {
   border-color: rgba(32,43,51,.13) !important;
-  background: rgba(255,255,255,.88) !important;
+  background: var(--surface-float) !important;
   box-shadow: 0 12px 26px rgba(33,44,53,.12), inset 0 1px rgba(255,255,255,.9) !important;
 }
 .studio-canvas .node-pop.node-selected {
   border-color: var(--color-brand) !important;
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-brand) 16%, transparent), 0 14px 30px rgba(33,44,53,.16) !important;
 }
-.studio-canvas .node-pop .field-control { background: rgba(247,249,249,.9); }
+.studio-canvas .node-pop .field-control { background: var(--surface-inset); }
 .studio-canvas .react-flow__edge-path { stroke: #7c8994; stroke-width: 1.5; }
 .studio-canvas .react-flow__edge.selected .react-flow__edge-path { stroke: var(--color-brand); stroke-width: 2.5; }
 .studio-canvas .react-flow__handle { box-shadow: 0 0 0 3px rgba(255,255,255,.85); }
 
-/* Gallery, history and modal surfaces share the same product language. */
+/* Gallery, history and modal surfaces share the same product language.
+ *
+ * 弹窗表面读 `--surface-panel`，与卡片同一套材质 token（surface.ts 的 surfaceTokens 算好后内联注入）：
+ * 此前这里是写死的 rgba(251,251,248,.97)，于是主体色 / 卡片通透度 / 背景材质对**所有弹窗**一律无效——
+ * 换色/调通透度时页面变了、弹窗不变，看着像两套界面。
+ * 兜底值与 surface.ts 的 BASE.panelTop 对齐（hue 0 / 不透明档），JS 未注入时也不会跑偏。 */
 .studio-modal-overlay,
 .modal-shell {
   position: fixed;
@@ -709,27 +620,29 @@ html[data-canvas-bounds="off"] .studio-canvas .react-flow__renderer {
   display: grid;
   place-items: center;
   padding: clamp(12px, 2vw, 24px);
-  background: rgba(20,26,31,.62) !important;
-  backdrop-filter: blur(10px) saturate(.9);
+  background: var(--scrim-bg) !important;
+  -webkit-backdrop-filter: var(--scrim-blur);
+  backdrop-filter: var(--scrim-blur);
 }
-.modal-shell--nested { z-index: 60; background: rgba(20,26,31,.44) !important; }
+.modal-shell--nested { z-index: 60; background: var(--scrim-bg-nested) !important; }
 .studio-modal,
 .modal-panel {
   width: min(100%, 42rem);
   max-height: min(86dvh, 760px);
   overflow: hidden;
-  /* flex 列 + 内容区可收缩：面板自己被 max-height 封顶、又 overflow:hidden，
-     所以内容一旦超过 760px，只有让 **内容区**（.modal-body）变成可收缩的滚动态才拿得到底。
-     改成块级布局时踩过的坑：.modal-body 只写了 overflow-y:auto，但高度不受约束，
-     scrollHeight === clientHeight 永远不触发滚动，底部几行（画布边界 / 恢复默认外观）
-     被面板裁掉且怎么拖都露不出来。 */
+  /* flex 列 + 内容区可收缩：面板自己被 max-height 封顶又 overflow:hidden，
+     所以内容一旦超过上限，只有让 **内容区** 变成可收缩的滚动态才拿得到底。
+     块级布局时踩过的坑：.modal-body 只写了 overflow-y:auto、高度不受约束，
+     scrollHeight === clientHeight 永远不触发滚动，底部几行被面板静默裁掉且怎么拖都露不出来
+     （实测 1100x620：panelClientH 531 / panelScrollH 716 / bodyClientH 636 / canScroll false）。 */
   display: flex;
   flex-direction: column;
   padding: 20px;
   border: 1px solid rgba(255,255,255,.68);
   border-radius: 16px !important;
   outline: none;
-  background: rgba(251,251,248,.97) !important;
+  /* 与卡片同源：主体色相 + 通透度都在这条 token 里 */
+  background: var(--surface-panel, linear-gradient(150deg, hsl(0 30% 98.4% / 0.96), hsl(0 34% 94.8% / 0.8)));
   box-shadow: 0 24px 70px rgba(15,20,25,.26), inset 0 1px 0 rgba(255,255,255,.8) !important;
 }
 .modal-panel--sm { width: min(100%, 26rem); }
@@ -743,25 +656,45 @@ html[data-canvas-bounds="off"] .studio-canvas .react-flow__renderer {
   padding: 0;
   flex-direction: column;
 }
+/* 弹窗变得可透之后，卡片用的那层「极淡白描边」同样适用（见下方 html[data-wallpaper] 段）。
+   两套材质 token 之下文字可读性一致，不再是「卡片透、弹窗不透」的两副面孔。 */
+.modal-panel,
+.studio-modal { text-shadow: none; }
 .modal-header { margin-bottom: 16px; }
 .modal-title { color: #17202b; font-size: 15px; font-weight: 650; letter-spacing: -.02em; }
 .modal-subtitle { margin-top: 4px; max-width: 58ch; color: rgba(23,32,43,.6); font-size: 12px; line-height: 1.55; }
 .modal-footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 .modal-empty { padding: 24px 12px; color: rgba(23,32,43,.38); font-size: 12px; text-align: center; }
-.workflow-list { border: 1px solid rgba(31,41,55,.12); border-radius: var(--r-control); background: rgba(255,255,255,.6); }
+.workflow-list { border: 1px solid rgba(31,41,55,.12); border-radius: var(--r-control); background: var(--surface-float); }
 .workflow-list__item { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 12px; color: #3f4953; font-size: 12px; text-align: left; transition: color .18s ease, background-color .18s ease; }
 .workflow-list__item:hover,
 .workflow-list__item:focus-visible { color: var(--color-brand); background: color-mix(in srgb, var(--color-brand) 7%, transparent); }
 .workflow-list__meta { flex: none; color: rgba(23,32,43,.42); font-size: 11px; font-variant-numeric: tabular-nums; }
-.select-list { border: 1px solid rgba(31,41,55,.14); border-radius: var(--r-control); background: rgba(255,255,255,.98); padding: 4px; box-shadow: 0 18px 40px rgba(15,20,25,.14); }
+.select-list { border: 1px solid rgba(31,41,55,.14); border-radius: var(--r-control); background: var(--surface-float); padding: 4px; box-shadow: 0 18px 40px rgba(15,20,25,.14); }
 .select-option { display: flex; min-height: 34px; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 10px; border-radius: 7px; color: #3f4953; font-size: 13px; cursor: pointer; }
 .select-option.is-active { color: var(--color-brand); background: color-mix(in srgb, var(--color-brand) 7%, transparent); }
 .select-option.is-selected { color: var(--color-brand); font-weight: 600; }
+/* 搜索框：贴在列表顶部，与选项区用一条细线分开；输入框本身不要 field-control 的边框，
+   否则「框里套框」，在已经带边框的浮层里显得脏。 */
+.select-search { flex: none; padding: 2px 2px 6px; border-bottom: 1px solid rgba(31,41,55,.1); margin-bottom: 4px; }
+.select-search__input { width: 100%; height: 30px; padding: 0 9px; border: 0; border-radius: 7px; background: color-mix(in srgb, var(--color-brand) 5%, transparent); color: #17202b; font-size: 13px; }
+.select-search__input:focus { outline: 2px solid color-mix(in srgb, var(--color-brand) 32%, transparent); outline-offset: 0; }
+.select-search__input::placeholder { color: rgba(23,32,43,.34); }
+.select-empty { padding: 14px 10px; color: rgba(23,32,43,.4); font-size: 12px; text-align: center; }
+/* 分组标题：粘在滚动容器顶部，长列表滚到中段也知道自己在哪一组。
+   底色走 --surface-float（和列表同一个 token），所以它看起来就是列表的一部分；
+   代价是粘顶时下方选项会以「通透度」的比例透上来一点点 —— 表面系统要求底色只能来自
+   surface.ts（surfaceAudit 会红），所以不能为它单独写一个不透明色。 */
+.select-group__title { position: sticky; top: 0; z-index: 1; padding: 6px 10px 4px; background: var(--surface-float); color: rgba(23,32,43,.45); font-size: 11px; font-weight: 600; letter-spacing: .04em; }
+.select-group__rows { margin: 0; padding: 0; list-style: none; }
+.select-group + .select-group { margin-top: 2px; }
+.select-trigger { cursor: pointer; }
+.select-trigger:disabled { cursor: not-allowed; opacity: .55; }
 .prompt-import-preview { margin-top: 10px; max-height: 260px; }
 .prompt-import-summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: rgba(23,32,43,.58); font-size: 12px; }
 .prompt-import-summary__error,
 .prompt-import-issue { color: #c83f3f; }
-.prompt-import-card { margin-top: 8px; padding: 10px 12px; border: 1px solid rgba(31,41,55,.1); border-radius: var(--r-control); background: rgba(255,255,255,.64); }
+.prompt-import-card { margin-top: 8px; padding: 10px 12px; border: 1px solid rgba(31,41,55,.1); border-radius: var(--r-control); background: var(--surface-float); }
 .prompt-import-card__meta { display: flex; flex-wrap: wrap; gap: 8px; color: rgba(23,32,43,.5); font-size: 11px; }
 .prompt-import-card__meta strong { color: #17202b; }
 .prompt-import-card__fallback { color: #a46108; }
@@ -770,13 +703,17 @@ html[data-canvas-bounds="off"] .studio-canvas .react-flow__renderer {
 .upload-thumb { display: block; padding: 0; border-radius: 9px; }
 .result-status-ring { display: flex; width: 112px; height: 112px; align-items: center; justify-content: center; border-width: 1.5px; border-radius: 50%; box-shadow: 0 18px 50px rgba(23,32,43,.08), inset 0 0 0 8px rgba(255,255,255,.42); }
 /* 模态内容区：默认按内容自适应高度（外观 / 提示词导入弹窗）。
- * flex: 1 1 auto + min-height: 0 是「能滚」的前提——父级 .modal-panel 是 flex 列，
- * 内容区必须允许被压缩到内容高度以下，否则它只会撑长面板、被面板的 overflow:hidden 裁掉。
- * scrollbar-gutter 预留滚动条占位：即便出现滚动条也不横向位移。 */
+ * scrollbar-gutter 预留滚动条占位：即便出现滚动条也不横向位移。
+ * padding-inline 与焦点环的外扩量对齐：`button:focus-visible` 是 outline 2px + offset 3px = 5px，
+ * 而滚动容器只裁到 padding box —— 内边距为 0 时左侧的环会被整条切掉（曾出现「左被裁、右正常」，
+ * 右边只是因为当时多写了一个 pr-1 的 4px）。两侧同值才不会左右不对称。 */
 .modal-body {
+  /* flex: 1 1 auto + min-height: 0 是「能滚」的前提：父级 .modal-panel 是 flex 列，
+     内容区必须允许被压缩到内容高度以下，否则它只会撑长面板、被面板的 overflow:hidden 裁掉。 */
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+  padding-inline: 6px;
   scrollbar-gutter: stable;
 }
 /* 「生图 API 设置」三个页签（使用中 / 个人配置 / 我的接口）用同一档高度：
@@ -821,10 +758,10 @@ html[data-canvas-bounds="off"] .studio-canvas .react-flow__renderer {
 /* Page-specific expressions: one system, three moods.
  * 经典输出区的表面已并入 .classic-result-panel 主定义（含 --surface-panel），此处不再重复覆盖。 */
 
-.history-overlay { background: rgba(30,30,28,.48) !important; backdrop-filter: blur(6px); }
-.history-modal { border: 1px solid rgba(31,41,55,.12); border-radius: 18px !important; background: #f4f1eb !important; box-shadow: 0 24px 70px rgba(25,25,22,.22) !important; }
-.history-modal > header { background: rgba(255,255,255,.72); border-color: rgba(31,41,55,.1); }
-.history-modal ul > li { border-color: rgba(31,41,55,.11); background: rgba(255,255,255,.72); transition: transform .2s ease, box-shadow .2s ease; }
+.history-overlay { background: var(--scrim-bg) !important; -webkit-backdrop-filter: var(--scrim-blur); backdrop-filter: var(--scrim-blur); }
+.history-modal { border: 1px solid rgba(31,41,55,.12); border-radius: 18px !important; background: var(--surface-panel) !important; box-shadow: 0 24px 70px rgba(25,25,22,.22) !important; }
+.history-modal > header { background: var(--surface-float); border-color: rgba(31,41,55,.1); }
+.history-modal ul > li { border-color: rgba(31,41,55,.11); background: var(--surface-float); transition: transform .2s ease, box-shadow .2s ease; }
 .history-modal ul > li:hover,
 .history-modal ul > li:focus-within { transform: translateY(-2px); box-shadow: 0 10px 22px rgba(31,41,55,.08); }
 
@@ -845,7 +782,8 @@ html[data-canvas-bounds="off"] .studio-canvas .react-flow__renderer {
   padding: 3px;
   border-radius: var(--r-pill);
   border: 1px solid rgba(31,41,55,.1);
-  background: rgba(255,255,255,.72);
+  /* 骨架档：它是顶栏里的分段控件底 */
+  background: var(--surface-base);
 }
 .mode-switch__item {
   display: inline-flex;
@@ -889,7 +827,6 @@ html[data-canvas-bounds="off"] .studio-canvas .react-flow__renderer {
 .api-settings-trigger.is-active:hover:not(:disabled),
 .api-settings-trigger.is-active:focus-visible { color: #fff !important; }
 .api-settings-modal { color: #17202b; }
-.api-settings-modal .field-control { background: rgba(255,255,255,.86); }
 
 /* ============ 公共组件类：表单 / 按钮 / 卡片 统一 ============ */
 @layer components {

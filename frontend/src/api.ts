@@ -1,59 +1,19 @@
 import type {
   AppConfig,
   AssetEntry,
+  ConfigWriteResult,
   GenerateParams,
   GenerationTaskStatus,
   GenerationTaskSnapshot,
+  ProviderCreateResult,
+  ProviderDeleteResult,
+  ProviderDraft,
+  ProviderProbeResult,
   RefItem,
   WorkflowEdge,
   WorkflowNode,
-  PersonalApiSettings,
-  PersonalApiPreset,
 } from "./types";
 
-const PERSONAL_API_STORAGE_KEY = "imagora.personal-api.v1";
-const PERSONAL_API_PRESETS_STORAGE_KEY = "imagora.personal-api.presets.v1";
-
-export function readPersonalApiSettings(): PersonalApiSettings | null {
-  try {
-    const raw = localStorage.getItem(PERSONAL_API_STORAGE_KEY);
-    if (!raw) return null;
-    const value = JSON.parse(raw) as Record<string, unknown>;
-    if (typeof value.baseUrl !== "string" || typeof value.apiKey !== "string") return null;
-    return {
-      baseUrl: value.baseUrl,
-      apiKey: value.apiKey,
-      model: typeof value.model === "string" ? value.model : "",
-        apiPath: typeof value.apiPath === "string"
-          ? value.apiPath
-          : (typeof value.generationsPath === "string" ? value.generationsPath : "/v1/images/generations"),
-    };
-  } catch { return null; }
-}
-
-export function savePersonalApiSettings(settings: PersonalApiSettings | null): void {
-  if (!settings?.baseUrl || !settings.apiKey) localStorage.removeItem(PERSONAL_API_STORAGE_KEY);
-  else localStorage.setItem(PERSONAL_API_STORAGE_KEY, JSON.stringify(settings));
-}
-
-export function readPersonalApiPresets(): PersonalApiPreset[] {
-  try {
-    const raw = localStorage.getItem(PERSONAL_API_PRESETS_STORAGE_KEY);
-    if (!raw) return [];
-    const value = JSON.parse(raw);
-    if (!Array.isArray(value)) return [];
-    return value.filter((item): item is PersonalApiPreset =>
-      item && typeof item.id === "string" && typeof item.name === "string"
-      && item.settings && typeof item.settings.baseUrl === "string"
-      && typeof item.settings.apiKey === "string"
-      && typeof item.settings.apiPath === "string",
-    );
-  } catch { return []; }
-}
-
-export function savePersonalApiPresets(presets: PersonalApiPreset[]): void {
-  localStorage.setItem(PERSONAL_API_PRESETS_STORAGE_KEY, JSON.stringify(presets));
-}
 /** 从错误响应体里取可读原因：FastAPI 的 detail（字符串或 {reason}）优先，非 JSON 原样截断 */
 function errorDetail(text: string): string {
   try {
@@ -101,11 +61,81 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+/** 写配置的令牌（内存驻留，不写 localStorage）：
+ *  由 ConfigGuardMiddleware 在 GET /api/config 的响应头里下发，同源页面能读，
+ *  跨站页面受同源策略限制读不到响应头内容，因此拼不出合法令牌。 */
+let configToken: string | null = null;
+
 /** 获取应用初始化配置（尺寸/质量/默认输出路径/窗口编号）
- *  传 win 表示沿用已有窗口编号（URL ?win= 或 window.name 记忆），否则由服务端分配 */
-export function getConfig(win?: number): Promise<AppConfig> {
+ *  传 win 表示沿用已有窗口编号（URL ?win= 或 window.name 记忆），否则由服务端分配。
+ *  顺带取出写配置令牌（令牌就是在这个响应里下发的）。 */
+export async function getConfig(win?: number): Promise<AppConfig> {
   const query = win ? `?win=${win}` : "";
-  return requestJson<AppConfig>(`/api/config${query}`);
+  const res = await fetch(`/api/config${query}`);
+  if (!res.ok) throw new Error(`获取配置失败（HTTP ${res.status}）`);
+  configToken = res.headers.get("X-Config-Token") ?? configToken;
+  return (await res.json()) as AppConfig;
+}
+
+/** 切换配置：写 ACTIVE_PROFILE 与 MODEL_<PROFILE>。
+ *
+ *  界面只做「选」不做「写」——接口地址 / 路径 / 密钥是定义性内容，改文件即可，
+ *  所以这里只可能出现这两个字段（服务端契约更宽，见 docs/config-write-api-design.md）。
+ *  失败时抛 HttpError（409 = 文件被外部修改）。 */
+export function writeConfig(payload: {
+  profile: string;
+  changes: Partial<Record<"profile" | "model", string>>;
+  expectedMtimes?: { env?: number | null; config?: number | null };
+}): Promise<ConfigWriteResult> {
+  return requestJson<ConfigWriteResult>("/api/config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...tokenHeader() },
+    body: JSON.stringify(payload),
+  });
+}
+
+function tokenHeader(): Record<string, string> {
+  return configToken ? { "X-Config-Token": configToken } : {};
+}
+
+/** 新增第三方来源（写 providers.local.json + 密钥写 .env）。
+ *
+ *  与 writeConfig 分开是刻意的：那是「改现有来源的某个字段」，这是「造一个新来源」，
+ *  两者落盘的文件不同（.env vs providers.local.json），混在一条路径上迟早出错。 */
+export function createProvider(draft: ProviderDraft): Promise<ProviderCreateResult> {
+  return requestJson<ProviderCreateResult>("/api/config/providers", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...tokenHeader() },
+    body: JSON.stringify(draft),
+  });
+}
+
+/** 探测某个接口地址的可用模型（GET {baseUrl}/models，只读不落盘）。
+ *
+ *  密钥可省略：服务端会按 name 去 .env 里找已存的 API_KEY_<NAME>，
+ *  这样「先存密钥再点获取」和「边填边探」两种顺序都能用。 */
+export function probeProviderModels(payload: {
+  baseUrl: string;
+  apiKey?: string;
+  name?: string;
+}): Promise<ProviderProbeResult> {
+  return requestJson<ProviderProbeResult>("/api/config/providers/probe", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...tokenHeader() },
+    body: JSON.stringify(payload),
+  });
+}
+
+/** 删除一条本机来源（providers.local.json 里的那条），顺带注释掉它的 API_KEY。
+ *
+ *  只删得掉本机来源：出厂来源在 config.json 里，服务端会拒绝（400 not_local）；
+ *  正在生效的来源也会被拒绝（400 profile_in_use）——删了之后进程仍在用旧配置，
+ *  下次启动静默回落，生图报错时联想不到是删了来源。 */
+export function deleteProvider(name: string): Promise<ProviderDeleteResult> {
+  return requestJson<ProviderDeleteResult>(
+    `/api/config/providers/${encodeURIComponent(name)}`,
+    { method: "DELETE", headers: { ...tokenHeader() } },
+  );
 }
 
 export function getHealthDetails(): Promise<{
@@ -163,7 +193,11 @@ export async function rememberOutputDir(path: string): Promise<void> {
 }
 
 /** 文生图 / 图生图（refPaths 优先复用已上传参考图，files 为未上传兜底）
- *  提交后立即返回 {taskId, status}，后续用 fetchTask 轮询快照 */
+ *  提交后立即返回 {taskId, status}，后续用 fetchTask 轮询快照。
+ *
+ *  **不携带任何凭据**：配置只有一份，在 .env / config.json 里，服务端自己读。
+ *  此前这里会读 localStorage 拼上 api_key / api_base_url —— 那是「浏览器也存一份配置」
+ *  时代的产物，已随配置归一移除（见 docs/config-write-api-design.md）。 */
 export async function submitGenerate(
   params: GenerateParams,
 ): Promise<{ taskId: string; status: GenerationTaskStatus }> {
@@ -181,13 +215,6 @@ export async function submitGenerate(
   formData.append("quality", params.quality);
   formData.append("output_dir", params.outputDir);
   formData.append("win", String(params.win)); // 与后端 Form 参数名一致，日志按窗口溯源
-  const personal = readPersonalApiSettings();
-  if (personal) {
-    formData.append("api_base_url", personal.baseUrl);
-    formData.append("api_key", personal.apiKey);
-    if (personal.model) formData.append("api_model", personal.model);
-    formData.append("api_path", personal.apiPath);
-  }
   if (params.allowOverBudget) {
     // 预算预检已确认：超限才放行（见 core/cost.py check_budget 与 /api/budget/check）
     formData.append("allow_over_budget", "true");

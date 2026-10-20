@@ -59,12 +59,6 @@ class GenerationTask:
     submission_id: str = ""
     # 参考图在提交阶段已注册进 .assets 的 id（server 用；persist 按 id 解析，不重复注册）
     input_asset_ids: list[str] = field(default_factory=list)
-    # 可选的浏览器个人 API 配置：仅存在于当前内存任务，不写入历史/配置文件。
-    api_base_url: str = ""
-    api_key: str = ""
-    api_model: str = ""
-    api_generations_path: str = "/v1/images/generations"
-    api_edits_path: str = "/v1/images/edits"
     # 结果（由注入的 run_task 写入）
     results: list[dict] = field(default_factory=list)
     messages: list[str] = field(default_factory=list)

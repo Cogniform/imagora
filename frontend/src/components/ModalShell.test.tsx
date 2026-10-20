@@ -3,12 +3,44 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { resetPopupCount } from "../popupLayer";
 import { ModalShell } from "./ModalShell";
+import { Select } from "./Select";
 
 describe("ModalShell", () => {
   afterEach(() => {
     cleanup();
+    resetPopupCount(); // 浮层计数是模块级状态，用例之间必须清，否则互相污染
     vi.useRealTimers();
+  });
+
+  it("弹窗里有展开的下拉时，Esc 先收下拉而不是关掉弹窗", () => {
+    // 回归：ModalShell 的 Esc 挂在 document 的 **capture** 阶段，比 Select 自己的
+    // onKeyDown 先跑。不判浮层的话，按一下 Esc 会把正在填的弹窗一起关掉。
+    const onClose = vi.fn();
+    render(
+      <ModalShell title="测试弹窗" onClose={onClose}>
+        <Select
+          options={[
+            { value: "a", label: "选项 A" },
+            { value: "b", label: "选项 B" },
+          ]}
+          value="a"
+          onChange={vi.fn()}
+        />
+      </ModalShell>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /选项 A/ }));
+    expect(screen.getByRole("listbox")).toBeTruthy();
+
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog", { name: "测试弹窗" })).toBeTruthy();
+
+    // 下拉收起后再按一次，才轮到弹窗关闭
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it("提供 dialog 语义，并区分面板点击与遮罩点击", () => {

@@ -10,16 +10,31 @@ release/
 *.spec
 *.egg-info/
 .env
+# .env 的原子写备份：core/config_write.py 改 .env 前会先 copy 一份 .bak。
+# 它和 .env 一样含明文密钥，只忽略 .env 会漏掉它 —— 界面上每改一次密钥就多一个未忽略的含密文件。
+.env.bak
 
 *.log
 frontend/node_modules/
 logs/
+
+# 本机来源层：界面上「添加第三方供应商」建出来的 profile（含地址与模型目录）。
+# 与 config.json 的区别见 docs/ARCHITECTURE.md 4.4 —— 出厂目录进仓库，本机来源不进。
+# 密钥不在这里（在 .env），所以这个文件被误提交也不会泄密，但仍然不入库：
+# 它是「这台机器接了哪些中转站」的本机事实，换机器不该继承。
+/providers.local.json
+/providers.local.json.bak
 
 # 运行产物：输出图片 / 参考图缓存 / 上次路径记录
 output/
 
 # 开发期 UI 审计图：本机产物，不入库（门面配图在 assets/screenshots/）
 /_ui-audit/
+
+# 个人素材：本机自用、不入库。wallpapers/ 下放着原来的两张内置预设壁纸
+# （dragon / tiger）——它们已从应用里移除，只作为「我的壁纸」的自选图留着，
+# 用外观弹窗的「选择图片」自己挑，进 IndexedDB，不进仓库。
+/personal/
 
 # 本机快捷方式：可执行入口是根目录的「启动生图工作台.exe」，快捷方式只是个人便利，
 # 且 .lnk 格式必须记录绝对路径，换机器即失效——不随仓库分发

@@ -111,8 +111,11 @@ with sync_playwright() as p:
     )
     check("已记入「我的接口」", len(presets) == 1, [pp["name"] for pp in presets])
     check(
-        "主界面按钮变为已启用",
-        "个人 API 已启用" in page.locator(".api-settings-trigger").inner_text(),
+        "顶栏角标显示当前模型并标记个人配置",
+        "gpt-image" in page.locator(".api-settings-trigger").inner_text()
+        and "is-active"
+        in (page.locator(".api-settings-trigger").get_attribute("class") or ""),
+        page.locator(".api-settings-trigger").inner_text(),
     )
 
     # ---- 使用中：切到个人配置生效 + 单价跟随来源 ----
@@ -157,8 +160,10 @@ with sync_playwright() as p:
         page.evaluate("() => localStorage.getItem('imagora.personal-api.v1')") is None,
     )
     check(
-        "主界面回到「生图 API」",
-        "个人 API 已启用" not in page.locator(".api-settings-trigger").inner_text(),
+        "清除后角标回到后端配置（不再是个人）",
+        "is-active"
+        not in (page.locator(".api-settings-trigger").get_attribute("class") or ""),
+        page.locator(".api-settings-trigger").inner_text(),
     )
 
     # /favicon.ico 是 Chromium 在 JS 注入动态图标前的一次固定探测（index.html 有意不放静态 link），

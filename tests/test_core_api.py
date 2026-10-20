@@ -59,25 +59,41 @@ def test_resolve_size_rejects_size_and_ratio_together():
 def test_resolve_size_from_ratio():
     """ratio + 档位 -> 对应分辨率。
 
-    具体数值随当前 profile 的 RATIOS 变化（供应商不同尺寸表不同），
-    这里从 RATIOS 推导而非硬编码，避免切换 profile 后假失败。
+    具体比例与档位随当前 profile 的 RATIOS 变化（供应商不同尺寸表不同），
+    这里从 RATIOS 自身取值而非硬编码某一家的形状，避免切换 profile 后假失败
+    （曾经写死 9:16/2K 与 1:1/1K，按 .env.example 推荐的 ACTIVE_PROFILE 换站即红）。
     """
     from core.config import RATIOS
 
-    for ratio, tier in (("9:16", "2K"), ("1:1", "1K")):
-        assert resolve_size_with_ratio(None, ratio, tier) == RATIOS[ratio][tier]
+    assert RATIOS, "当前 profile 的 RATIOS 不应为空"
+    for ratio, tiers in RATIOS.items():
+        for tier, expected in tiers.items():
+            assert resolve_size_with_ratio(None, ratio, tier) == expected
 
 
 def test_resolve_size_rejects_unknown_ratio():
     """不支持的 ratio -> ValueError"""
+    from core.config import RATIOS
+
+    unknown = next(r for r in ("5:4", "7:3", "99:1") if r not in RATIOS)
     with pytest.raises(ValueError, match="不支持比例"):
-        resolve_size_with_ratio(None, "5:4", "2K")
+        resolve_size_with_ratio(None, unknown, "2K")
 
 
 def test_resolve_size_rejects_unavailable_tier():
-    """ratio 存在但该档位无此比例 -> ValueError"""
-    with pytest.raises(ValueError, match="没有 1K 档"):
-        resolve_size_with_ratio(None, "3:2", "1K")
+    """ratio 存在但该档位无此比例 -> ValueError
+
+    档位取自当前 profile 的 RATIOS：挑一个该比例**没有**的档位，而不是写死
+    「3:2 必须没有 1K」——那是 volc 的形状，换 profile 就会假失败。
+    """
+    from core.config import RATIOS
+
+    all_tiers = ("1K", "2K", "4K")
+    ratio, missing = next(
+        (r, t) for r, tiers in RATIOS.items() for t in all_tiers if t not in tiers
+    )
+    with pytest.raises(ValueError, match=f"没有 {missing} 档"):
+        resolve_size_with_ratio(None, ratio, missing)
 
 
 # ---------- build_default_output_path ----------

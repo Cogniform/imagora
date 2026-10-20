@@ -6,7 +6,7 @@
 - 命名：`<界面或场景>-<视角>.png`，全小写 kebab-case（现有：`canvas-overview` / `form-view` / `terminal-window`）。
 - 被谁引用：根 [README.md](../README.md)「界面一览」。改文件名要同改那里三处链接。
 - 变更影响路由：新增或改名 → 同改根 README 的链接，以及根 [AGENTS.md](../AGENTS.md) 待办里指向本目录的那条；跑 `python scripts/check_docs.py` 确认不断链。
-- 本目录不放的东西：应用运行时资源在 `frontend/public/`（图标、内置壁纸），程序产物与资产库在 `output/`。
+- 本目录不放的东西：应用运行时资源在 `frontend/public/`（图标等静态文件），程序产物与资产库在 `output/`，个人素材在 `personal/`（git 忽略）。
 
 ## 重拍要拍到哪些状态
 
