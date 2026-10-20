@@ -47,7 +47,7 @@ Imagora 是本地单机工具，运行时分三层，方向单一：
 | `core/` | 后端核心逻辑（见 2.2），全部无 HTTP 依赖的纯业务模块；**双件**：规则层 core/AGENTS.md + 文件索引 core/README.md |
 | `frontend/` | React SPA（见 2.3）；**双件**：frontend/AGENTS.md（规则）+ frontend/README.md（索引） |
 | `scripts/` | 独立运维脚本：`migrate.py`（存储一步到最新，默认只报告、`--apply` 才落盘备份校验）；**双件**：scripts/AGENTS.md + scripts/README.md |
-| `tests/` | 后端 pytest（420 用例）+ 前端 vitest（360 用例），全部不调上游；**双件**：tests/AGENTS.md + tests/README.md（逐文件覆盖） |
+| `tests/` | 后端 pytest（432 用例）+ 前端 vitest（360 用例），全部不调上游；**双件**：tests/AGENTS.md + tests/README.md（逐文件覆盖） |
 | `docs/` | 设计圣经 `ARCHITECTURE.md`（本文档）+ `prompt-import-format.md` / `ecom-prompt-import-format.md`（格式规范）；**双件**：docs/AGENTS.md + docs/README.md |
 | `assets/` | **文档配图**（只服务 markdown 渲染，不是应用资源）：`screenshots/` 放 README「界面一览」的界面截图；**双件**：assets/AGENTS.md + assets/README.md |
 | `_ui-audit/` | 开发期 UI 审计图（本机产物，git 忽略）：由 [scripts/capture.py](../scripts/capture.py) 生成，与门面配图 `assets/screenshots/` 不是一回事 |
@@ -338,6 +338,7 @@ React Flow v12（`@xyflow/react`）受控模式：`nodes` / `edges` 状态由 `C
 | POST | `/api/config/secret` | { profile, confirm: true } | { ok, cleared, fileState }（清空密钥：把 `.env` 里那一行注释掉，手工去掉 `#` 即恢复；必须显式 confirm） |
 | POST | `/api/config/providers` | { name, label?, baseUrl, protocol(`openai`/`ark`/`custom`), generationsPath?, editsPath?, model?, apiKey?, activate? } | { ok, name, profile, path, pending, fileState }（**新增第三方来源**：profile 写 `providers.local.json`、密钥写 `.env` 的 `API_KEY_<NAME>`；重名 / 名非法 / 地址非法 → 400 `invalid_value`；`activate` 才写 `ACTIVE_PROFILE` 并计入 pending；落盘后服务端 `reload_config()`，不用重启） |
 | POST | `/api/config/providers/probe` | { baseUrl, apiKey?, name? } | { ok, models[{id,label}] }（**探测上游可用模型**：`GET {baseUrl}/models`；不带 apiKey 时按 `name` 回落到 `.env` 里已存的 `API_KEY_<NAME>`；失败 → 400 `probe_failed`；**只读，不写任何文件**） |
+| DELETE | `/api/config/providers/{name}` | 路径参数 | { ok, removed, cleared, pending, fileState }（**删除本机来源**：只删 `providers.local.json` 里的条目，并把 `.env` 的 `API_KEY_<NAME>` 注释掉（不删行，可反悔）；出厂来源 → 400 `not_local`；**正在生效的来源 → 400 `profile_in_use`**（删了进程仍在用旧配置，下次启动静默回落，报错时联想不到是删了来源）；落盘后 `reload_config()`） |
 | GET | `/api/window/next` | 无 | { windowId }（原子分配，与 config 共用计数器） |
 | GET | `/api/status` | 无 | { windowCounter }（只读最大已分配编号） |
 | POST | `/api/select-folder` | { current } | { path }（系统弹窗，取消返回原值） |
@@ -509,7 +510,7 @@ React Flow v12（`@xyflow/react`）受控模式：`nodes` / `edges` 状态由 `C
 
 ### 10.1 单元测试
 
-- 后端 pytest：**420 用例**（Windows 含 5 个专属测试，CI 必须 `windows-latest`；默认 tmp 路径的 WinError 5 历史坑已随目录重建恢复，见 AGENTS「活跃坑」）
+- 后端 pytest：**432 用例**（Windows 含 5 个专属测试，CI 必须 `windows-latest`；默认 tmp 路径的 WinError 5 历史坑已随目录重建恢复，见 AGENTS「活跃坑」）
 - 前端 vitest：**360 用例**；`tsc --noEmit` + `vite build` 成功；`npm run lint` / `uv run ruff check .` 均零告警
 - 文档完整性：`python scripts/check_docs.py`（相对链接可解析 + AGENTS/tests-README/ARCHITECTURE/frontend-README 的测试计数与源码一致；改任何文档后必跑，见 [scripts/README.md](../scripts/README.md)）
 - **逐文件用例 / 覆盖范围 / 变更影响路由（完整表）见 [tests/README.md](../tests/README.md) 文件索引**

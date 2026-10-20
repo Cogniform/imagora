@@ -14,9 +14,12 @@ import pytest
 from fastapi import HTTPException
 
 import core.config as config
-import core.provider_store as provider_store
 import server
-from server import add_config_provider, probe_config_provider
+from server import (
+    add_config_provider,
+    delete_config_provider,
+    probe_config_provider,
+)
 
 PROFILE = {
     "base_url": "https://factory.example",
@@ -248,7 +251,11 @@ def test_new_routes_are_guarded():
     """新路由挂在 /api/config 前缀下 → 自动继承三层防护（本机绑定/Origin/令牌）。"""
     from core import config_guard
 
-    for path in ("/api/config/providers", "/api/config/providers/probe"):
+    for path in (
+        "/api/config/providers",
+        "/api/config/providers/probe",
+        "/api/config/providers/{name}",
+    ):
         assert path.startswith(config_guard.GUARDED_PREFIX)
 
 
@@ -256,6 +263,7 @@ def test_routes_registered():
     paths = {getattr(route, "path", "") for route in server.app.routes}
     assert "/api/config/providers" in paths
     assert "/api/config/providers/probe" in paths
+    assert "/api/config/providers/{name}" in paths
 
 
 def test_provider_store_uses_atomic_write(env):
@@ -263,4 +271,95 @@ def test_provider_store_uses_atomic_write(env):
     add_config_provider(_payload(name="first"))
     add_config_provider(_payload(name="second"))
     assert (env / "providers.local.json.bak").exists()
-    assert provider_store.load_local_providers(env / "providers.local.json")["profiles"]
+
+
+# ---------- 删除本机来源 ----------
+
+
+def test_delete_removes_local_entry(env):
+    add_config_provider(_payload(name="acme"))
+    body = delete_config_provider("acme")
+    assert body["ok"] is True
+    assert body["removed"] == "acme"
+    doc = json.loads((env / "providers.local.json").read_text(encoding="utf-8"))
+    assert "acme" not in doc["profiles"]
+
+
+def test_delete_keeps_other_entries(env):
+    add_config_provider(_payload(name="keep"))
+    add_config_provider(_payload(name="drop"))
+    delete_config_provider("drop")
+    doc = json.loads((env / "providers.local.json").read_text(encoding="utf-8"))
+    assert set(doc["profiles"]) == {"keep"}
+
+
+def test_delete_does_not_touch_config_json(env):
+    """出厂目录永远只读：删本机来源不许碰 config.json。"""
+    (env / "config.json").write_text('{"default_profile": "wanwu"}', encoding="utf-8")
+    before = (env / "config.json").read_text(encoding="utf-8")
+    add_config_provider(_payload(name="acme"))
+    delete_config_provider("acme")
+    assert (env / "config.json").read_text(encoding="utf-8") == before
+
+
+def test_delete_comments_out_secret(env):
+    """密钥是注释掉而不是删除：留一行痕迹，去掉 # 即可恢复。"""
+    add_config_provider(_payload(name="acme", apiKey="sk-secret"))
+    env_text = (env / ".env").read_text(encoding="utf-8")
+    assert "API_KEY_ACME=sk-secret" in env_text
+    body = delete_config_provider("acme")
+    assert body["cleared"] == ["API_KEY_ACME"]
+    after = (env / ".env").read_text(encoding="utf-8")
+    # 判定按「整行是否还是活键」：注释后那行仍含 "API_KEY_ACME=sk-secret" 子串，
+    # 所以不能做子串判断，要看行首有没有被 # 挡住。
+    live = [ln for ln in after.splitlines() if ln.strip().startswith("API_KEY_ACME=")]
+    assert live == []
+    assert "# API_KEY_ACME=sk-secret" in after
+
+
+def test_delete_without_secret_clears_nothing(env):
+    add_config_provider(_payload(name="acme"))
+    body = delete_config_provider("acme")
+    assert body["cleared"] == []
+
+
+def test_delete_rejects_factory_profile(env):
+    """出厂来源删不掉：config.json 是 git 跟踪的，删了下次 pull 又回来。"""
+    with pytest.raises(HTTPException) as exc:
+        delete_config_provider("wanwu")
+    assert exc.value.status_code == 400
+    assert exc.value.detail["error"] == "not_local"
+
+
+def test_delete_rejects_unknown_name(env):
+    with pytest.raises(HTTPException) as exc:
+        delete_config_provider("never-existed")
+    assert exc.value.status_code == 400
+    assert exc.value.detail["error"] == "not_local"
+
+
+def test_delete_rejects_active_profile(env, monkeypatch):
+    """正在生效的来源删不掉：删了进程仍在用旧配置，下次启动静默回落，报错时联想不到。"""
+    add_config_provider(_payload(name="acme"))
+    monkeypatch.setattr(config, "ACTIVE_PROFILE", "acme")
+    with pytest.raises(HTTPException) as exc:
+        delete_config_provider("acme")
+    assert exc.value.status_code == 400
+    assert exc.value.detail["error"] == "profile_in_use"
+    # 拒绝之后文件里那条必须还在（不能删一半）
+    doc = json.loads((env / "providers.local.json").read_text(encoding="utf-8"))
+    assert "acme" in doc["profiles"]
+
+
+def test_delete_rejects_blank_name(env):
+    with pytest.raises(HTTPException) as exc:
+        delete_config_provider("  ")
+    assert exc.value.status_code == 400
+    assert exc.value.detail["error"] == "invalid_value"
+
+
+def test_delete_returns_file_state(env):
+    add_config_provider(_payload(name="acme"))
+    body = delete_config_provider("acme")
+    assert body["fileState"]["profile"] == "wanwu"
+    assert "pending" in body

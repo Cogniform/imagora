@@ -179,6 +179,73 @@ def main() -> int:
             not real_errors,
             f"实际: {real_errors[:3]}",
         )
+
+        print("[7] 删除本机来源")
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(300)
+        # 关掉探测弹窗后回到主界面，打开配置弹窗
+        page.wait_for_selector('[data-testid="provider-modal"]', state="detached")
+        page.locator(".api-settings-trigger").click()
+        page.wait_for_selector('[data-testid="config-editor"]', timeout=5000)
+
+        # 先选刚建的那条本机来源
+        page.locator("#cfg-profile").click()
+        page.wait_for_selector('[role="listbox"]', timeout=3000)
+        page.get_by_role("option", name=TEST_NAME, exact=True).click()
+        page.wait_for_timeout(300)
+
+        delete_btn = page.get_by_role("button", name="删除这个来源")
+        check("本机来源出现删除按钮", delete_btn.count() == 1)
+        check("删除按钮可用（非当前生效来源）", not delete_btn.is_disabled())
+        page.screenshot(path=str(ROOT / "_ui-audit" / "provider-03-deletable.png"))
+
+        delete_btn.click()
+        page.wait_for_timeout(200)
+        check(
+            "二次确认提示出现",
+            page.get_by_text("地址与模型目录会从本机移除").count() == 1,
+        )
+        page.get_by_role("button", name="确认删除").click()
+        page.wait_for_timeout(1500)
+
+        check(
+            "删除成功提示",
+            page.get_by_text("已删除来源").count() >= 1,
+        )
+        doc_after = (
+            json.loads(LOCAL.read_text(encoding="utf-8")) if LOCAL.exists() else {}
+        )
+        check(
+            "本机文件里已无该来源",
+            TEST_NAME not in (doc_after.get("profiles") or {}),
+        )
+
+        # 出厂来源不该出现删除按钮：切到 volc 再看
+        page.locator("#cfg-profile").click()
+        page.wait_for_selector('[role="listbox"]', timeout=3000)
+        page.get_by_role("option", name="volc", exact=True).click()
+        page.wait_for_timeout(300)
+        check(
+            "出厂来源没有删除按钮",
+            page.get_by_role("button", name="删除这个来源").count() == 0,
+        )
+
+        print("[8] 当前生效的来源不可删")
+        page.locator("#cfg-profile").click()
+        page.wait_for_selector('[role="listbox"]', timeout=3000)
+        page.get_by_role("option", name="api", exact=True).click()
+        page.wait_for_timeout(300)
+        in_use_btn = page.get_by_role("button", name="删除这个来源")
+        if in_use_btn.count() == 1:
+            check("生效中来源的删除按钮禁用", in_use_btn.is_disabled())
+            check(
+                "生效中来源有原因提示",
+                page.get_by_text("正在使用中，请先切换到别的来源再删除").count() >= 1,
+            )
+        else:
+            check("生效中来源不显示删除按钮（或已非本机来源）", True)
+
+        page.screenshot(path=str(ROOT / "_ui-audit" / "provider-04-in-use.png"))
         browser.close()
 
     print(f"\nTOTAL: {passed + failed}  PASS: {passed}  FAIL: {failed}")

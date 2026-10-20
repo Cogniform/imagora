@@ -296,6 +296,40 @@ def test_build_provider_catalog_tolerates_broken_profiles():
     assert config.build_provider_catalog({"profiles": {"bad": "x"}}) == []
 
 
+def test_build_provider_catalog_marks_local_sources(monkeypatch, tmp_path):
+    """`local` 标记：只有 providers.local.json 里的来源为 True，出厂来源为 False。
+
+    界面据此决定「删除这个来源」按钮出不出现 —— 出厂来源写死在 config.json 里，
+    删了下次 git pull 又回来，所以不给删。这个标记错了会让用户对着删不掉的按钮点。
+    """
+    import json
+
+    local_file = tmp_path / "providers.local.json"
+    local_file.write_text(
+        json.dumps(
+            {"version": 1, "profiles": {"mine": {"base_url": "https://m.example"}}}
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(config, "LOCAL_PROVIDERS_FILE", local_file)
+    cfg = {
+        "profiles": {
+            "factory": {"base_url": "https://f.example"},
+            "mine": {"base_url": "https://m.example"},
+        }
+    }
+    by_name = {item["name"]: item for item in config.build_provider_catalog(cfg)}
+    assert by_name["factory"]["local"] is False
+    assert by_name["mine"]["local"] is True
+
+
+def test_build_provider_catalog_without_local_file(monkeypatch, tmp_path):
+    """没有 providers.local.json 时一律标 False（不能因为读不到文件就全变可删）。"""
+    monkeypatch.setattr(config, "LOCAL_PROVIDERS_FILE", tmp_path / "absent.json")
+    (item,) = config.build_provider_catalog({"profiles": {"only": {}}})
+    assert item["local"] is False
+
+
 def test_provider_catalog_matches_local_config_json():
     """本机 config.json：注册过的 profile 一个都不少，且每个都带可用地址与尺寸表。"""
     profiles = config._cfg.get("profiles")

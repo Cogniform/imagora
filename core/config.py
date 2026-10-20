@@ -651,11 +651,15 @@ def build_provider_catalog(cfg: dict) -> list[dict]:
     把各 profile 的 base_url + sizes + models 一并下发，前端才能按地址自己换表；
     profile 增删来源时前端零改动。
 
-    每项：{name, label, baseUrl, apiPath, defaultModel, defaultQuality, defaultSize, sizes, models}
+    每项：{name, label, baseUrl, apiPath, defaultModel, defaultQuality, defaultSize, sizes, models, local}
+
+    `local` 标记这条来源是否只存在于本机的 `providers.local.json`：界面据此决定
+    能不能删（出厂来源写死在 config.json 里，删了下次 `git pull` 又回来，界面不提供）。
     """
     profiles = cfg.get("profiles")
     if not isinstance(profiles, dict):
         return []
+    local_names = provider_store.load_local_providers(LOCAL_PROVIDERS_FILE)["profiles"]
     catalog: list[dict] = []
     for name, profile in profiles.items():
         if not isinstance(profile, dict):
@@ -684,6 +688,7 @@ def build_provider_catalog(cfg: dict) -> list[dict]:
                 ),
                 "sizes": list(profile.get("size_options") or _DEFAULTS["size_options"]),
                 "models": normalize_models(profile.get("models")),
+                "local": str(name) in local_names,
             }
         )
     return catalog

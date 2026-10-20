@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { generationHistory, getConfig, getHealthDetails, isHttpError, openFolder, rememberOutputDir, writeConfig } from "./api";
+import { deleteProvider, generationHistory, getConfig, getHealthDetails, isHttpError, openFolder, rememberOutputDir, writeConfig } from "./api";
 import { useGenerationTask } from "./useGenerationTask";
 import { Palette, Plug } from "lucide-react";
 import { accentForWindow, accentFromHue, hueForWindow, readAccentHue, saveAccentHue } from "./accent";
@@ -367,11 +367,14 @@ function ConfigEditorModal({
   config,
   onClose,
   onFileState,
+  onDeleted,
 }: {
   config: AppConfig;
   onClose: () => void;
   /** 写入成功后把新的 fileState 交回上层（顶栏 pending 角标要用） */
   onFileState: (next: ConfigFileState) => void;
+  /** 删掉本机来源后通知上层重拉 /api/config（目录少了一条，下拉要跟着变） */
+  onDeleted: (next: ConfigFileState) => void;
 }) {
   const fileState = config.fileState;
   /** 当前**生效**的 profile（进程正在用的那套） */
@@ -397,6 +400,8 @@ function ConfigEditorModal({
   /** 保存成功后的短暂反馈：2 秒后回到无变化态 */
   const [justSaved, setJustSaved] = useState(false);
   const savedTimer = useRef<number | null>(null);
+  /** 删除二次确认：null = 没在确认；否则是待删的来源名 */
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
   useEffect(() => () => {
     if (savedTimer.current !== null) window.clearTimeout(savedTimer.current);
@@ -407,6 +412,13 @@ function ConfigEditorModal({
   const pickedProvider = providerOf(pickedProfile);
   const modelOptions = (pickedProvider?.models ?? []).map((m) => ({ value: m.id, label: m.label }));
   const activeProvider = providerOf(activeProfile);
+
+  /** 选中的这条是不是本机来源（界面建的），以及能不能删。
+   *  出厂来源删不掉（config.json 里写死，删了下次 git pull 又回来），
+   *  正在生效的也删不掉（删了进程仍在用旧配置，下次启动静默回落，报错时联想不到原因）。 */
+  const pickedIsLocal = pickedProvider?.local === true;
+  const pickedInUse = pickedProfile === activeProfile;
+  const canDelete = pickedIsLocal && !pickedInUse && !busy;
 
   /** 切来源时把模型一起带到该来源的默认值：否则模型还停在上一个来源的 id，
    *  保存下去就是一个「新来源 + 旧模型」的无效组合。 */
@@ -459,6 +471,37 @@ function ConfigEditorModal({
     }
   };
 
+  /** 删掉选中的本机来源。二次确认走行内展开，不用 window.confirm（原生弹窗会阻塞
+   *  整个页面，也让「取消」变成浏览器的事而非弹窗的事）。 */
+  const removeProvider = async (name: string) => {
+    setBusy(true);
+    setNotice(null);
+    try {
+      const result = await deleteProvider(name);
+      setConfirmDelete(null);
+      onDeleted(result.fileState);
+      // 删掉的正是下拉里选中的那条：退回当前生效的来源，避免停在一个已不存在的名字上
+      setPickedProfile(result.fileState.profile ?? "");
+      const back = providerOf(result.fileState.profile ?? "");
+      setPickedModel(back?.defaultModel ?? "");
+      setBaseline({
+        profile: result.fileState.profile ?? "",
+        model: result.fileState.fields.model.fileValue ?? back?.defaultModel ?? "",
+      });
+      setPending(result.pending);
+      setNotice({
+        kind: "ok",
+        text: result.cleared.length > 0
+          ? `已删除来源「${name}」，密钥 ${result.cleared.join("、")} 已在 .env 里注释掉`
+          : `已删除来源「${name}」`,
+      });
+    } catch (err) {
+      setNotice({ kind: "err", text: errMessage(err) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <ModalShell title="生图 API 配置" onClose={onClose} testId="config-editor">
       <header className="modal-header">
@@ -483,6 +526,50 @@ function ConfigEditorModal({
                 ? pickedProvider.label
                 : "换来源 = 换地址、模型与尺寸价目表"}
             </p>
+
+            {/* 删除入口只对本机来源出现：出厂来源写死在 config.json 里，删了下次
+                git pull 又回来；正在生效的也不给删（服务端同样拒绝），先把路堵在界面上。 */}
+            {pickedIsLocal && (
+              <div className="mt-3">
+                {confirmDelete === pickedProfile ? (
+                  <div className="rounded-lg bg-red-50 px-3 py-2">
+                    <p className="text-xs text-red-700">
+                      删除「{pickedProfile}」？地址与模型目录会从本机移除，.env 里的密钥会注释掉（可反悔）。
+                    </p>
+                    <div className="mt-2 flex gap-2">
+                      <button
+                        type="button"
+                        className="btn-ghost btn-xs"
+                        onClick={() => setConfirmDelete(null)}
+                      >
+                        取消
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-danger btn-xs"
+                        disabled={busy}
+                        onClick={() => void removeProvider(pickedProfile)}
+                      >
+                        {busy ? "删除中…" : "确认删除"}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn-danger btn-xs"
+                    disabled={!canDelete}
+                    title={pickedInUse ? "正在使用中，请先切换到别的来源" : "从本机移除这个来源"}
+                    onClick={() => setConfirmDelete(pickedProfile)}
+                  >
+                    删除这个来源
+                  </button>
+                )}
+                {pickedInUse && (
+                  <p className="text-caption mt-1">正在使用中，请先切换到别的来源再删除</p>
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -1269,6 +1356,16 @@ useEffect(() => {
         <ConfigEditorModal
           config={effectiveConfig}
           onFileState={setFileState}
+          onDeleted={(next) => {
+            // 服务端已 reload_config：重拉 /api/config 让来源目录少掉那一条，
+            // 弹窗保持打开（用户可能接着删下一条或切来源）。
+            setFileState(next);
+            void getConfig(windowId ?? undefined)
+              .then((fresh) => setConfig(fresh))
+              .catch(() => {
+                /* 刷新失败不影响已删除的事实：下次重开窗口自然会读到 */
+              });
+          }}
           onClose={() => setShowApiSettings(false)}
         />
       )}

@@ -667,6 +667,67 @@ def probe_config_provider(body: dict = Body(...)):
     return {"ok": True, "models": [{"id": mid, "label": mid} for mid in ids]}
 
 
+@app.delete("/api/config/providers/{name}")
+def delete_config_provider(name: str):
+    """删除一条**本机**来源（providers.local.json 里的那条）。
+
+    请求路径：/api/config/providers/{name}
+
+    响应：{ok, removed, cleared, pending, fileState}
+
+    三条刻意的限制：
+    1. **出厂来源删不掉**。config.json 是 git 跟踪的出厂目录，界面删了下次 `git pull`
+       又回来；这里直接 400 拒绝，而不是写一条「删除标记」—— 出厂目录只能由仓库改。
+    2. **当前生效的来源删不掉**。删掉之后进程仍在用旧配置，下次启动会静默回落到
+       config.json 的 default_profile（地址、模型、密钥全变），生图报错时根本联想不到
+       是「删了来源」。让用户先切走，是唯一能让他看见后果的顺序。
+    3. **密钥注释掉而不是删除**（与 /api/config/secret 同一条纪律）：留一行痕迹，
+       想恢复去掉一个 # 即可。
+    """
+    target = str(name or "").strip()
+    if not target:
+        raise _reject("invalid_value", "缺少来源名")
+
+    local = provider_store.load_local_providers(config.LOCAL_PROVIDERS_FILE)
+    if target not in local["profiles"]:
+        # 出厂来源与「本来就不存在」在这里合并成一个回答：界面本来就不该给出按钮，
+        # 能走到这里说明请求是拼出来的，没有必要区分。
+        raise _reject("not_local", f"「{target}」不是本机来源，不能在这里删除")
+
+    if target == (config.ACTIVE_PROFILE or ""):
+        raise _reject(
+            "profile_in_use",
+            f"「{target}」正在使用中，请先切换到别的来源再删除",
+        )
+
+    try:
+        provider_store.remove_provider(config.LOCAL_PROVIDERS_FILE, target)
+    except OSError as exc:
+        raise _reject("write_failed", str(exc), 500) from exc
+
+    cleared: list[str] = []
+    try:
+        env_path = config_guard.safe_profile_path(config.WORK_ROOT, target)
+        key_name = _provider_key_name(target)
+        if (config_write.read_env_values(env_path).get(key_name) or "").strip():
+            config_write.comment_out_env_file(env_path, [key_name])
+            cleared.append(key_name)
+    except (OSError, ValueError) as exc:
+        # 来源已经从目录里删掉了，密钥清理失败不该让整次请求回滚 —— 报告出来即可。
+        raise _reject("secret_cleanup_failed", str(exc), 500) from exc
+
+    # 目录里少了一条：重读盘让 /api/config 与前端下拉立刻一致
+    config.reload_config()
+    state = _config_file_state()
+    return {
+        "ok": True,
+        "removed": target,
+        "cleared": cleared,
+        "pending": state["pending"],
+        "fileState": state,
+    }
+
+
 @app.get("/api/window/next")
 def next_window():
     """分配下一个窗口编号（多开脚本 / 界面按钮用，与 /api/config 共用计数器，全局唯一）"""

@@ -6,6 +6,7 @@ import type {
   GenerationTaskStatus,
   GenerationTaskSnapshot,
   ProviderCreateResult,
+  ProviderDeleteResult,
   ProviderDraft,
   ProviderProbeResult,
   RefItem,
@@ -123,6 +124,18 @@ export function probeProviderModels(payload: {
     headers: { "Content-Type": "application/json", ...tokenHeader() },
     body: JSON.stringify(payload),
   });
+}
+
+/** 删除一条本机来源（providers.local.json 里的那条），顺带注释掉它的 API_KEY。
+ *
+ *  只删得掉本机来源：出厂来源在 config.json 里，服务端会拒绝（400 not_local）；
+ *  正在生效的来源也会被拒绝（400 profile_in_use）——删了之后进程仍在用旧配置，
+ *  下次启动静默回落，生图报错时联想不到是删了来源。 */
+export function deleteProvider(name: string): Promise<ProviderDeleteResult> {
+  return requestJson<ProviderDeleteResult>(
+    `/api/config/providers/${encodeURIComponent(name)}`,
+    { method: "DELETE", headers: { ...tokenHeader() } },
+  );
 }
 
 export function getHealthDetails(): Promise<{

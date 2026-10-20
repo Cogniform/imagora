@@ -35,6 +35,10 @@ export interface ProviderCatalog {
   sizes: SizeOption[];
   /** 该来源的可选模型（各自带尺寸与单价） */
   models: ModelOption[];
+  /** 是否只存在于本机的 providers.local.json（= 界面新建的，可删）。
+   *  出厂来源写死在 config.json 里，删了下次 `git pull` 又回来，界面不提供删除。
+   *  可选：旧服务端不下发这一项，前端一律按「不可删」处理（缺失 = 出厂）。 */
+  local?: boolean;
 }
 
 /** 应用初始化配置 */
@@ -139,6 +143,17 @@ export interface ProviderCreateResult {
 export interface ProviderProbeResult {
   ok: boolean;
   models: { id: string; label: string }[];
+}
+
+/** 删除本机来源的响应（DELETE /api/config/providers/{name}） */
+export interface ProviderDeleteResult {
+  ok: boolean;
+  /** 被删掉的来源名 */
+  removed: string;
+  /** 顺带注释掉的 .env 键名（如 ["API_KEY_API"]）；没配密钥时为空数组 */
+  cleared: string[];
+  pending: string[];
+  fileState: ConfigFileState;
 }
 export interface AppConfig {
   sizes: SizeOption[];
