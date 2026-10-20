@@ -1976,7 +1976,7 @@ export function CanvasPage({
         <ModalShell title="操作帮助" className="modal-panel--md" onClose={() => setShowHelp(false)}>
           <header className="modal-header">
             <h3 className="modal-title">操作帮助</h3>
-            <p className="modal-subtitle">拖入图片 · 双击空白新建卡片 · 右键框选</p>
+            <p className="modal-subtitle">拖入图片 · 右键框选</p>
           </header>
           <div className="flex flex-col gap-2.5 text-xs leading-relaxed">
             {HELP_ROWS.map(([key, text]) => (
