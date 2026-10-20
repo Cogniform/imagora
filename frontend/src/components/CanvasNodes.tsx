@@ -4,6 +4,7 @@ import { Eye, RefreshCw, Trash2 } from "lucide-react";
 import type { CanvasGroupNodeData, CanvasImageNodeData, CanvasPromptNodeData } from "../types";
 import { generatingLabel } from "../format";
 import { FolderPicker } from "./FolderPicker";
+import { GenerationPending } from "./GenerationPending";
 import { Select } from "./Select";
 
 /* ---------------- 统一节点右侧操作区（hover 显示，竖排不遮挡内容，全部 nodrag 防误拖） ---------------- */
@@ -257,6 +258,23 @@ function ElapsedText({ startedAtMs }: { startedAtMs?: number | undefined }) {
   return <>{generatingLabel(seconds)}</>;
 }
 
+/* 生成中占位卡：生成期间顶替结果区，让「已提交、还没回图」这段时间有可见的推进感。
+ * 秒数以节点上的 startedAtMs 为准（画布在 queued→running 转换时写一次），
+ * **不让占位卡自己从 0 走表**——否则切后台再回来、或卡片重挂载时秒数会倒退重来（受控优先）。
+ * 锚点缺失（离线的旧工作流）才退化为自计时。 */
+function PendingSeconds({ startedAtMs }: { startedAtMs?: number | undefined }) {
+  const anchor = startedAtMs ?? null;
+  const [seconds, setSeconds] = useState(() => (anchor ? Math.max(0, Math.floor((Date.now() - anchor) / 1000)) : 0));
+  useEffect(() => {
+    if (!anchor) return;
+    const timer = window.setInterval(() => {
+      setSeconds(Math.max(0, Math.floor((Date.now() - anchor) / 1000)));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [anchor]);
+  return <GenerationPending elapsed={anchor ? seconds : undefined} testId={`prompt-pending-${anchor ?? "live"}`} />;
+}
+
 /* 状态指示灯：圆点颜色映射状态，悬停 title 看详情（张数 / 失败原因），
  * 就绪灰、排队琥珀、生成中品牌色呼吸、完成绿、失败红。
  * 生成中的秒数刻意不进 title（挂 tooltip 每秒跳字 → 悬停闪烁），秒数只在运行按钮文字上走。 */
@@ -346,6 +364,12 @@ export const PromptNode = memo(function PromptNode({
         <div className={`max-w-full truncate text-center text-xl font-medium ${summary.className}`} title={summary.detail}>
           {running ? <ElapsedText startedAtMs={data.startedAtMs} /> : summary.text}
         </div>
+        {/* 抽象模式不渲染表单，占位卡缩到一行内联条，只保留「在动」的观感，不抢标题的视觉重量 */}
+        {running && (
+          <div className="w-full px-2">
+            <PendingSeconds startedAtMs={data.startedAtMs} />
+          </div>
+        )}
       </div>
     );
   }
@@ -400,6 +424,13 @@ export const PromptNode = memo(function PromptNode({
           <FolderPicker value={data.outputDir} onChange={(v) => onUpdate(id, { outputDir: v })} alignEnd />
         </div>
       </div>
+      {/* 生成中占位卡：顶替结果区的位置。只有 running 才挂载（queued 还没开始计时，
+          自计时从挂载那刻起算，提前挂载会把排队时间算成生成时间）。 */}
+      {running && (
+        <div className="nodrag mb-2">
+          <PendingSeconds startedAtMs={data.startedAtMs} />
+        </div>
+      )}
       <div className="nodrag mt-2 flex items-center gap-2">
         <button
           type="button"

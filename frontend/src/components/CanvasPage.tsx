@@ -15,6 +15,7 @@ import {
   BackgroundVariant,
   ControlButton,
   Controls,
+  MiniMap,
   ReactFlow,
   useEdgesState,
   useNodesState,
@@ -39,6 +40,16 @@ import {
 } from "../api";
 import { createCanvasHistory } from "../canvasHistory";
 import { errMessage } from "../format";
+import {
+  readMinimapVisible,
+  readZoomSliderPercent,
+  saveMinimapVisible,
+  saveZoomSliderPercent,
+  sliderPercentToZoom,
+  zoomToSliderPercent,
+  ZOOM_SLIDER_MAX_PERCENT,
+  ZOOM_SLIDER_MIN_PERCENT,
+} from "../minimapVisible";
 import { useGenerationTask, type GenerationTaskView } from "../useGenerationTask";
 import { useCanvasRecovery } from "../useCanvasRecovery";
 import { useCanvasDrop } from "../useCanvasDrop";
@@ -87,6 +98,22 @@ const MIN_FIT_ZOOM = 0.02;
  *  两值之间是迟滞带（0.1~0.2），避免在阈值附近反复缩放时抖动切换。 */
 const LOD_IN_ZOOM = 0.1;
 const LOD_OUT_ZOOM = 0.2;
+
+/** 小地图里按节点类型取色：三类节点在小缩略图上仍能分辨结构。
+ *  取的是 index.css 里的品牌色与两个中性色，不新增色板 —— 小地图是导航辅助，
+ *  不该引入第五套配色。未知类型走中性灰兜底（工作流文件可能来自旧版本）。 */
+function minimapNodeColor(node: Node): string {
+  switch (node.type) {
+    case "prompt":
+      return "var(--color-brand)";
+    case "image":
+      return "#7c8994";
+    case "group":
+      return "#c4ccd4";
+    default:
+      return "#a8b0b8";
+  }
+}
 
 /** 操作帮助正文：画布 / 节点 / 连线三类交互 + 全局快捷键（内容与 README「画布工作流」一致） */
 const HELP_ROWS: [string, string][] = [
@@ -179,9 +206,19 @@ export function CanvasPage({
    *  迟滞切换防抖动；只影响渲染，拖拽/选中/连线等基础交互不变 */
   const [lod, setLod] = useState(false);
   const lodRef = useRef(false);
+  /** 小地图开关（纯本机偏好，默认关：卡片少时占地方没价值，用户显式打开才落盘） */
+  const [minimapVisible, setMinimapVisible] = useState(readMinimapVisible);
+  /** 缩放滑杆位置（百分比整数）。初值取上次位置，但**视口不会被它拖动** ——
+   *  滑杆是「显示当前缩放 + 拖它才改视口」的受控显示，初值只影响首帧读数；
+   *  真正的视口缩放由 ReactFlow 的 onInit / onMove 回写（handleViewportMove）。 */
+  const [zoomPercent, setZoomPercent] = useState(readZoomSliderPercent);
+  /** 拖动滑杆期间不把 onMove 回写的值再灌回滑杆，否则会与用户拖动打架（见 handleViewportMove） */
+  const draggingSliderRef = useRef(false);
   const handleViewportMove = useCallback(
     (_event: unknown, viewport: { zoom: number }) => {
       setCanvasZoom(viewport.zoom);
+      // 拖滑杆时视口跟着滑杆走，此时若把视口值再灌回滑杆会与拖动互相拉扯（读数抖动）
+      if (!draggingSliderRef.current) setZoomPercent(zoomToSliderPercent(viewport.zoom));
       const z = viewport.zoom;
       if (!lodRef.current && z < LOD_IN_ZOOM) {
         lodRef.current = true;
@@ -193,6 +230,23 @@ export function CanvasPage({
     },
     [setCanvasZoom],
   );
+  /** 滑杆拖动：立刻改视口缩放（围绕视口中心，不跳位），松手才落盘 */
+  const handleZoomSlider = useCallback((percent: number) => {
+    draggingSliderRef.current = true;
+    setZoomPercent(percent);
+    void rfInstanceRef.current?.zoomTo(sliderPercentToZoom(percent), { duration: 0 });
+  }, []);
+  /** 滑杆松手：恢复「视口回写滑杆」的联动并持久化 */
+  const commitZoomSlider = useCallback((percent: number) => {
+    draggingSliderRef.current = false;
+    saveZoomSliderPercent(percent);
+  }, []);
+  const toggleMinimap = useCallback(() => {
+    setMinimapVisible((visible) => {
+      saveMinimapVisible(!visible);
+      return !visible;
+    });
+  }, []);
   /** 节点/边的最新引用：回调经 ref 读取，避免 useCallback 依赖 nodes/edges
    *  导致 nodeTypes 每次拖拽重建 -> 全节点重渲染闪烁 */
   const nodesRef = useRef<WorkflowNode[]>(nodes);
@@ -1522,8 +1576,40 @@ export function CanvasPage({
           proOptions={{ hideAttribution: true }}
         >
           <Background variant={BackgroundVariant.Dots} gap={24} size={1} />
+          {/* 小地图（右下角，默认关）：卡片铺开后靠它定位；点击/拖动小地图可跳视口。
+              节点按类型取色 —— 提示词卡 / 图片 / 图片组三色，缩略图上仍能分辨结构。 */}
+          {minimapVisible && (
+            <MiniMap
+              pannable
+              zoomable
+              ariaLabel="画布小地图"
+              className="!bg-[var(--surface-float)]"
+              maskColor="rgba(31, 41, 55, 0.08)"
+              nodeColor={minimapNodeColor}
+              nodeStrokeWidth={2}
+            />
+          )}
           {/* 左下角控制钮：fitView 显式放宽 minZoom，节点再多也能一屏全览 */}
           <Controls fitViewOptions={{ padding: 0.15, minZoom: MIN_FIT_ZOOM, maxZoom: 2 }}>
+            {/* 缩放滑杆：读数即百分比，拖动实时改视口（对数/线性已退化为线性，见 minimapVisible.ts） */}
+            <div className="react-flow__controls-button !h-auto !w-auto !cursor-default flex-col !gap-1 !px-1 !py-2">
+              <span className="text-[10px] font-medium leading-none tabular-nums" aria-hidden="true">
+                {zoomPercent}%
+              </span>
+              <input
+                type="range"
+                aria-label="画布缩放"
+                aria-valuetext={`${zoomPercent}%`}
+                min={ZOOM_SLIDER_MIN_PERCENT}
+                max={ZOOM_SLIDER_MAX_PERCENT}
+                step={1}
+                value={zoomPercent}
+                onChange={(e) => handleZoomSlider(Number(e.target.value))}
+                onPointerUp={() => commitZoomSlider(zoomPercent)}
+                onKeyUp={() => commitZoomSlider(zoomPercent)}
+                className="zoom-slider nodrag"
+              />
+            </div>
             {/* 操作帮助与缩放/适应视图同一栈：不再单占工具栏下方一整行 */}
             <ControlButton
               onClick={() => setShowHelp(true)}
@@ -1531,6 +1617,17 @@ export function CanvasPage({
               aria-label="操作帮助与快捷键"
             >
               <span aria-hidden="true" className="text-[13px] font-semibold leading-none">?</span>
+            </ControlButton>
+            {/* 小地图开关：同一栈里，避免再往画布上叠一块常驻 UI */}
+            <ControlButton
+              onClick={toggleMinimap}
+              title={minimapVisible ? "隐藏小地图" : "显示小地图"}
+              aria-label={minimapVisible ? "隐藏小地图" : "显示小地图"}
+              aria-pressed={minimapVisible}
+            >
+              <span aria-hidden="true" className="text-[13px] font-semibold leading-none">
+                {minimapVisible ? "▣" : "▢"}
+              </span>
             </ControlButton>
           </Controls>
         </ReactFlow>

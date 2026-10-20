@@ -47,7 +47,7 @@ Imagora 是本地单机工具，运行时分三层，方向单一：
 | `core/` | 后端核心逻辑（见 2.2），全部无 HTTP 依赖的纯业务模块；**双件**：规则层 core/AGENTS.md + 文件索引 core/README.md |
 | `frontend/` | React SPA（见 2.3）；**双件**：frontend/AGENTS.md（规则）+ frontend/README.md（索引） |
 | `scripts/` | 独立运维脚本：`migrate.py`（存储一步到最新，默认只报告、`--apply` 才落盘备份校验）；**双件**：scripts/AGENTS.md + scripts/README.md |
-| `tests/` | 后端 pytest（432 用例）+ 前端 vitest（388 用例），全部不调上游；**双件**：tests/AGENTS.md + tests/README.md（逐文件覆盖） |
+| `tests/` | 后端 pytest（454 用例）+ 前端 vitest（475 用例），全部不调上游；**双件**：tests/AGENTS.md + tests/README.md（逐文件覆盖） |
 | `docs/` | 设计圣经 `ARCHITECTURE.md`（本文档）+ `prompt-import-format.md` / `ecom-prompt-import-format.md`（格式规范）；**双件**：docs/AGENTS.md + docs/README.md |
 | `assets/` | **文档配图**（只服务 markdown 渲染，不是应用资源）：`screenshots/` 放 README「界面一览」的界面截图；**双件**：assets/AGENTS.md + assets/README.md |
 | `_ui-audit/` | 开发期 UI 审计图（本机产物，git 忽略）：由 [scripts/capture.py](../scripts/capture.py) 生成，与门面配图 `assets/screenshots/` 不是一回事 |
@@ -242,6 +242,8 @@ React Flow v12（`@xyflow/react`）受控模式：`nodes` / `edges` 状态由 `C
 - **快捷键**：Ctrl+A 全选、Ctrl+Z/Y 撤销恢复、Ctrl+S 保存、Delete 删除（带退场动画）；输入框聚焦时不拦截。
 - **撤销/恢复**：`canvasHistory.ts` 50 条上限的 past/future 栈，删除/连线/新建/导入前记录快照。
 - **画布日志**：右下角浮层只露最新 5 条（`log-toast` 淡入上移），低饱和中性色弱化存在感，`pointer-events-none` 不挡画布操作。
+- **视口辅助（小地图 / 缩放滑杆）**：两者都塞进左下角 `<Controls>` 同一列，不往画布上另叠常驻 UI。缩放滑杆是垂直 `input[type=range]`，行程 5%~200% 与 React Flow 的 `minZoom=0.05` / `maxZoom=2` **严格对齐**（写死在 `minimapVisible.ts` 的常量里，不做成参数——参数化会让两处数字各自漂移）。滑杆与视口**双向同步**：拖动滑杆 → `zoomTo()`；视口变化（滚轮 / fitView）→ `handleViewportMove` 把 zoom 回灌读数。回灌有一道闸门 `draggingSliderRef`：拖动期间不回灌，否则用户手指与视口更新会互相拉扯；闸门靠 `pointerup` / `keyup` 松开。**刻度是线性的，不是对数**——两端跨度恰好都是 40 倍（0.05→2 与 5%→200%），端点对齐后对数映射系数精确为 1，写一套 log 只是把同一条直线算两遍再加浮点误差；滑杆读数因此直接就是用户看到的百分比。小地图**默认关闭**（右下角 160×110 固定面积，卡片少时是纯负担），开关状态与滑杆位置落 localStorage（`imagora.canvas-minimap.v1` / `imagora.canvas-zoom-slider.v1`，读写一律 try/catch 静默降级）。
+- **生成中占位卡**：提示词节点 running 时在运行按钮上方长出一条细进度条（`.generation-pending`），文案按秒轮播（理解提示词 → 构图 → 铺设光影 → 细化细节 → 收尾），进度是**假进度**：`10 + (1 - e^(-s/28)) × 88`，渐近到 98% 永不越过（最后 2% 留给真实完成，不能让用户看到 100% 却还在等）。秒数锚定节点 `data.startedAtMs` 而不是卡片自走表——切后台、组件重挂载都不倒退；`GenerationPending` 的 `elapsed` 受控，不传才自建 interval，避免同一张卡上跑两套时钟。**进度只由 `transform: scaleX()` 驱动，绝不给 `width` 加 transition**：width 运动会每帧重排布局，在缩放中的画布上尤其卡。
 
 ### 5.5 持久化
 
@@ -510,14 +512,14 @@ React Flow v12（`@xyflow/react`）受控模式：`nodes` / `edges` 状态由 `C
 
 ### 10.1 单元测试
 
-- 后端 pytest：**432 用例**（Windows 含 5 个专属测试，CI 必须 `windows-latest`；默认 tmp 路径的 WinError 5 历史坑已随目录重建恢复，见 AGENTS「活跃坑」）
-- 前端 vitest：**388 用例**；`tsc --noEmit` + `vite build` 成功；`npm run lint` / `uv run ruff check .` 均零告警
+- 后端 pytest：**454 用例**（Windows 含 5 个专属测试，CI 必须 `windows-latest`；默认 tmp 路径的 WinError 5 历史坑已随目录重建恢复，见 AGENTS「活跃坑」）
+- 前端 vitest：**475 用例**；`tsc --noEmit` + `vite build` 成功；`npm run lint` / `uv run ruff check .` 均零告警
 - 文档完整性：`python scripts/check_docs.py`（相对链接可解析 + AGENTS/tests-README/ARCHITECTURE/frontend-README 的测试计数与源码一致；改任何文档后必跑，见 [scripts/README.md](../scripts/README.md)）
 - **逐文件用例 / 覆盖范围 / 变更影响路由（完整表）见 [tests/README.md](../tests/README.md) 文件索引**
 
 ### 10.2 端到端（E2E）
 
-`frontend/e2e/verify_canvas.py`（Playwright，36 断言，自包含测试图，需服务已启动）：新建/上传居中（精确到像素）、视口不突变、右键菜单屏蔽、预览打开与点击空白关闭（含放大态）、文件拖拽添加（落点示意跟随光标与数量 / 落点精确 / 多图批次排开 / 非图片过滤）、工具栏按钮拖出新建 + **拖到画布外松开取消（示意切「松开取消」+ 红色 X 图标，拖回画布仍新建）**。改画布交互后必须跑通它再加 E2E 断言。运行前置条件与命令见 frontend/README.md。
+`frontend/e2e/verify_canvas.py`（Playwright，46 断言，自包含测试图，需服务已启动）：新建/上传居中（精确到像素）、视口不突变、右键菜单屏蔽、预览打开与点击空白关闭（含放大态）、文件拖拽添加（落点示意跟随光标与数量 / 落点精确 / 多图批次排开 / 非图片过滤）、工具栏按钮拖出新建 + **拖到画布外松开取消（示意切「松开取消」+ 红色 X 图标，拖回画布仍新建）**、缩放滑杆与视口双向同步（拖滑杆改视口 / 滚轮缩放回灌读数）、小地图开关（默认关 → 开 → 关，选择落 localStorage）。改画布交互后必须跑通它再加 E2E 断言。运行前置条件与命令见 frontend/README.md。
 
 ### 10.3 未覆盖
 

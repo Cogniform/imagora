@@ -120,6 +120,70 @@ describe("PromptNode", () => {
   });
 });
 
+describe("PromptNode 生成中占位卡", () => {
+  function renderPrompt(data: Partial<ComponentProps<typeof PromptNode>["data"]>, lod?: boolean) {
+    const props = nodeProps<typeof PromptNode>({
+      id: "prompt-1",
+      type: "prompt",
+      data: {
+        prompt: "product photo",
+        size: "1024x1024",
+        quality: "high",
+        outputDir: "output",
+        status: "idle",
+        ...data,
+      },
+      selected: false,
+      lod,
+      onUpdate: vi.fn(),
+      onRun: vi.fn(),
+      onDelete: vi.fn(),
+      sizeOptions: [{ value: "1024x1024", label: "1:1" }],
+      qualityOptions: [{ value: "high", label: "high" }],
+    });
+    render(<ReactFlowProvider><PromptNode {...props} /></ReactFlowProvider>);
+    return props;
+  }
+
+  it("running：占位卡出现，秒数以 startedAtMs 为锚点（不从头数）", () => {
+    // 锚点设在 8 秒前：卡片一旦自己从 0 走表，就会显示「生成中 0s」而不是 8s
+    const startedAtMs = Date.now() - 8000;
+    // 秒数由内部计时器每秒重算，断言用容差正则而不是固定字面量（用例执行耗时会带来 ±1s 漂移）
+    renderPrompt({ status: "running", startedAtMs });
+
+    const card = screen.getByTestId(`prompt-pending-${startedAtMs}`);
+    expect(card.getAttribute("role")).toBe("status");
+    // 关键断言：秒数来自锚点（8s）而不是从 0 数起；文案后半句由纯函数轮播，此处不锁死
+    expect(card.getAttribute("aria-label")).toMatch(/^生成中 (8|9)s · .+…$/);
+    expect(card.getAttribute("aria-label")).not.toContain("生成中 0s");
+    expect(screen.getByTestId("generation-pending-bar").style.transform.startsWith("scaleX(")).toBe(true);
+  });
+
+  it("idle / queued / done / failed：都不渲染占位卡", () => {
+    for (const status of ["idle", "queued", "done", "failed"] as const) {
+      cleanup();
+      renderPrompt({ status });
+      expect(screen.queryByTestId("generation-pending"), status).toBeNull();
+      expect(document.querySelector(".generation-pending"), status).toBeNull();
+    }
+  });
+
+  it("lod 抽象模式：运行中也显示占位卡，且不渲染表单", () => {
+    renderPrompt({ status: "running", startedAtMs: Date.now(), title: "主图" }, true);
+
+    expect(document.querySelector(".generation-pending")).toBeTruthy();
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.queryByRole("button", { name: "运行" })).toBeNull();
+  });
+
+  it("离线的旧工作流缺 startedAtMs 时不崩，退化为一秒一跳的自计时卡", () => {
+    renderPrompt({ status: "running" });
+
+    const card = screen.getByTestId("prompt-pending-live");
+    expect(card.getAttribute("aria-label")).toBe("生成中 0s · 正在理解提示词…");
+  });
+});
+
 describe("LOD abstract mode", () => {
   it("keeps the image thumbnail and double-click zoom but drops the action rail", () => {
     const { onZoom } = renderImageNode(vi.fn(), vi.fn(), true);

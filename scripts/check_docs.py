@@ -15,6 +15,7 @@ ARCHITECTURE / frontend/README 多处，人工同步易漏（曾出现 221→222
 """
 
 import argparse
+import ast
 import hashlib
 import pathlib
 import re
@@ -66,28 +67,108 @@ def check_links() -> list[str]:
     return checked, problems
 
 
+def _parametrize_multiplier(decorator: ast.expr) -> int:
+    """`@pytest.mark.parametrize(...)` 把 1 个函数展开成 N 个用例，返回倍数。
+
+    只认字面量 argvalues（list/tuple）；变量或函数调用无法静态展开，按 1 计。
+    同一函数叠多个 parametrize 时倍数相乘（pytest 的笛卡尔积语义）。
+    """
+    call = decorator
+    if not isinstance(call, ast.Call):
+        return 1
+    # 只处理 pytest.mark.parametrize，其它装饰器（fixture/skipif）不改变倍数
+    func = call.func
+    if not (isinstance(func, ast.Attribute) and func.attr == "parametrize"):
+        return 1
+    if len(call.args) < 2:
+        return 1
+    values = call.args[1]
+    if isinstance(values, (ast.List, ast.Tuple)):
+        return max(1, len(values.elts))
+    return 1
+
+
 def count_backend_tests() -> tuple[int, dict[str, int]]:
-    """tests/test_*.py 的 def test_ 函数数（与 pytest 收集口径一致）。"""
+    """tests/test_*.py 的用例数（与 pytest 收集口径一致，参数化按展开后计）。
+
+    曾只数 `def test_`，于是 `@pytest.mark.parametrize` 展开出的用例被漏掉：
+    文档写 432、`pytest` 实际收 454，两边都写错反而自洽通过。
+    """
     total = 0
     per_file: dict[str, int] = {}
     for py in sorted((ROOT / "tests").glob("test_*.py")):
-        n = sum(
-            1
-            for line in py.read_text(encoding="utf-8").splitlines()
-            if re.match(r"^\s*def\s+test_", line)
-        )
+        tree = ast.parse(py.read_text(encoding="utf-8"), filename=str(py))
+        n = 0
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            if not node.name.startswith("test_"):
+                continue
+            multiplier = 1
+            for decorator in node.decorator_list:
+                multiplier *= _parametrize_multiplier(decorator)
+            n += multiplier
         per_file[py.name] = n
         total += n
     return total, per_file
 
 
+# it.each 的表头：`it.each([...])` / `it.each<Type>([...])` / `it.each\`...\``。
+# 必须允许 `<...>` 类型参数——`it.each<CropHandle>([8 项])(...)` 里带尖括号，
+# 只写 `it\.each\(` 会整条漏掉，8 个用例被算成 0（曾把 475 算成 467）。
+_IT_EACH_RE = re.compile(r"it\.each(?:<[^>]*>)?\s*[(`]")
+_IT_RE = re.compile(r"\bit\(")
+
+
 def count_frontend_tests() -> int:
-    """frontend/src 下 *.test.ts* 的 it() / it.each() 数（vitest 用例口径）。"""
+    """frontend/src 下 *.test.ts* 的 it() / it.each() 数（vitest 用例口径）。
+
+    `it.each` 的表格行数要展开算——vitest 运行时按表长展开成 N 个用例，
+    静态计数必须同口径，否则仪表盘数字与 `vitest run` 输出对不上。
+    """
     total = 0
     for ts in sorted((ROOT / "frontend" / "src").rglob("*.test.ts*")):
         text = ts.read_text(encoding="utf-8")
-        total += len(re.findall(r"\bit\(|it\.each\(", text))
+        # 先把 it.each 的调用从文本里摘掉，避免它内部的 `it(` 被重复计数
+        without_each = _IT_EACH_RE.sub("__IT_EACH__", text)
+        total += len(_IT_RE.findall(without_each))
+        total += _count_each_rows(text)
     return total
+
+
+# `it.each([...])` / `it.each<Type>([...])` 的字面量数组：数顶层逗号分隔的元素。
+_EACH_TABLE_RE = re.compile(r"it\.each(?:<[^>]*>)?\s*\(\s*\[([^\]]*)\]", re.DOTALL)
+
+
+def _count_each_rows(text: str) -> int:
+    """统计 it.each 表格字面量里的行数；解析不出的（变量 / 模板）按 1 计。"""
+    rows = 0
+    for match in _EACH_TABLE_RE.finditer(text):
+        body = match.group(1).strip()
+        if not body:
+            continue
+        # 元素可能是字符串、数字或元组；按「不在括号/引号内的逗号」切分
+        depth = 0
+        quote: str | None = None
+        items = 1
+        for ch in body:
+            if quote:
+                if ch == quote:
+                    quote = None
+            elif ch in "\"'`":
+                quote = ch
+            elif ch in "([{":
+                depth += 1
+            elif ch in ")]}":
+                depth -= 1
+            elif ch == "," and depth == 0:
+                items += 1
+        rows += items
+    # 有 it.each 但表格不是字面量（变量 / 模板字符串）时无法静态展开，按 1 计
+    each_calls = len(_IT_EACH_RE.findall(text))
+    literal_tables = len(_EACH_TABLE_RE.findall(text))
+    rows += max(0, each_calls - literal_tables)
+    return rows
 
 
 # 计数声明点：文本模式 → 期望的计数类型（backend/frontend）。

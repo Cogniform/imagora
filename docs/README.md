@@ -5,6 +5,7 @@
 - [`config-write-api-design.md`](config-write-api-design.md) — 配置写入接口契约（请求响应 / 三层防护 / 令牌下发 / mtime 冲突）
 - [`prompt-import-format.md`](prompt-import-format.md) — 通用粘贴导入格式（`=== 标题 ===` + 代码围栏 + `ratio: N:M`）
 - [`ecom-prompt-import-format.md`](ecom-prompt-import-format.md) — 电商专用模板（固定轮播/详情批次）
+- [`reference-survey.md`](reference-survey.md) — 参考实现调研：四份外部画布源码的可借鉴清单、license 边界、收益×成本路线（**只读设计，代码只可借鉴 MIT 的那一份**）
 
 配置数据只有一份（`.env` / `config.json`），界面是它的一个编辑入口——分层与归属见 [ARCHITECTURE.md](ARCHITECTURE.md) 4.4。
 

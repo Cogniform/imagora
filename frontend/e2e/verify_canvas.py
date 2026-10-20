@@ -3,7 +3,8 @@
 覆盖：新建/上传落点在视口中心、视口不突变、右键菜单屏蔽、预览打开/点击空白关闭、
 文件拖拽添加（落点示意跟随光标与数量、落点精确、多图批次排开、非图片过滤）、
 工具栏按钮拖出新建（提示词卡片 / 图片组，示意文案与全局跟随、松开即建）、
-真实鼠标拖拽（原生 HTML5 DnD 管线）、拖到画布外松开=取消（示意切「松开取消」，拖回画布仍新建）。
+真实鼠标拖拽（原生 HTML5 DnD 管线）、拖到画布外松开=取消（示意切「松开取消」，拖回画布仍新建）、
+缩放滑杆与视口双向同步、小地图开关（默认关 → 开 → 关，选择落 localStorage）。
 
 前置：本地服务已启动（uv run python -m main ui --port 7860），且已安装：
   pip install playwright && playwright install chromium
@@ -520,6 +521,65 @@ def main():
             len(node_positions("group")) == before_top + 1,
             f"groups={node_positions('group')}",
         )
+
+        # 12. 缩放滑杆：读数与视口 zoom 双向一致（滑杆 = 百分比，视口 = 倍率）
+        slider = page.get_by_role("slider", name="画布缩放")
+        check("缩放滑杆存在", slider.count() == 1)
+        slider.fill("150")
+        # fill 只改值不产生 pointerup，而「拖动中不回灌读数」的闸门是靠 pointerup/keyup 松开的
+        # ——不补这一下，后面滚轮缩放就不会反映到滑杆上，属测试漏动作而非产品缺陷
+        slider.dispatch_event("pointerup")
+        page.wait_for_timeout(300)
+        snap = vp_snap(page)
+        zoom_now = snap["zoom"] if snap else -1
+        check(
+            "滑杆拨到 150% 视口跟着放大",
+            snap is not None and abs(zoom_now - 1.5) < 0.02,
+            f"zoom={zoom_now:.4f}",
+        )
+        check(
+            "滑杆读数与视口同步",
+            page.get_by_text("150%", exact=True).count() >= 1,
+        )
+        # 视口反向驱动滑杆：滚轮缩放后读数应跟着变（不是单向下发）
+        page.mouse.move(
+            rf_box["x"] + rf_box["width"] / 2, rf_box["y"] + rf_box["height"] / 2
+        )
+        page.mouse.wheel(0, -240)
+        page.wait_for_timeout(400)
+        zoom_after_wheel = (vp_snap(page) or {}).get("zoom")
+        check(
+            "滚轮缩放后滑杆读数跟着更新",
+            zoom_after_wheel is not None
+            and abs(float(slider.input_value()) - zoom_after_wheel * 100) <= 1.5,
+            f"slider={slider.input_value()} zoom={zoom_after_wheel}",
+        )
+        slider.fill("100")
+        slider.dispatch_event("pointerup")
+        page.wait_for_timeout(300)
+
+        # 13. 小地图：默认关闭 → 开关打开出现 → 再点关闭（且选择写入 localStorage）
+        check("小地图默认不显示", page.locator(".react-flow__minimap").count() == 0)
+        minimap_toggle = page.get_by_role("button", name="显示小地图")
+        check("小地图开关存在", minimap_toggle.count() == 1)
+        minimap_toggle.click()
+        page.wait_for_timeout(300)
+        check("点开关后小地图出现", page.locator(".react-flow__minimap").count() == 1)
+        check(
+            "开关 aria-pressed 同步为按下",
+            page.get_by_role("button", name="隐藏小地图").get_attribute("aria-pressed")
+            == "true",
+        )
+        check(
+            "小地图选择写入 localStorage",
+            page.evaluate(
+                "() => window.localStorage.getItem('imagora.canvas-minimap.v1')"
+            )
+            == "1",
+        )
+        page.get_by_role("button", name="隐藏小地图").click()
+        page.wait_for_timeout(300)
+        check("再点一次小地图消失", page.locator(".react-flow__minimap").count() == 0)
 
         browser.close()
 

@@ -5,7 +5,7 @@ FastAPI 路由级 + 纯逻辑测试，**不调真实上游 API、不花钱**。�
 ## 本地常用命令（在项目根目录执行）
 
 ```powershell
-# 后端全量（432 用例）
+# 后端全量（454 用例）
 .\.venv\Scripts\python.exe -m pytest
 # 按模块筛选
 .\.venv\Scripts\python.exe -m pytest tests/test_core_config.py tests/test_server_helpers.py
@@ -22,7 +22,7 @@ cd frontend; npm test
 - **测试数字是 AGENTS 仪表盘数据源**：增/删测试用例必须同步 AGENTS「当前仪表盘」；数字意外变化（非新增导致）必须报告维护者
 - **别按变量名读断言**：`test_core_api.py` 里的 `calls["n"] == 3` 是**重试次数**计数器，与生成张数无关。看名字以为"多张已覆盖"过一次误判（CLI `--n` 的真覆盖在 `test_main_cli.py`，见 issue #34）
 
-## 文件索引（后端 pytest，共 432）——每个 test_*.py 测什么
+## 文件索引（后端 pytest，共 454）——每个 test_*.py 测什么
 
 | 文件 | 用例 | 覆盖 |
 | --- | --- | --- |
@@ -33,7 +33,7 @@ cd frontend; npm test
 | [`test_core_config_write.py`](test_core_config_write.py) | 21 | `.env` 行级原地更新：注释/空行/键顺序原样保留、引号风格与缩进保留、CRLF 不混用、**留空 = 不修改**、注释掉幂等（清空密钥可手工恢复）、`.bak` 备份与原子写、写失败清理临时文件且原文件不受损 |
 | [`test_server_config_write.py`](test_server_config_write.py) | 30 | 写配置路由：三层防护纯函数（本机 / Origin 白名单 / 令牌比对 / profile 名挡路径穿越）、`GET /api/config` 不回传密钥值、写入保留注释、留空不修改、**写完当场生效不留 pending**、手工改文件仍如实报 pending、**mtime 不匹配 409 且磁盘不变**、清空密钥是注释而非删除、需要 confirm |
 | [`test_server_config_profile.py`](test_server_config_profile.py) | 7 | 切 profile：写 `ACTIVE_PROFILE` 且注释与未改的键保留、未注册的 profile 被拒（400 且磁盘不变）、profile 非字符串被拒、切 profile 计入 pending、profile 与字段可同一次写入、`fileState` 下发注册名单、文件值与生效值不同时报 pending |
-| [`test_core_provider_store.py`](test_core_provider_store.py) | 45 | 本机来源层（`providers.local.json`）：**profile 名收紧到全小写**（会进 `.env` 键名与 URL）、地址必须 http(s) 且末尾斜杠自动去掉、协议预设（openai 带 `/v1` / ark 已含版本号 / custom 手填路径）、**地址与路径的版本段去重**（`/v1` 地址 + `/v1` 路径不再拼成 `/v1/v1`，只剥完全相同的版本段）、表单→profile 形状（8 档尺寸单价全 0、7 个比例、模型目录嵌入）、**profile 里绝不出现密钥**、读取宽容（缺失/坏 JSON/单条坏掉不牵连）、合并（**本机优先且重名告警**、不改入参）、落盘（重名拒绝含出厂重名、保留既有条目、`.bak` 备份、校验失败不落盘、UTF-8 不转义） |
+| [`test_core_provider_store.py`](test_core_provider_store.py) | 67 | 本机来源层（`providers.local.json`）：**profile 名收紧到全小写**（会进 `.env` 键名与 URL）、地址必须 http(s) 且末尾斜杠自动去掉、协议预设（openai 带 `/v1` / ark 已含版本号 / custom 手填路径）、**地址与路径的版本段去重**（`/v1` 地址 + `/v1` 路径不再拼成 `/v1/v1`，只剥完全相同的版本段）、表单→profile 形状（8 档尺寸单价全 0、7 个比例、模型目录嵌入）、**profile 里绝不出现密钥**、读取宽容（缺失/坏 JSON/单条坏掉不牵连）、合并（**本机优先且重名告警**、不改入参）、落盘（重名拒绝含出厂重名、保留既有条目、`.bak` 备份、校验失败不落盘、UTF-8 不转义） |
 | [`test_server_config_providers.py`](test_server_config_providers.py) | 35 | 新增来源路由：写 `providers.local.json` + 密钥写 `.env`、**不动 config.json**、**密钥不进本机来源文件**、默认不切换（显式 `activate` 才写 `ACTIVE_PROFILE` 并计入 pending）、重名/坏名/坏地址 400、探测模型（传 url 与 key、无 key 时按 name 回落环境变量、坏地址 400、网络错误包成 `probe_failed`、**探测不写任何文件**）、两条路由继承 `/api/config` 三层防护 |
 | [`test_core_cost.py`](test_core_cost.py) | 21 | 账本聚合（成功/失败计数、成功率、费用只算成功行、按天窗口与倒序、按尺寸/模式、坏行与脏类型容错、空账本）/ 今日花费 / 预估费用（已知/未知尺寸、非法张数）/ 预算规范化与读写（缺失/损坏/原子写无残留）/ 超预算判定（不限放行、单次上限、当日已花+预估、双限、remaining） |
 | [`test_core_logging.py`](test_core_logging.py) | 8 | 日志写入 / 并发串行 / 路径相对化 |
@@ -50,7 +50,7 @@ cd frontend; npm test
 | [`test_main_process.py`](test_main_process.py) | 4 | 端口探测 / 祖先链回溯（Windows） |
 | [`test_main_cli.py`](test_main_cli.py) | 31 | CLI gen 子命令全链路（校验/输出解析/文生图+图生图+多参考/失败/--no-asset/比例档位）/ **`--n` 逐张请求（每次 `n=1`、各存各的账、部分失败保留已成功、默认单张行为不变）** / config 输出 |
 
-## 文件索引（前端 vitest，共 388，位于 frontend/src/）
+## 文件索引（前端 vitest，共 475，位于 frontend/src/）
 
 | 文件 | 用例 | 覆盖 |
 | --- | --- | --- |
@@ -100,7 +100,7 @@ cd frontend; npm test
 - 改 `core/api.py` → `test_core_api.py` + `test_main_cli.py`
 - 改 `server.py` 路由 → 对应 `test_server_*.py` + 前端 `types.ts`/`api.ts`
 - 改前端纯函数 → 对应 `*.test.ts`（同目录同名）
-- 改前端组件 → 组件单测 + E2E（`../frontend/e2e/verify_canvas.py` 36 断言；改来源/配置相关再跑 `verify_provider.py` 38 断言）
+- 改前端组件 → 组件单测 + E2E（`../frontend/e2e/verify_canvas.py` 46 断言；改来源/配置相关再跑 `verify_provider.py` 38 断言）
 - **增/删用例后更新 AGENTS「当前仪表盘」数字**
 
 ## CI 要求
