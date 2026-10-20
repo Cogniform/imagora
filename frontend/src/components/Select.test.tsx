@@ -174,4 +174,50 @@ describe("Select", () => {
     expect(document.querySelectorAll(".select-group__title")).toHaveLength(0);
     expect(screen.getAllByRole("option")).toHaveLength(3);
   });
+
+  it("renderOption：每个选项里出现自定义节点，且选项文字仍在", () => {
+    render(
+      <Select
+        options={options}
+        value="a"
+        onChange={vi.fn()}
+        renderOption={(option) => <span data-testid="opt-icon">{option.value}</span>}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /选项 A/ }));
+
+    // 列表里每行一个自定义节点
+    const listbox = screen.getByRole("listbox");
+    const optionIcons = within(listbox).getAllByTestId("opt-icon");
+    expect(optionIcons).toHaveLength(options.length);
+    expect(optionIcons.map((el) => el.textContent)).toEqual(["a", "b", "c"]);
+    // 自定义节点插在文字前面，不顶掉文字本身（否则读屏与既有断言都会失配）
+    const first = screen.getAllByRole("option")[0];
+    expect(first?.textContent).toBe("a选项 A");
+  });
+
+  it("renderOption：收起状态的触发器也带图标（不用展开就能看出当前项）", () => {
+    // 替身与真实用法一致：AspectIcon 这类装饰性图标是 aria-hidden 且无文本，
+    // 所以不会污染触发器的可访问名。renderOption 若返回带文字的内容，名字会被拼上
+    // —— 那是调用方的责任，组件不为它做特殊处理。
+    render(
+      <Select
+        options={options}
+        value="b"
+        onChange={vi.fn()}
+        renderOption={() => <span data-testid="opt-icon" aria-hidden="true" />}
+      />,
+    );
+    // 未展开：只有触发器那一个图标
+    expect(screen.getAllByTestId("opt-icon")).toHaveLength(1);
+    // 触发器可访问名仍以文字为准
+    expect(screen.getByRole("button", { name: "选项 B" })).toBeTruthy();
+  });
+
+  it("不传 renderOption 时没有自定义节点（纯文字，行为不变）", () => {
+    render(<Select options={options} value="a" onChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /选项 A/ }));
+    expect(screen.queryAllByTestId("opt-icon")).toHaveLength(0);
+    expect(screen.getAllByRole("option").map((el) => el.textContent)).toEqual(["选项 A", "选项 B", "选项 C"]);
+  });
 });

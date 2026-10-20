@@ -8,7 +8,7 @@ React 19 + TypeScript + Vite + Tailwind v4 + React Flow（`@xyflow/react`）。�
 npm install
 npm run dev        # 开发模式（热更新；需后端已启动，见下）
 npm run build      # tsc --noEmit + vite build → dist/（git 忽略，由后端服务托管）
-npm test           # vitest run（388 用例）
+npm test           # vitest run（730 用例）
 npm run lint       # eslint
 npx tsc --noEmit   # 类型检查
 ```
@@ -68,6 +68,11 @@ $env:IMAGORA_CHROMIUM = 'C:\path\to\chrome.exe'
 | 画布边界 | `html[data-canvas-bounds="off"] .studio-canvas` | 关闭时收掉画布边框 / 底色 / 投影与渲染层底色晕，与页面背景融为一体 |
 | 滚动条 | `--sb-size` · `--sb-thumb` · `--sb-track` | 全局统管；轨道 transparent = 跟随所在容器底色 |
 | 主体色选择 | `.accent-hue` | 外观弹窗**只有一条色相滑杆**（九色预设方块已移除，2026-10-03）：`--r-pill` 轨道 + 自定义 thumb，轨道底色是色相彩虹——那只属于「选色」，其余参数用中性的「通用滑杆」`.range-field`；宽度交给容器（配 `flex-1`），与「卡片通透度」那行逐行对齐。取到的色相写到根元素 `--accent-hue`，背景底色与页面光晕都读它 |
+| 画布控件 | `.zoom-slider` · `.studio-canvas .react-flow__minimap` | 缩放滑杆塞进左下角 `<Controls>` 的按钮栈（30px 宽一列）。**垂直 range 用 `writing-mode: vertical-lr` + `direction: rtl`**，不要用 `transform: rotate(90deg)`——旋转后命中区与视觉位置错位（拖动点偏移一个滑杆高度），键盘方向键语义也会反。小地图底色走 `--surface-float` 与浮层同 token，边框/圆角/投影与 Controls 保持一套语言 |
+| 下拉浮层 | `.select-list` · `--search` · `--empty` · `--group__title` · `--group__rows` · `--trigger` | 通用下拉（[Select.tsx](src/components/Select.tsx)）：浮层 `createPortal` 到 body 后坐标由 TSX 现算内联给，这里只管外观。底色走 `--surface-float`，与弹窗同一档。搜索框在**列表内部顶部**、不替换触发器。组标题 `position: sticky; top: 0`，底色同样只能取 `--surface-float`（表面系统要求底色唯一产地是 [surface.ts](src/surface.ts)，不能为它单独写不透明色）——代价是粘顶时下方选项会按通透度透上来一点，属既有设计不是缺陷 |
+| 生成中占位卡 | `.generation-pending` + `__label` / `__track` / `__bar` | 等待结果的细进度条（画布提示词节点）。**进度只由 `transform: scaleX()` 驱动，绝不给 `width` 加 transition**——width 运动会每帧重排布局，在缩放中的画布上尤其卡；`prefers-reduced-motion: reduce` 时去掉过渡。卡内两层中性色都从 `--color-brand` 掺出来（`color-mix` 加深），因为掺色 token 本身是浅底，直接拿它画细线 / 进度条会看不见 |
+| 对齐线 | `.snap-guide` | 拖拽吸附时的辅助线（[CanvasPage.tsx](src/components/CanvasPage.tsx) 画在 React Flow 的 `ViewportPortal` 层里，位置由 TSX 用视口坐标算，随平移缩放自动跟随；这里只给视觉不给尺寸）。颜色取 `--color-brand` 不取中性灰（点阵背景上灰线看不清），`opacity: 0.55` 免得盖过节点。**`pointer-events: none` 必须写死**——它横跨整个视口，可点的话会挡住所有节点拖拽与点击 |
+| 组节点叠卡 | 无公共类（写在 [CanvasNodes.tsx](src/components/CanvasNodes.tsx) 的内联 `style` 里） | 图片组节点背后错位的几张卡，表达「这是一批、里面有 N 张」。纯 CSS（`translate` + `rotate` + 内联 `color-mix` 底色），零状态、零布局计算；层数夹到 `Math.min(n-1, 3)` 张（一个 40 张图的组会渲染 39 层，每层都是独立合成层，缩放时掉帧；夹到 3 张后「3 张以上」在视觉上是同一个意思，精度由数字补）。**z 序靠 DOM 顺序不靠 `z-index`**：叠卡写在 body 之前，后绘制的 body 自然压在上面；父元素没有 `z-index` 就没有层叠上下文，写负 `z-index` 反而会被父元素背景盖住 |
 
 ## 文件索引
 
@@ -121,6 +126,50 @@ $env:IMAGORA_CHROMIUM = 'C:\path\to\chrome.exe'
 
 ### [format.ts](src/format.ts)
 - 职责：显示格式化（`formatBytes` / `generatingLabel` / `errMessage`）
+
+### [generationPending.ts](src/generationPending.ts)
+- 职责：生成中占位卡的**渐近进度曲线 + 文案轮播**（`pendingProgress` / `pendingProgressScale` / `pendingMessage` / `pendingLabel`；常量 `PENDING_PROGRESS_START = 10` / `PENDING_PROGRESS_CAP = 98` / `PENDING_PROGRESS_TAU = 28` / `PENDING_MESSAGE_SECONDS = 2` / `PENDING_MESSAGES`）
+- 被谁依赖：`components/GenerationPending.tsx`（画布提示词卡 running 时的占位区）
+- 注意：**是「假进度」不是真进度**——生图接口不回报百分比（排队/推理/回传三段只有头尾可观测），老实显示 `0% → 0% → 100%` 会让人以为卡死。曲线渐近逼近 98% 且永不越过（最后 2% 留给真实完成事件），首秒就从 10% 起步（从 0 起爬会让人怀疑「是不是没开始」）。纯函数：无 `Date.now`、无随机数，同一 tick 恒定同值，非法入参（NaN / ±Infinity / 负数）按 0s 处理绝不产出 `NaN%`。文案轮播间隔与参考实现 basketikun/infinite-canvas（MIT）的 `Math.floor(tick / 2)` 同口径
+
+### [imageOps.ts](src/imageOps.ts)
+- 职责：裁剪 / 放大的**几何纯函数 + canvas I/O**。A 层纯几何（`CropRect` 归一化 0~1、`clampCrop` / `moveCrop` / `resizeCrop` / `fitCropToRatio` / `centeredSquareCrop` / `resolveUpscaleSize` / `gcdRatio`，常量 `CROP_MIN_SIZE = 0.06` / `MAX_UPSCALE_LONG_EDGE = 4096`）；B 层 canvas I/O（`loadImage` / `readImageSize` / `cropDataUrl` / `upscaleDataUrl`）
+- 注意：**比例换算必须乘框的宽高比**——`normalizedRatio = aspectRatio * boxAspect`（`boxAspect = boxHeight / boxWidth`），漏了这一步「1:1」会裁成长方形。B 层**不写单测**：jsdom 的 `canvas.getContext("2d")` 返回 `null`（不装 canvas npm 包也不许装），只由 A 层纯函数兜底。裁剪与放大全部在前端 canvas 完成，后端零参与（不新增接口、不改 `generate_image` 契约）
+
+### [dataUrlFile.ts](src/dataUrlFile.ts)
+- 职责：把前端 canvas 导出的 `data:image/png;base64,...` 转成可上传的 `File`（`dataUrlToFile`），并生成派生图文件名（`derivedImageName`，形如 `crop-红苹果-20261020-130405.png`）
+- 被谁依赖：`components/CanvasPage.tsx`（裁剪 / 放大对话框的产出落库）
+- 注意：**非法 dataUrl 必须抛错而不是返回空 File** —— 上传 0 字节会在画布上多出一个永远加载失败的红框节点，比直接报错难排查得多。转换独立成模块的理由：`canvasUpload(files: File[])` 只收 `File`，这层 `atob` / `Blob` 不该撒进 1800 行的 CanvasPage.tsx，独立后能单测。支持 base64 与百分号编码两种载荷
+
+### [aspectIcon.ts](src/aspectIcon.ts)
+- 职责：尺寸比例图标几何（`aspectIconSize(ratio, long?)` 算空矩形的像素宽高、`ratioFromSizeLabel(label)` 从尺寸标签反解比例）
+- 被谁依赖：`components/AspectIcon.tsx` → `components/CanvasNodes.tsx` 的尺寸下拉（`Select` 的 `renderOption`）
+- 注意：`ASPECT_ICON_LONG = 24` 是长边上限（再大会撑高下拉行）、`ASPECT_ICON_MIN_SHORT = 10` 是短边下限（再矮看不出是矩形）。**标签解析必须三层回退**：括号内 `a:b` → 裸 `a:b` → `WxH` 宽高比——真实尺寸里有 `1024x1792 (竖版长图)`、`1792x1024 (横版长图)` 两项括号内只有中文方位词，不退回宽高比这两项就没图标
+
+### [canvasGeometry.ts](src/canvasGeometry.ts)
+- 职责：视口聚焦 + 分组几何纯函数（移植自 basketikun/infinite-canvas，MIT）。`nodeBounds` / `containsCenter` / `findGroupDropTarget` / `snapNodesIntoGroup` / `collectGroupMemberNodes` / `getGroupWrapRect` / `focusViewportForNode`
+- 被谁依赖：`components/CanvasPage.tsx`（「聚焦」控件）
+- 注意：`focusViewportForNode` 让节点**最多占视口 60%**（`FOCUS_MAX_VIEWPORT_RATIO`），下方有浮层时按 3:1 把节点往上推；`containsCenter` 判的是**节点中心点**而不是整体包含（整体包含会让大节点永远拖不进小组）；`nodeBounds` 空数组必须返回退化盒 `{0,0,0,0}`，返回 `±Infinity` 会让调用方算出 NaN
+
+### [imageSplit.ts](src/imageSplit.ts)
+- 职责：图像切分几何 + canvas 导出。`clampGrid` / `splitCells`（网格）/ `splitCellsByLines`（自定义切割线）/ `splitCellCount` / `splitOutputName` / `splitDataUrl`
+- 被谁依赖：`components/ImageSplitDialog.tsx`
+- 注意：格子坐标**用 `col / cols` 直算不要累加**（累加会漂，最后几格对不上 1）；1×1 是合法输入（等于不切），不要强行抬到 2；`splitDataUrl` 必须**静态 import** `cropDataUrl`（动态 + 静态混合导入会让 vite 放弃分块并告警）
+
+### [snapGuide.ts](src/snapGuide.ts)
+- 职责：拖拽吸附纯函数。`snapToNeighbors(moving, others, threshold?)` 按左/中/右与上/中/下三对齐线找最近目标；`snapToGrid(moving, step?)` 退化为 8px 栅格
+- 被谁依赖：`snapDrag.ts`
+- 注意：x 与 y **独立决策**（可能只吸一个轴）；阈值比较用严格 `<`；**没有可吸目标时原样返回，绝不偷偷退回网格**（否则「关掉吸附」和「没邻居」会变成两套行为）；非法入参（NaN / Infinity / step<=0）安全退化不抛错——这个函数每帧拖拽都跑，抛错会让整个画布白屏
+
+### [snapDrag.ts](src/snapDrag.ts)
+- 职责：吸附**接线层**——把 `snapGuide` 的纯函数结果翻译成 React Flow 的 `NodeChange[]`（`snapPositionChanges`），并算出要画的对齐线
+- 被谁依赖：`components/CanvasPage.tsx` 的 `onNodesChange`
+- 注意：吸附位移必须**同时写 `position` 与 `positionAbsolute`**（只写一个节点会瞬移回原位）；多选拖拽按主节点算位移再整体平移，不能各算各的；对齐线只在拖拽帧产出，松手帧返回空数组
+
+### [modelIcon.ts](src/modelIcon.ts)
+- 职责：从模型 ID 猜品牌（`modelBrand`）、品牌字形（`MODEL_BRAND_GLYPH`）、中文名（`modelBrandLabel`）
+- 被谁依赖：`components/ModelIcon.tsx` → `components/ProviderModal.tsx` 的模型下拉
+- 注意：**第一步必须调 `foldModelId()` 做全角连字符归一化**（中转站把 `gpt‑image‑2.5` 登记成 U+2011，不折叠就认不出 `gpt`）；匹配顺序有讲究（`claude` 先于 `openai`）；不支持 `mj` 两字母简写——裸 `includes("mj")` 会把 `mjpeg` 之类误判，成本高于收益，只保留 `midjourney`
 
 ### [cost.ts](src/cost.ts)
 - 职责：成本展示纯函数（`formatMoney` / `formatRate` / `formatSeconds` / `budgetSummary` / `statRows`）
@@ -187,6 +236,11 @@ $env:IMAGORA_CHROMIUM = 'C:\path\to\chrome.exe'
 - 被谁依赖：`App.tsx`（外观弹窗），样式落点 `html[data-canvas-bounds]`
 - 注意：默认 `true`（显示边框 + 底色，保持既有观感），只有用户显式关掉才进「融为一体」档
 
+### [minimapVisible.ts](src/minimapVisible.ts)
+- 职责：画布**小地图开关**与**缩放滑杆刻度**两件偏好（`readMinimapVisible` / `saveMinimapVisible`；`zoomToSliderPercent` / `sliderPercentToZoom` / `clampSliderPercent` / `readZoomSliderPercent` / `saveZoomSliderPercent`）
+- 被谁依赖：`components/CanvasPage.tsx`（`<MiniMap>` 显隐 + `<Controls>` 里的缩放滑杆）
+- 注意：小地图默认 **`false`**——它固定占画布右下角 160×110，卡片少时是纯负担，用户显式打开才落盘。滑杆**用直接百分比 `p = 100z` 而不是对数刻度**：滑杆行程 5%~200% 与缩放区间 0.05~2 的跨度都正好是 40 倍，端点对齐后对数映射在数学上精确退化为直线（`ln p = ln 100 + ln z` 系数恰为 1），写一套 log 运算只是把同一根直线算两遍还多出浮点误差；直接百分比另有两个好处——读数就是用户看到的缩放百分比、100% 天然落在行程 48.7% 处接近居中。`ZOOM_SLIDER_MIN_PERCENT = 5` / `ZOOM_SLIDER_MAX_PERCENT = 200` **刻意写成模块常量而不是函数参数**，与 `CanvasPage.tsx` 的 ReactFlow `minZoom={0.05}` / `maxZoom={2}` 对齐；做成参数两处数字必然漂移（滑杆拖到底但视口还在缩是最难查的一类 bug）。两个换算函数互为反函数（往返误差 < 1e-9，单测钉住）；非法输入（NaN / ±Infinity）一律夹到端点而不抛错——滑杆是受控组件，抛错会让整个画布白屏
+
 ### [recentPrompts.ts](src/recentPrompts.ts)
 - 职责：最近提示词挑选（`pickRecentPrompts(items, limit = 5, prefixLen = 40)`）——从生成历史里挑可直接复用的条目：按前 `prefixLen` 字归并近似版本并保留最新那条、丢弃空白与缺失项、取满 `limit` 即停；只做挑选不截断长度（视觉截断归展示层）
 - 被谁依赖：`App.tsx`（拉到历史后算出列表并存进 state）；再以 `recentPrompts` prop 经 `components/ResultPanel.tsx` 转给 `components/Gallery.tsx` 渲染成空态那一行（两个组件本身不 import 本模块）
@@ -208,7 +262,7 @@ $env:IMAGORA_CHROMIUM = 'C:\path\to\chrome.exe'
 
 ### [useCanvasDrop.tsx](src/useCanvasDrop.tsx)
 - 职责：拖放接线（落点示意显隐/定位/文案、window 兜底守卫、工作区四事件）；提示词卡片/图片组拖出画布外松手取消
-- 改后必测：`npm test` + E2E（verify_canvas.py 第 8-11 段）
+- 改后必测：`npm test` + E2E（verify_canvas.py 第 8-13 段）
 
 ### [useGenerationTask.ts](src/useGenerationTask.ts)
 - 职责：生成任务轮询/取消（`useGenerationTask`）；导出终态常量 `TERMINAL_STATUSES`（轮询停止口径，勿在别处内联重复列表）
@@ -217,6 +271,11 @@ $env:IMAGORA_CHROMIUM = 'C:\path\to\chrome.exe'
 ### [useCanvasRecovery.ts](src/useCanvasRecovery.ts)
 - 职责：恢复快照自动保存/恢复接线
 
+### [useImageEditorViewport.ts](src/useImageEditorViewport.ts)
+- 职责：图片编辑器视口（`useImageEditorViewport(image, open)`）——缩放（1×~4×，步进 1.2）、以指针为锚点、空格/中键拖拽平移、`ResizeObserver` 跟随容器尺寸。返回 `viewportRef`（回调 ref）/ `stageRef` / `zoom` / `isPanning` / `spacePressed` / `scrollClassName` / `panHandlers` / `canZoomIn` / `canZoomOut` / `imageScale` / `zoomIn` / `zoomOut` / `resetZoom` / `contentStyle` / `stageStyle` / `mediaStyle`；纯函数部分（`fitImageToViewport` / `imageEditorContentSize` / `imageEditorAnchorAt` / `imageEditorAnchorScroll` / `isImageEditorPanGesture` 等）也全部导出可单测
+- 被谁依赖：`components/ImageCropDialog.tsx`
+- 注意：**两段式缩放**——`setZoomAround` 只记锚点再 setState，真正反算 `scrollLeft/scrollTop` 在 `useLayoutEffect` 里做（同步 setState 时拿不到新尺寸，会跳一格）；滚轮必须 `{ passive: false }` 且 `preventDefault + stopPropagation`，否则画布跟着一起缩放；空格拖拽监听挂 window capture 阶段且先 `document.activeElement.blur()`，否则输入框里打空格会触发平移。移植自 basketikun/infinite-canvas（MIT）的 `use-image-editor-viewport.ts`
+
 ### [useImageZoom.ts](src/useImageZoom.ts)
 - 职责：图片「单击开原图 / 双击放大预览」时序区分（`useImageZoom`，250ms 延时）
 - 被谁依赖：Gallery.tsx（经典表单结果图）、HistoryGallery.tsx（生产历史）
@@ -224,8 +283,13 @@ $env:IMAGORA_CHROMIUM = 'C:\path\to\chrome.exe'
 
 ### 组件（components/；改后跑 `npm test` + E2E）
 
-- [`CanvasPage.tsx`](src/components/CanvasPage.tsx) — 无限画布主页面（React Flow 集成、选中操作栏、操作帮助弹窗、历史面板入口）
-- [`CanvasNodes.tsx`](src/components/CanvasNodes.tsx) — 三类节点（图片/图片组/提示词卡）+ `ActionButton`（nodrag 胶囊按钮）；`StatusLight` 状态灯 running 恒定「生成中」，`ElapsedText` 秒数文字以 `startedAtMs` 自计时（防逐秒重渲染，见 ARCHITECTURE 5.3）
+- [`CanvasPage.tsx`](src/components/CanvasPage.tsx) — 无限画布主页面（React Flow 集成、选中操作栏、操作帮助弹窗、历史面板入口、**小地图显隐** + **缩放滑杆**（塞在左下角 `<Controls>` 按钮栈里，偏好见 [minimapVisible.ts](src/minimapVisible.ts)）+ **吸附开关** + **聚焦控件**（[canvasGeometry.ts](src/canvasGeometry.ts) 的 `focusViewportForNode`，让选中内容最多占视口 60%）；拖拽时经 [snapDrag.ts](src/snapDrag.ts) 吸到邻居边缘并画对齐线）
+- [`CanvasNodes.tsx`](src/components/CanvasNodes.tsx) — 三类节点（图片/图片组/提示词卡）+ `ActionButton`（nodrag 胶囊按钮）；`StatusLight` 状态灯 running 恒定「生成中」，`ElapsedText` 秒数文字以 `startedAtMs` 自计时（防逐秒重渲染，见 ARCHITECTURE 5.3）。图片节点的悬停操作栏六个按钮：预览大图 / **裁剪图片** / **放大图片** / **切分图片** / 替换图片 / 删除图片。**操作栏是 `opacity-0 pointer-events-none`，不是 `invisible`** —— `visibility:hidden` 会把按钮从无障碍树摘掉（E2E 的 `get_by_role` 与读屏器都查不到）；用 `pointer-events` 拦命中测试才既不挡画布又能被查到。悬停区用 `pl-2` 内边距而不是 `ml-2` 外边距，否则鼠标从节点移向按钮途中会掉出 `.group` 而闪断。图片组节点用**叠卡**（`Math.min(n-1, 3)` 张错位背景卡）表达「这是一批」，纯 CSS 零状态。尺寸下拉经 `Select` 的 `renderOption` 挂 [AspectIcon.tsx](src/components/AspectIcon.tsx) 比例图标
+- [`AspectIcon.tsx`](src/components/AspectIcon.tsx) — 按比例画一个空心矩形（图形代替文字表达「1:1 / 16:9」），几何算 [aspectIcon.ts](src/aspectIcon.ts)。颜色只用 `currentColor`（写死 hex 会被 `surfaceAudit.test.ts` 拦下）
+- [`ModelIcon.tsx`](src/components/ModelIcon.tsx) — 模型品牌小徽标（OpenAI / Gemini / 通义…），品牌识别在 [modelIcon.ts](src/modelIcon.ts)。**未知品牌也渲染**（显示 `·`）而不是返回 null —— 列表里突然少一个图标会显得错位。底色用 `color-mix(in srgb, currentColor 12%, transparent)`，不写死颜色
+- [`ImageSplitDialog.tsx`](src/components/ImageSplitDialog.tsx) — 切分对话框：五个预设（2×2 / 2×3 / 3×2 / 3×3 / 4×4）+ 行列手填（即时夹到 1~8）、网格预览（在图片上铺 `grid` 格子而不是画 canvas）、文件名预览、1×1 时禁用确认（等于不切）。几何与导出在 [imageSplit.ts](src/imageSplit.ts)
+- [`ImageCropDialog.tsx`](src/components/ImageCropDialog.tsx) — 裁剪对话框（`ModalShell` + [useImageEditorViewport.ts](src/useImageEditorViewport.ts) 做视口 + [imageOps.ts](src/imageOps.ts) 做几何）：八向手柄拖拽、比例预设（自由 / 1:1 / 4:3 / 3:4 / 16:9 / 9:16）、实时像素读数、确认后回传 dataUrl 给上层落库。**遮罩用 `boxShadow: 0 0 0 9999px` 而不是四块 div** —— 四块只能盖住 stage 层（图片宽度），盖不满视口留白，且 spread 型阴影不参与布局
+- [`ImageUpscaleDialog.tsx`](src/components/ImageUpscaleDialog.tsx) — 放大对话框：目标长边预设（1024 / 2048 / 3072 / 4096，默认原长边 ×2 夹在区间内）+ 自定义、算法选择（high / bilinear / nearest）、换算文案（`原 1024×768 → 2048×1536（2.0×）· 显示比例 4:3`）。目标小于原图长边时只提示不禁用（缩小也是合法诉求）。**处理期间用户仍可取消**，卸载后用 `aliveRef` 拦住迟到的结果，避免窗都关了 `onConfirm` 还被调一次
 - [`WorkflowModals.tsx`](src/components/WorkflowModals.tsx) — 保存/加载/导入弹窗 + **`ZoomModal` 全屏预览**（createPortal 到 body，画布 / 经典表单 / 生产历史共用；Portal 根截停 click 冒泡，防误关外层宿主遮罩）
 - [`ResultPanel.tsx`](src/components/ResultPanel.tsx) — 经典表单结果区 5 态容器：主图形层 absolute 居中钉死 + 副信息层底部独立生长（行增减不挤动主图形）；切换交叉淡化（swap-in/swap-out，旧层保留 200ms）；排队/生成中/失败/已取消/透传 Gallery；生成中图标本体按自身颜色呼吸光（`icon-breathe`）
 - [`Gallery.tsx`](src/components/Gallery.tsx) — 经典表单结果图（双击放大 / 单击新窗口开原图，250ms 区分，走 useImageZoom；被 ResultPanel 透传）
@@ -239,13 +303,14 @@ $env:IMAGORA_CHROMIUM = 'C:\path\to\chrome.exe'
 - [`FolderPicker.tsx`](src/components/FolderPicker.tsx) — 目录选择
 - [`Select.tsx`](src/components/Select.tsx) — 通用下拉框（`options` / `value` / `onChange`，可选 `searchable` + `emptyLabel` + `option.group` 分组）。**展开列表 createPortal 到 body**：此前就地 absolute 定位会被弹窗的 `overflow:hidden` / `overflow-y:auto` 裁掉，表现为「下拉展开后底部几项看不见」。坐标按触发器 `getBoundingClientRect` 现算，展开期间监听 scroll / resize / `ResizeObserver` 重算（后者覆盖「窗口没变但触发器被挤窄」），下方空间不足自动翻到上方并据此限高。搜索框在**列表内部**顶部（不替换触发器，避免「已选值」与「搜索词」抢同一块区域），过滤走 `rankByName`。完整键盘导航（↑↓ Home End Enter Esc Space）、`aria-activedescendant` / `aria-selected` / `aria-controls`，展开时 `pushPopup()` 让 Esc 先收下拉再关弹窗（见 [popupLayer.ts](src/popupLayer.ts)）。无障碍属性由 `Field` 经 `cloneElement` 注入后**转发到触发器按钮**——按钮才是 `label` 的控件
 - [`Field.tsx`](src/components/Field.tsx) — 表单字段壳（`id` / `label` / `hint` / `error` / `action` / `children`）：`hint` 与 `error` **共用同一个消息槽位** `<p id="{id}-message">`，invalid 时 error 顶掉 hint，任何时刻至多一行提示；`aria-describedby` 只在有内容时拼 id（无内容传 `undefined` 而非空串）、`aria-invalid` 用条件展开（`exactOptionalPropertyTypes` 下不能写 `= {undefined}`）。控件本体由调用方渲染，`Field` 用 `cloneElement` 注入 aria（非单个元素时降级为原样渲染）。移植自 DeepSeek Harness（MIT）的 `SettingsValueField`
+- [`GenerationPending.tsx`](src/components/GenerationPending.tsx) — 生成中占位卡（画布提示词卡 running 时占住结果位）：一行文案（`生成中 8s · 正在构图…`）+ 渐近进度条，曲线与文案由 [generationPending.ts](src/generationPending.ts) 给出。`elapsed` 不传则自己每秒走表、传了就以父组件为准（两套时钟会互相打架）；进度条只动 `transform: scaleX()`，不给 `width` 做动画（宽度动画会触发布局）。**父组件必须在开始生成时再挂载它**（`{running && <GenerationPending/>}`）——常驻挂载会让秒数从页面打开就跑。结构移植自 basketikun/infinite-canvas（MIT），但底色一律走 `var(--surface-*)` token
 
 ### 根文件
 
 - [`App.tsx`](src/App.tsx) — 根组件：顶栏（品牌区 3D `brand-swing` 系、`chip` 角标、`corner-note` 镜像小字）、经典/画布模式切换、**外观弹窗**（主体色 / 我的壁纸 / 画布边界：壁纸图存 IndexedDB 后铺成整页背景，`html[data-wallpaper]` / `html[data-canvas-bounds]` 属性驱动「底色让位」与「画布边界开关」）、**生图 API 配置弹窗**（选择器：选来源 + 选模型两件事，值 + 来源由 `/api/config` 的 `profileView` 下发，改地址/密钥请改文件）与 **添加第三方供应商弹窗**（`ProviderModal`，顶栏插头图标；建新来源写 `providers.local.json`）。品牌区参数（`BRAND_LAYERS`/`TEXT_Z_STEP`/`LOGO_Z_STEP`/`LOGO_FACE*`）在 App.tsx 顶部——**标题与 logo 挤出深度分档**（logo 线条细，同深度会糊成红块）
 - [`main.tsx`](src/main.tsx) — 入口（挂载 + accent 主题注入）
 - [`index.css`](src/index.css) — **唯一样式层**（Tailwind v4）：`:root` 设计 token + `@layer components` 组件类 + 动效层；导出的 token 与公共类清单见本文「样式体系」节，组件只引用类名、不写死尺寸与颜色
-- [`verify_canvas.py`](e2e/verify_canvas.py) — 画布交互 E2E（36 断言，Playwright headless）
+- [`verify_canvas.py`](e2e/verify_canvas.py) — 画布交互 E2E（81 断言，Playwright headless）
 - [`verify_provider.py`](e2e/verify_provider.py) — 「添加第三方供应商」E2E（38 断言）：真实点顶栏插头 → 填表 → 真实落盘 `providers.local.json` → 断言文件内容（8 档尺寸单价全 0 / 7 个比例 / 模型目录 / **不含密钥** / 地址带 `/v1` 时路径不重复）→ 新来源出现在配置弹窗下拉。探测那步打一个不存在的域名（预期 400，不花外部配额）；Provider ID 用随机值，跑完不留残留
 
 ## 上下游依赖

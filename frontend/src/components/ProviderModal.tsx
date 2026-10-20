@@ -5,6 +5,7 @@ import { errMessage } from "../format";
 import type { ProviderDraft, ProviderCreateResult } from "../types";
 import { Field } from "./Field";
 import { ModalShell } from "./ModalShell";
+import { ModelIcon } from "./ModelIcon";
 import { Select } from "./Select";
 
 /** Provider ID 的校验规则：与服务端 core/provider_store.py 的 _NAME_RE 一致。
@@ -321,6 +322,9 @@ export function ProviderModal({ registeredNames, onClose, onCreated }: ProviderM
         >
           {showSelect ? (
             // searchable：中转站常报出几十上百个模型 ID，不给搜索就只能盲滚
+            // renderOption：每行前面加一个品牌小徽标（OpenAI / Gemini / 通义…），
+            // 几十个 ID 纯文字时只能逐个读才知道哪家是哪家。徽标是装饰性
+            // aria-hidden 元素，不影响可访问名，也不参与搜索过滤。
             <Select
               id="pv-model"
               options={modelOptions}
@@ -328,6 +332,7 @@ export function ProviderModal({ registeredNames, onClose, onCreated }: ProviderM
               onChange={setModel}
               searchable
               emptyLabel="没有匹配的模型 ID"
+              renderOption={(option) => <ModelIcon modelId={option.value} />}
             />
           ) : (
             <input

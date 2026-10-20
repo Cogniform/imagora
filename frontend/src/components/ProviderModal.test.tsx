@@ -205,9 +205,15 @@ describe("ProviderModal", () => {
 
     // 探到清单后模型字段从文本框换成下拉（datalist 会按输入过滤、原生渲染还随浏览器变，
     // 曾经导致「上游 7 个模型只显示 2 个」）。下拉的触发器可访问名来自 label。
+    // 触发器同时渲染 renderOption 的品牌徽标（字形 "O"），textContent 会变成
+    // "Ogpt-image-2"，所以断言尾部的 label，而不是整个 textContent。
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "默认模型" }).textContent).toBe("gpt-image-2"),
+      expect(screen.getByRole("button", { name: "默认模型" }).textContent).toMatch(/gpt-image-2$/),
     );
+    // 触发器上也带品牌徽标（title 是中文品牌名），收起状态就能看出是哪家
+    expect(
+      screen.getByRole("button", { name: "默认模型" }).querySelector('[title="OpenAI"]'),
+    ).toBeTruthy();
     expect(screen.getByText(/探到 2 个模型/)).toBeTruthy();
   });
 

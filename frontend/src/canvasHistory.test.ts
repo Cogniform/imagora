@@ -42,4 +42,40 @@ describe("canvas history", () => {
     expect(afterNew && indexed(afterNew.nodes, 0).id).toBe("b");
     expect(history.undo(state("b"))).toBeNull();
   });
+
+  it("keeps the redo stack when recording with preserveRedo", () => {
+    const history = createCanvasHistory(5);
+    history.record(state("a"));
+    const undone = history.undo(state("b"));
+    expect(undone && indexed(undone.nodes, 0).id).toBe("a");
+    history.record(state("auto"), { preserveRedo: true });
+    expect(history.canRestore()).toBe(true);
+    const restored = history.restore(state("auto"));
+    expect(restored && indexed(restored.nodes, 0).id).toBe("b");
+  });
+
+  it("treats an explicit preserveRedo false the same as omitting options", () => {
+    const history = createCanvasHistory(5);
+    history.record(state("a"));
+    history.undo(state("b"));
+    history.record(state("auto"), { preserveRedo: false });
+    expect(history.canRestore()).toBe(false);
+  });
+
+  it("keeps undo intact after preserveRedo and clears redo on the next plain record", () => {
+    const history = createCanvasHistory(5);
+    history.record(state("a"));
+    history.record(state("b"));
+    history.undo(state("c"));
+    history.record(state("auto"), { preserveRedo: true });
+    // past 栈未被破坏：继续 undo 仍正常——先弹出 preserveRedo 记录，再回更早状态
+    const afterSecondUndo = history.undo(state("auto"));
+    expect(afterSecondUndo && indexed(afterSecondUndo.nodes, 0).id).toBe("auto");
+    const afterThirdUndo = history.undo(state("a"));
+    expect(afterThirdUndo && indexed(afterThirdUndo.nodes, 0).id).toBe("a");
+    // 派生重算不清 redo；下一次不带选项的 record 才清空
+    expect(history.canRestore()).toBe(true);
+    history.record(state("user"));
+    expect(history.canRestore()).toBe(false);
+  });
 });
