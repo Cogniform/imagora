@@ -1,4 +1,4 @@
-import { aspectIconSize } from "../aspectIcon";
+import { aspectIconSize, ratioFromSizeLabel } from "../aspectIcon";
 
 /**
  * 比例预览图标：一个按真实宽高比缩放的**空心矩形**。
@@ -41,4 +41,14 @@ export function AspectIcon({ ratio, className }: AspectIconProps) {
       }}
     />
   );
+}
+
+/**
+ * 尺寸下拉的选项图标：把 `1024x1024 (1:1 1K)` 这类标签解析成比例框。
+ *
+ * 单独包一层，是为了让「尺寸下拉永远带比例图标」成为**组件契约**：经典表单与画布节点
+ * 调用同一个组件，而不是各自在调用点手写一遍 `renderOption` —— 写两遍就会漂（一处改了另一处忘）。
+ */
+export function SizeOptionIcon({ label, className }: { label: string; className?: string }) {
+  return <AspectIcon ratio={ratioFromSizeLabel(label)} className={className ?? "text-neutral-400"} />;
 }

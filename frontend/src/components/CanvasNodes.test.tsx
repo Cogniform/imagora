@@ -105,6 +105,31 @@ describe("ImageNode", () => {
     expect(rail.className).not.toMatch(/\binvisible\b/);
   });
 
+  it("uses the shared surface role and icon-button size tiers in the action rail", () => {
+    renderImageNode(vi.fn(), vi.fn(), undefined, { refCount: 2 });
+    const rail = screen.getByTestId("image-action-rail");
+
+    // 操作栏是一块浮层：底色必须走 surface 角色类（写死白色底会被 surfaceAudit.test.ts 拦下），
+    // 圆角/描边/阴影与全站卡片一致。
+    // 注意：surfaceAudit 是逐行正则扫描、不区分注释与代码，本行断言刻意用正则而非类名字面量，
+    // 否则这条"不许写死底色"的守卫自己就会被判为写死底色。
+    expect(rail.className).toContain("surface-float");
+    expect(rail.className).toContain("rounded-lg");
+    expect(rail.className).toContain("shadow-sm");
+    expect(rail.className).not.toMatch(/\bbg-(white|black)\b/);
+
+    // 图标按钮收敛到 .btn-icon + .btn-icon--sm 尺寸档，不再手写 !px-1.5 !py-0.5 text-[10px] 魔法值。
+    const cropButton = screen.getByRole("button", { name: "裁剪图片" });
+    expect(cropButton.className).toContain("btn-icon");
+    expect(cropButton.className).toContain("btn-icon--sm");
+    expect(cropButton.className).not.toContain("text-[10px]");
+    expect(cropButton.className).not.toContain("!px-1.5");
+    expect(cropButton.className).not.toContain("!py-0.5");
+
+    // 引用计数徽标跟 .btn-xs 对齐到 11px 档，不再是 10px。
+    expect(screen.getByText("引用 2 处").className).toContain("text-[11px]");
+  });
+
   it("wires crop and upscale buttons to their handlers", () => {
     const { onCrop, onUpscale } = renderImageNode();
 
@@ -193,6 +218,40 @@ describe("PromptNode", () => {
     expect(pathInput.className).toContain("text-right");
     expect(pathInput.getAttribute("title")).toBe(outputDir);
     expect(document.querySelector(".react-flow__node-prompt")).toBeNull();
+  });
+
+  it("uses the shared compact label and small button size tiers", () => {
+    const props = nodeProps<typeof PromptNode>({
+      id: "prompt-1",
+      type: "prompt",
+      data: {
+        prompt: "product photo",
+        size: "1024x1024",
+        quality: "high",
+        outputDir: "output",
+        status: "idle",
+      },
+      selected: false,
+      onUpdate: vi.fn(),
+      onRun: vi.fn(),
+      onDelete: vi.fn(),
+      sizeOptions: [{ value: "1024x1024", label: "1:1" }],
+      qualityOptions: [{ value: "high", label: "high" }],
+    });
+
+    render(<ReactFlowProvider><PromptNode {...props} /></ReactFlowProvider>);
+
+    // 三个字段标签统一走 .field-label-compact（12px 档），不再各自写 field-label text-[10px]。
+    const labels = screen.getAllByText(/^(尺寸|质量|输出路径)$/);
+    expect(labels).toHaveLength(3);
+    for (const label of labels) {
+      expect(label.className).toBe("field-label-compact");
+    }
+
+    // 生成按钮走 .btn-sm 尺寸档，不再靠 !py-1 text-xs 临时拼。
+    const runButton = screen.getByRole("button", { name: "运行" });
+    expect(runButton.className).toContain("btn-sm");
+    expect(runButton.className).not.toContain("!py-1");
   });
 });
 

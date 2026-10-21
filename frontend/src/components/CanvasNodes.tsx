@@ -47,7 +47,7 @@ function NodeActions({ children, testId }: { children: ReactNode; testId?: strin
   return (
     <div
       data-testid={testId}
-      className="absolute left-full top-2 z-30 flex flex-col gap-1 pl-2 opacity-0 pointer-events-none transition-opacity group-hover:pointer-events-auto group-hover:opacity-100"
+      className="absolute left-full top-2 z-30 flex flex-col gap-1 surface-float rounded-lg border border-white/40 p-1 pl-2 shadow-sm opacity-0 pointer-events-none transition-opacity group-hover:pointer-events-auto group-hover:opacity-100"
     >
       {children}
     </div>
@@ -71,7 +71,7 @@ function ActionButton({
       onClick={onClick}
       aria-label={label}
       title={label}
-      className={`nodrag btn-ghost !px-1.5 !py-0.5 text-[10px] ${danger ? "btn-danger" : ""}`}
+      className={`nodrag btn-ghost btn-icon btn-icon--sm p-0 ${danger ? "btn-danger" : ""}`}
     >
       {children}
     </button>
@@ -181,7 +181,7 @@ export function ImageNode({
       <div className="mt-1 max-w-[128px] truncate text-[11px] text-neutral-600" title={data.name}>
         {data.name}
       </div>
-      <div className={`text-[10px] ${data.refCount > 0 ? "text-brand" : "text-neutral-400"}`}>
+      <div className={`text-[11px] ${data.refCount > 0 ? "text-brand" : "text-neutral-400"}`}>
         {data.refCount > 0 ? `引用 ${data.refCount} 处` : "未引用"}
       </div>
     </>
@@ -506,7 +506,7 @@ export const PromptNode = memo(function PromptNode({
       />
       <div className={`nodrag mt-2 grid gap-2 ${qualityEffective ? "grid-cols-[7fr_3fr]" : "grid-cols-1"}`}>
         <div className="min-w-0">
-          <label className="field-label text-[10px]">尺寸</label>
+          <label className="field-label-compact">尺寸</label>
           <Select
             options={mergeCustomOption(sizeOptions, data.size)}
             value={data.size}
@@ -522,7 +522,7 @@ export const PromptNode = memo(function PromptNode({
         </div>
         {qualityEffective && (
           <div className="min-w-0">
-            <label className="field-label text-[10px]">质量</label>
+            <label className="field-label-compact">质量</label>
             <Select
               options={qualityOptions}
               value={data.quality}
@@ -533,7 +533,7 @@ export const PromptNode = memo(function PromptNode({
         )}
       </div>
       <div className="nodrag mt-2">
-        <label className="field-label text-[10px]">输出路径</label>
+        <label className="field-label-compact">输出路径</label>
         <div className="mt-0.5">
           <FolderPicker value={data.outputDir} onChange={(v) => onUpdate(id, { outputDir: v })} alignEnd />
         </div>
@@ -550,7 +550,7 @@ export const PromptNode = memo(function PromptNode({
           type="button"
           onClick={() => onRun(id)}
           disabled={busy || !data.prompt.trim()}
-          className={`btn-primary flex-1 !py-1 text-xs ${busy ? "btn-busy" : ""}`}
+          className={`btn-primary btn-sm flex-1 ${busy ? "btn-busy" : ""}`}
         >
           {running ? <ElapsedText startedAtMs={data.startedAtMs} /> : queued ? "排队中..." : "运行"}
         </button>

@@ -47,7 +47,7 @@ Imagora 是本地单机工具，运行时分三层，方向单一：
 | `core/` | 后端核心逻辑（见 2.2），全部无 HTTP 依赖的纯业务模块；**双件**：规则层 core/AGENTS.md + 文件索引 core/README.md |
 | `frontend/` | React SPA（见 2.3）；**双件**：frontend/AGENTS.md（规则）+ frontend/README.md（索引） |
 | `scripts/` | 独立运维脚本：`migrate.py`（存储一步到最新，默认只报告、`--apply` 才落盘备份校验）；**双件**：scripts/AGENTS.md + scripts/README.md |
-| `tests/` | 后端 pytest（467 用例）+ 前端 vitest（930 用例），全部不调上游；**双件**：tests/AGENTS.md + tests/README.md（逐文件覆盖） |
+| `tests/` | 后端 pytest（467 用例）+ 前端 vitest（936 用例），全部不调上游；**双件**：tests/AGENTS.md + tests/README.md（逐文件覆盖） |
 | `docs/` | 设计圣经 `ARCHITECTURE.md`（本文档）+ `prompt-import-format.md` / `ecom-prompt-import-format.md`（格式规范）；**双件**：docs/AGENTS.md + docs/README.md |
 | `assets/` | **文档配图**（只服务 markdown 渲染，不是应用资源）：`screenshots/` 放 README「界面一览」的界面截图；**双件**：assets/AGENTS.md + assets/README.md |
 | `_ui-audit/` | 开发期 UI 审计图（本机产物，git 忽略）：由 [scripts/capture.py](../scripts/capture.py) 生成，与门面配图 `assets/screenshots/` 不是一回事 |
@@ -519,13 +519,13 @@ React Flow v12（`@xyflow/react`）受控模式：`nodes` / `edges` 状态由 `C
 ### 10.1 单元测试
 
 - 后端 pytest：**467 用例**（Windows 含 5 个专属测试，CI 必须 `windows-latest`；默认 tmp 路径的 WinError 5 历史坑已随目录重建恢复，见 AGENTS「活跃坑」）
-- 前端 vitest：**930 用例**；`tsc --noEmit` + `vite build` 成功；`npm run lint` / `uv run ruff check .` 均零告警
+- 前端 vitest：**936 用例**；`tsc --noEmit` + `vite build` 成功；`npm run lint` / `uv run ruff check .` 均零告警
 - 文档完整性：`python scripts/check_docs.py`（相对链接可解析 + AGENTS/tests-README/ARCHITECTURE/frontend-README 的测试计数与源码一致；改任何文档后必跑，见 [scripts/README.md](../scripts/README.md)）
 - **逐文件用例 / 覆盖范围 / 变更影响路由（完整表）见 [tests/README.md](../tests/README.md) 文件索引**
 
 ### 10.2 端到端（E2E）
 
-`frontend/e2e/verify_canvas.py`（Playwright，81 断言，自包含测试图，需服务已启动）：新建/上传居中（精确到像素）、视口不突变、右键菜单屏蔽、预览打开与点击空白关闭（含放大态）、文件拖拽添加（落点示意跟随光标与数量 / 落点精确 / 多图批次排开 / 非图片过滤）、工具栏按钮拖出新建 + **拖到画布外松开取消（示意切「松开取消」+ 红色 X 图标，拖回画布仍新建）**、缩放滑杆与视口双向同步（拖滑杆改视口 / 滚轮缩放回灌读数）、小地图开关（默认关 → 开 → 关，选择落 localStorage）、图片节点裁剪与放大（入口按钮 → 对话框 → 确认后派生新节点且原图保留，裁剪产物还能继续放大）。改画布交互后必须跑通它再加 E2E 断言。运行前置条件与命令见 frontend/README.md。
+`frontend/e2e/verify_canvas.py`（Playwright，103 断言，自包含测试图，需服务已启动）：新建/上传居中（精确到像素）、视口不突变、右键菜单屏蔽、预览打开与点击空白关闭（含放大态）、文件拖拽添加（落点示意跟随光标与数量 / 落点精确 / 多图批次排开 / 非图片过滤）、工具栏按钮拖出新建 + **拖到画布外松开取消（示意切「松开取消」+ 红色 X 图标，拖回画布仍新建）**、缩放滑杆与视口双向同步（拖滑杆改视口 / 滚轮缩放回灌读数）、小地图开关（默认关 → 开 → 关，选择落 localStorage）、图片节点裁剪与放大（入口按钮 → 对话框 → 确认后派生新节点且原图保留，裁剪产物还能继续放大）、**切分 3×2 一次产 6 张**、**拖拽吸附**（对齐时出现 `.snap-guide`、关掉开关即消失）、**聚焦所选节点**（视口缩放变化且不失真）、**蒙版局部重绘**（涂一笔 → 确认 → 出现「蒙版」角标 → 点击清除）、**提示词 `@` 引用不存在的图会在运行前被拦下**（不发请求不花钱）、**节点右键菜单**、**连线三态**（idle 1.5px → hover 2.5px → 选中 → Delete 删除）、**尺寸下拉手填清单外尺寸**。改画布交互后必须跑通它再加 E2E 断言。运行前置条件与命令见 frontend/README.md。
 
 ### 10.3 未覆盖
 

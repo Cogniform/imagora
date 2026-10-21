@@ -15,6 +15,9 @@ import { groupOptions, type GroupedOption } from "../optionGroups";
 import { popPopup, pushPopup } from "../popupLayer";
 import { rankByName } from "../rankByName";
 
+/** 选项数超过这个值才自动出搜索框（`searchable="auto"` 的判据）。 */
+export const SELECT_SEARCH_THRESHOLD = 4;
+
 export interface SelectOption {
   value: string;
   label: string;
@@ -28,12 +31,16 @@ interface SelectProps {
   onChange: (value: string) => void;
   className?: string;
   id?: string;
-  /** 列表顶部出搜索框。选项超过一屏时用它，否则用户只能滚。 */
-  searchable?: boolean;
+  /** 列表顶部是否出搜索框。
+   *  缺省（等同于 `"auto"`）按选项数自动决定：超过 `SELECT_SEARCH_THRESHOLD` 才出 ——
+   *  同一个「尺寸」下拉在经典表单（3~4 项）与画布节点（十几项）里因此表现一致。
+   *  `true` / `false` 是强制显示 / 强制隐藏，用于少数确定要或确定不要的场合。 */
+  searchable?: boolean | "auto" | undefined;
   /** 搜索无结果时的提示文案 */
   emptyLabel?: string;
   /** 允许提交清单外的自由输入值（画布尺寸想填 `1280x720`、模型想填配置里还没有的 ID）。
-   *  **只在 `searchable` 同时为真时生效**：没有搜索框就没有打字入口，单开这个开关只会让人困惑。 */
+   *  **只在搜索框真的出现时生效**（见 `searchable`）：没有搜索框就没有打字入口，
+   *  单开这个开关只会让人困惑。 */
   allowCustom?: boolean | undefined;
   /** 自由输入被确认时回调，收到的是归一化后的值（见 `customValue.ts`）。
    *  开了 `allowCustom` 就要传它，否则「使用 “…”」那行点了没有下文。 */
@@ -65,6 +72,10 @@ interface SelectProps {
  * 职责，把输入框塞进触发器会让「已选值」和「搜索词」共用一块区域，关闭时还得决定
  * 该留哪个。放进列表则天然跟着列表生灭。
  *
+ * **出不出搜索框按选项数自动决定**（`searchable` 缺省 = `"auto"`）：超过
+ * `SELECT_SEARCH_THRESHOLD` 才出。此前由各调用点自己传 `searchable`，导致同一个
+ * 「尺寸」下拉在经典表单里没有搜索框、在画布节点里有，用户看到的是两套控件行为。
+ *
  * 过滤用 `rankByName`（有序子序列 + 前缀优先），不是简单 substring ——
  * 模型 ID 动辄 `gpt-image-2.5-flare`，用户打 `flare` 或 `gi25` 都该命中。
  *
@@ -79,7 +90,9 @@ export function Select({
   onChange,
   className = "",
   id,
-  searchable = false,
+  // 不设默认值：`undefined` 与 `"auto"` 同义，统一交给下面的 searchEnabled 解析，
+  // 免得「默认值」和「解析式」两处各写一份判据、日后只改一处就分叉。
+  searchable,
   emptyLabel = "没有匹配项",
   allowCustom = false,
   onCreateCustom,
@@ -109,12 +122,19 @@ export function Select({
     return rankByName(keyed, query).map((entry) => entry.option);
   }, [options, query]);
 
+  /** 本次渲染到底出不出搜索框：`undefined`/`"auto"` 按选项数判，`true`/`false` 照办。
+   *  只解析一次，下面所有判断都用它 —— 直接读 `searchable` 会漏掉 `"auto"` 这个真值。 */
+  const searchEnabled =
+    searchable === undefined || searchable === "auto"
+      ? options.length > SELECT_SEARCH_THRESHOLD
+      : searchable;
+
   const selectedIndex = visible.findIndex((option) => option.value === value);
   const current = options.find((option) => option.value === value);
   const optionId = (index: number) => `${listboxId}-option-${index}`;
 
   /** 自由输入只在「能打字 + 调用方允许」时成立：没有搜索框就没有输入入口。 */
-  const customEnabled = searchable && allowCustom === true;
+  const customEnabled = searchEnabled && allowCustom === true;
 
   /** 输入是否**精确**命中了某个可见选项（值或显示名都算，精确比对、大小写敏感）。 */
   const exactMatch = useMemo<SelectOption | undefined>(() => {
@@ -211,10 +231,11 @@ export function Select({
 
   // 可搜索时把焦点交给搜索框：用户展开就想打字，不该再点一下。
   // 依赖里必须有 rect —— 搜索框只在 rect 算出来后才渲染，首帧 searchRef 还是 null；
-  // 只依赖 open/searchable 的话这个 effect 早跑完就再也不会重跑，焦点永远落不上去。
+  // 只依赖 open/searchEnabled 的话这个 effect 早跑完就再也不会重跑，焦点永远落不上去。
+  // 依赖里也必须有 searchEnabled：它由选项数算出，清单从 3 项变 5 项时要重新聚焦。
   useEffect(() => {
-    if (open && searchable && rect) searchRef.current?.focus();
-  }, [open, searchable, rect]);
+    if (open && searchEnabled && rect) searchRef.current?.focus();
+  }, [open, searchEnabled, rect]);
 
   // 过滤结果变了要夹住 activeIndex，否则上下键会落到不存在的下标上
   useEffect(() => {
@@ -286,7 +307,7 @@ export function Select({
         openList();
         return;
       }
-      // 自由输入的三段判定（只在 searchable && allowCustom 时成立）：
+      // 自由输入的三段判定（只在 searchEnabled && allowCustom 时成立）：
       // ① 输入**精确**命中某个可见项 → 走正常选中（`gpt-image-2.5` 打全了就该选它，
       //    而不是造一个同名的新值）；
       // ② 没精确命中且校验通过 → 提交自由输入；
@@ -369,7 +390,7 @@ export function Select({
             className="select-list fixed z-[70] flex flex-col overflow-hidden"
             style={{ left: rect.left, top: rect.top, width: rect.width, maxHeight: rect.maxHeight }}
           >
-            {searchable && (
+            {searchEnabled && (
               <div className="select-search">
                 <input
                   ref={searchRef}
@@ -389,7 +410,7 @@ export function Select({
             )}
             <ul
               role="listbox"
-              aria-labelledby={searchable ? searchId : undefined}
+              aria-labelledby={searchEnabled ? searchId : undefined}
               className="min-h-0 flex-1 overflow-auto"
             >
               {visible.length === 0 && (
