@@ -15,6 +15,10 @@
 #    实测过：`--locked` 下 job 级 UV_INDEX_URL 覆盖不了锁里记的地址（锁里是绝对 URL，
 #    不是 index 名），因此「锁走官方 + 装走镜像」在锁定安装下做不到。
 #    本地要加速只能改本机（会同时让锁文件回到镜像源，别把那种锁提交上来）。
+#    前端同理：package-lock.json 的每个包都记 resolved 绝对 URL，用镜像源装机再提交，
+#    锁里就是镜像地址（2026-10-21 清理过一批：257 处 npmmirror + 62 处 tencent，
+#    见那笔 chore(deps) 提交）。除海外 runner 连不上外，npm 12 起 allow-remote
+#    默认 none、直接拒绝非官方 registry，本机 npm ci 会报 EALLOWREMOTE。
 # 4. E2E 目前（verify_canvas.py 36 断言 + verify_provider.py 29 断言）只测界面交互，
 #    不触发生成接口（verify_provider.py 会真实写 providers.local.json，但不调生图上游），
 #    因此无需 mock 上游 API。未来若 E2E 覆盖「生成→回流」链路，必须先
