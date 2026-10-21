@@ -744,7 +744,7 @@ function TitleBar({
   return (
     <header className="studio-header enter-up mb-4 flex flex-wrap items-center gap-x-3 gap-y-2">
       <a
-        href="https://github.com/zlZayn/imagora"
+        href="https://github.com/Cogniform/imagora"
         target="_blank"
         rel="noreferrer"
         ref={brandRootRef}
