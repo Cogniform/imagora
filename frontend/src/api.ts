@@ -236,7 +236,7 @@ export function fetchTask(taskId: string): Promise<GenerationTaskSnapshot> {
   return requestJson<GenerationTaskSnapshot>(`/api/tasks/${encodeURIComponent(taskId)}`);
 }
 
-/** 请求取消任务（排队中立即取消；运行中等待当前张完成后丢弃结果） */
+/** 请求取消任务（排队中的出队后不再发上游；运行中跑完当前那张才作废——产物仍落盘并计费，只是不派回画布） */
 export async function cancelTask(taskId: string): Promise<{ ok: boolean }> {
   return requestJson<{ ok: boolean }>(`/api/tasks/${encodeURIComponent(taskId)}/cancel`, {
     method: "POST",

@@ -456,6 +456,64 @@ describe("PromptNode 生成中占位卡", () => {
   });
 });
 
+describe("PromptNode 取消入口", () => {
+  function renderPrompt(data: Partial<ComponentProps<typeof PromptNode>["data"]>) {
+    const onCancel = vi.fn();
+    const props = nodeProps<typeof PromptNode>({
+      id: "prompt-1",
+      type: "prompt",
+      data: {
+        prompt: "product photo",
+        size: "1024x1024",
+        quality: "high",
+        outputDir: "output",
+        status: "idle",
+        ...data,
+      },
+      selected: false,
+      onUpdate: vi.fn(),
+      onRun: vi.fn(),
+      onCancel,
+      onDelete: vi.fn(),
+      sizeOptions: [{ value: "1024x1024", label: "1:1" }],
+      qualityOptions: [{ value: "high", label: "high" }],
+    });
+    render(<ReactFlowProvider><PromptNode {...props} /></ReactFlowProvider>);
+    return { onCancel };
+  }
+
+  it("排队中/生成中才出现「取消」，点击把节点 id 交给回调", () => {
+    const { onCancel } = renderPrompt({ status: "queued" });
+
+    const cancel = screen.getByRole("button", { name: "取消" });
+    // 取消按钮与运行按钮同排（运行态下运行按钮已禁用，取消是唯一能点的动作）
+    expect(screen.getByRole("button", { name: "排队中..." })).toHaveProperty("disabled", true);
+    fireEvent.click(cancel);
+
+    expect(onCancel).toHaveBeenCalledWith("prompt-1");
+  });
+
+  it("已请求取消：按钮变「取消中…」并禁用（防重复点）", () => {
+    const { onCancel } = renderPrompt({ status: "running", cancelRequested: true });
+
+    expect(screen.queryByRole("button", { name: "取消" })).toBeNull();
+    const pending = screen.getByRole("button", { name: "取消中…" });
+    expect(pending).toHaveProperty("disabled", true);
+
+    fireEvent.click(pending);
+    expect(onCancel).not.toHaveBeenCalled();
+  });
+
+  it("就绪 / 完成的卡片上没有取消按钮（没有可取消的任务）", () => {
+    for (const status of ["idle", "done", "failed"] as const) {
+      cleanup();
+      renderPrompt({ status });
+      expect(screen.queryByRole("button", { name: "取消" }), status).toBeNull();
+      expect(screen.queryByRole("button", { name: "取消中…" }), status).toBeNull();
+    }
+  });
+});
+
 describe("LOD abstract mode", () => {
   it("keeps the image thumbnail and double-click zoom but drops the action rail", () => {
     const { onZoom } = renderImageNode(vi.fn(), vi.fn(), true);

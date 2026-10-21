@@ -312,6 +312,20 @@ def main():
                 f"before={before} after={after} pos={pos}",
             )
 
+        # 1b. 取消入口按需出现（issue #33）：没有任务在跑时，就绪卡片上没有「取消」、工具栏也没有「取消全部」。
+        #     「排队/生成中出现 + 取消中禁用 + 终态清标记」由前端单测钉住——E2E 不触发生成链路
+        #     （见 AGENTS.md 活跃坑：要覆盖「生成→回流」必须先 mock core/api.py 的 generate_image）。
+        idle_prompt = page.locator(".react-flow__node-prompt").first
+        check(
+            "就绪卡片没有「取消」按钮",
+            idle_prompt.get_by_role("button", name="取消", exact=True).count() == 0,
+        )
+        check(
+            "没有任务在跑时工具栏不出现「取消全部」",
+            page.locator(".studio-toolbar").get_by_text("取消全部", exact=False).count()
+            == 0,
+        )
+
         # 2. 新建图片组：阶梯 +30，仍在中心附近
         page.get_by_role("button", name="新建图片组").click()
         page.wait_for_timeout(250)

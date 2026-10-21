@@ -304,6 +304,8 @@ export interface CanvasPromptNodeData {
   resultCount?: number | undefined;
   /** 失败原因（failed 时显示） */
   message?: string | undefined;
+  /** 已请求取消、还在等它落地（运行中的任务要等当前这张完成才停）：卡片按钮显示「取消中…」并禁用 */
+  cancelRequested?: boolean | undefined;
   [key: string]: unknown;
 }
 

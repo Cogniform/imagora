@@ -24,6 +24,8 @@ function runningPrompt(startedAtMs: number): WorkflowNode {
       startedAtMs,
       resultCount: 2,
       message: "temporary",
+      // 恢复时也必须剥掉：留 true 会让恢复出来的 idle 卡片先显示一次「取消中…」
+      cancelRequested: true,
     },
   } as WorkflowNode;
 }
@@ -38,6 +40,7 @@ describe("recovery snapshots", () => {
     expect(saved.type === "prompt" && saved.data.startedAtMs).toBeUndefined();
     expect(saved.type === "prompt" && saved.data.resultCount).toBeUndefined();
     expect(saved.type === "prompt" && saved.data.message).toBeUndefined();
+    expect(saved.type === "prompt" && saved.data.cancelRequested).toBeUndefined();
     expect(source.type === "prompt" && source.data.status).toBe("running");
   });
 

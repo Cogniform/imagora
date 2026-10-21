@@ -3,7 +3,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { checkBudget, submitGenerate, type HttpError } from "./api";
+import { cancelTask, checkBudget, fetchTask, submitGenerate, type HttpError } from "./api";
 import { useGenerationTask } from "./useGenerationTask";
 
 /** noUncheckedIndexedAccess 守卫：越界即失败，不把断言弱化为可选链 */
@@ -170,5 +170,89 @@ describe("useGenerationTask 超预算确认（409 → 确认 → 重提）", () 
 
     expect(confirmSpy).not.toHaveBeenCalled();
     expect(checkBudget).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * 回归测试（复核 D1）：点过取消之后，「取消中…」不能被旧快照冲掉。
+ *
+ * 背景：秒数推送（每秒）与起飞中的轮询拿的都是「点取消之前」那一份快照，
+ * 它们把 cancelRequested 写成 false 时，卡片会从「取消中…」退回可点的「取消」，
+ * 与「取消期间禁用防重复点」的约定相反。本机意图必须在终态之前一直压得住旧快照。
+ */
+describe("useGenerationTask 取消意图不被旧快照冲掉", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // 前面的用例用 mockRejectedValue 改过提交实现，clearAllMocks 不会还原它，这里显式复位
+    vi.mocked(submitGenerate).mockResolvedValue({ taskId: "task-1", status: "queued" } as never);
+    vi.mocked(cancelTask).mockResolvedValue({ ok: true });
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it("running 期间点取消：计时推送与后续轮询都保持 cancelRequested，终态才清", async () => {
+    // 服务端快照永远不带 cancelRequested（模拟「取件前 / 尚未认下取消」的旧状态）
+    vi.mocked(fetchTask).mockResolvedValue({
+      taskId: "task-1",
+      status: "running",
+      startedAt: Date.now(),
+    } as never);
+
+    const { result } = renderHook(() => useGenerationTask());
+    const seen: Array<{ status: string; cancelRequested: boolean | undefined }> = [];
+    act(() => {
+      result.current.subscribe((_taskId, view) =>
+        seen.push({ status: view.status, cancelRequested: view.cancelRequested }),
+      );
+    });
+
+    await act(async () => {
+      await result.current.submit(PARAMS);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000); // 第一轮轮询 → running
+    });
+    await act(async () => {
+      await result.current.cancel("task-1");
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000); // 计时推送 ×3 + 一轮轮询，全是旧快照
+    });
+
+    const firstCancel = seen.findIndex((view) => view.cancelRequested === true);
+    expect(firstCancel).toBeGreaterThanOrEqual(0);
+    // 从点取消那一刻起，所有 running 视图都必须带取消意图（一次回退都不许有）
+    expect(seen.slice(firstCancel).filter((v) => v.status === "running" && v.cancelRequested !== true))
+      .toEqual([]);
+
+    // 走到终态才清：清早了 = 永久禁用，清不掉 = 「取消中…」永不退出
+    vi.mocked(fetchTask).mockResolvedValue({ taskId: "task-1", status: "cancelled" } as never);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+    const last = indexed(seen, seen.length - 1);
+    expect(last.status).toBe("cancelled");
+    expect(last.cancelRequested).not.toBe(true);
+  });
+
+  it("任务已终态时点取消：不改写视图，也不留残留意图", async () => {
+    vi.mocked(fetchTask).mockResolvedValue({ taskId: "task-1", status: "done" } as never);
+    const { result } = renderHook(() => useGenerationTask());
+    await act(async () => {
+      await result.current.submit(PARAMS);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000); // → done（轮询停止）
+    });
+
+    await act(async () => {
+      await result.current.cancel("task-1");
+    });
+
+    expect(result.current.get("task-1")?.cancelRequested).not.toBe(true);
   });
 });

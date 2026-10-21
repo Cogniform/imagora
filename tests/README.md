@@ -51,7 +51,7 @@ cd frontend; npm test
 | [`test_main_process.py`](test_main_process.py) | 4 | 端口探测 / 祖先链回溯（Windows） |
 | [`test_main_cli.py`](test_main_cli.py) | 31 | CLI gen 子命令全链路（校验/输出解析/文生图+图生图+多参考/失败/--no-asset/比例档位）/ **`--n` 逐张请求（每次 `n=1`、各存各的账、部分失败保留已成功、默认单张行为不变）** / config 输出 |
 
-## 文件索引（前端 vitest，共 1030，位于 frontend/src/）
+## 文件索引（前端 vitest，共 1040，位于 frontend/src/）
 
 | 文件 | 用例 | 覆盖 |
 | --- | --- | --- |
@@ -67,7 +67,7 @@ cd frontend; npm test
 | [`canvasHistory.test.ts`](../frontend/src/canvasHistory.test.ts) | 5 | 撤销 / 恢复 / 新分支清空 |
 | [`canvasStyles.test.ts`](../frontend/src/canvasStyles.test.ts) | 4 | 动效 CSS 选择器约束 |
 | [`recovery.test.ts`](../frontend/src/recovery.test.ts) | 4 | 快照剥离动画类 / 运行期字段清除 |
-| [`useGenerationTask.test.ts`](../frontend/src/useGenerationTask.test.ts) | 6 | hook 稳定成员引用 + **超预算确认（409→确认→带 allowOverBudget 重提、取消则抛出、同实例只问一次、非 409 不触发确认）** |
+| [`useGenerationTask.test.ts`](../frontend/src/useGenerationTask.test.ts) | 8 | hook 稳定成员引用 + **超预算确认（409→确认→带 allowOverBudget 重提、取消则抛出、同实例只问一次、非 409 不触发确认）** |
 | [`useImageZoom.test.ts`](../frontend/src/useImageZoom.test.ts) | 4 | 单击开原图 / 双击放大时序（fake timers）/ 卸载清理 |
 | [`useImageEditorViewport.test.ts`](../frontend/src/useImageEditorViewport.test.ts) | 28 | 图片编辑器视口 hook：`fitImageToViewport` 缩放上限 1、`imageEditorContentSize` 保证居中可算、以指针为锚点的两段式缩放（先记锚点再 `useLayoutEffect` 反算 scrollLeft/scrollTop）、滚轮按 `passive:false` 注册且不冒泡、空格/中键拖拽判定、缩放边界（`canZoomIn`/`canZoomOut` 带 0.001 容差）、`ResizeObserver` 缺失守卫。**测试必须桩 `clientWidth`/`clientHeight`/`getBoundingClientRect`/`scrollLeft`**（jsdom 恒 0 且不可写），且 afterEach 先卸载实例再还原原型桩（否则多实例抢同一个 window 监听、假通过） |
 | [`logPath.test.ts`](../frontend/src/logPath.test.ts) | 6 | 日志路径词条解析（绝对/相对、正反斜杠、多路径、扩展名大小写） |
@@ -87,8 +87,8 @@ cd frontend; npm test
 | [`minimapColor.test.ts`](../frontend/src/minimapColor.test.ts) | 6 | 小地图节点取色（从 CanvasPage 抽出的模块级纯函数）：提示词用品牌色、图片/图片组两档中性灰、未知类型走更深的兜底色（旧工作流文件的 `node.type` 未必在当前三类里）、只做类型映射不读 DOM 与主题实值 |
 | [`rankByName.test.ts`](../frontend/src/rankByName.test.ts) | 10 | 模糊排序：query 是 name 的大小写不敏感**有序子序列**（`gi25` 命中 `gpt-image-2.5`）、边界命中加分优先、相邻匹配加分、跳跃扣分、空 query 返回**同一数组引用**、全角 U+2011 折叠后比对 |
 | [`optionGroups.test.ts`](../frontend/src/optionGroups.test.ts) | 6 | 分组归并：组间按首次出现顺序、组内保持源顺序、无分组的项归入空标题兜底组、全部无分组时返回单组、混合时兜底组排最后 |
-| [`CanvasNodes.test.tsx`](../frontend/src/components/CanvasNodes.test.tsx) | 30 | 节点操作栏（含**蒙版重绘**入口）/ 双击行为 / 组卡去重提示渲染 / **蒙版角标只在带蒙版时出现，点一下即清除** / **`ImageNode` 与 `GroupNode` 的 memo 浅比较**（父组件重渲染但 props 全等时函数体不执行，用 getter 计数取证） |
-| [`CanvasPage.baseline.test.tsx`](../frontend/src/components/CanvasPage.baseline.test.tsx) | 53 | **CanvasPage 拆分护栏**（唯一渲染整页的文件）：`@xyflow/react` 走自建桩、真实渲染 `nodeTypes[type]`，钉住「拆了就崩」的接线——`nodeTypes` 身份在节点坐标变化时不变（否则全节点重挂）、14 个 deps 的回调身份、`modalOpen` 十条来源全为 true（拖放互斥）、撤销/重做与 Ctrl+A/Ctrl+S、吸附接线（`applySnapToChanges` 只拦 position）、右键菜单四项、保存/加载、任务状态机的 status 流转、画布偏好读写、counts 统计随节点增删刷新 |
+| [`CanvasNodes.test.tsx`](../frontend/src/components/CanvasNodes.test.tsx) | 33 | 节点操作栏（含**蒙版重绘**入口）/ **提示词卡取消入口**（排队·生成中出现、`cancelRequested` 变「取消中…」并禁用、就绪/终态不出现）/ 双击行为 / 组卡去重提示渲染 / **蒙版角标只在带蒙版时出现，点一下即清除** / **`ImageNode` 与 `GroupNode` 的 memo 浅比较**（父组件重渲染但 props 全等时函数体不执行，用 getter 计数取证） |
+| [`CanvasPage.baseline.test.tsx`](../frontend/src/components/CanvasPage.baseline.test.tsx) | 58 | **CanvasPage 拆分护栏**（唯一渲染整页的文件）：`@xyflow/react` 走自建桩、真实渲染 `nodeTypes[type]`，钉住「拆了就崩」的接线——`nodeTypes` 身份在节点坐标变化时不变（否则全节点重挂）、14 个 deps 的回调身份、`modalOpen` 十条来源全为 true（拖放互斥）、撤销/重做与 Ctrl+A/Ctrl+S、吸附接线（`applySnapToChanges` 只拦 position）、右键菜单四项、保存/加载、任务状态机的 status 流转、**取消入口（issue #33）**（单卡取消→不立刻复位 / 终态清标记 / 视图说没在取消就退回可点（本机意图由 hook 合成）/ 工具栏「取消全部 (n)」只取消在跑任务）、画布偏好读写、counts 统计随节点增删刷新 |
 | [`Field.test.tsx`](../frontend/src/components/Field.test.tsx) | 8 | 字段壳：label 与控件经 id 关联、`hint` 与 `error` **共用同一个消息槽位**（invalid 时 error 顶掉 hint、任何时刻至多一行）、`aria-describedby` 无内容时不写空串、`aria-invalid` 条件展开、`action` 插槽渲染 |
 | [`GenerationPending.test.tsx`](../frontend/src/components/GenerationPending.test.tsx) | 7 | 生成中占位卡：`role="status"` + `aria-live` 语义、受控 `elapsed` 优先于自走表、进度条只改 `transform: scaleX()`（不给 width 做动画）、文案随秒数轮播 |
 | [`ImageCropDialog.test.tsx`](../frontend/src/components/ImageCropDialog.test.tsx) | 7 | 裁剪对话框：比例预设按钮（`aria-pressed`）、八向手柄拖拽的位移换算（先除 stage 宽高再交给 `resizeCrop`）、遮罩用 `boxShadow` spread 覆盖整块视口、确认回传 dataUrl、取消关闭。测试用 `vi.mock("../imageOps", …)` 部分替身（`vi.importActual` 展开真身、只换 `readImageSize` / `cropDataUrl` 两个 canvas I/O 函数），几何纯函数全走真实实现 |
@@ -131,7 +131,7 @@ cd frontend; npm test
 - 改 `core/api.py` → `test_core_api.py` + `test_main_cli.py`
 - 改 `server.py` 路由 → 对应 `test_server_*.py` + 前端 `types.ts`/`api.ts`
 - 改前端纯函数 → 对应 `*.test.ts`（同目录同名）
-- 改前端组件 → 组件单测 + E2E（`../frontend/e2e/verify_canvas.py` 103 断言；改来源/配置相关再跑 `verify_provider.py` 38 断言）
+- 改前端组件 → 组件单测 + E2E（`../frontend/e2e/verify_canvas.py` 105 断言；改来源/配置相关再跑 `verify_provider.py` 38 断言）
 - **增/删用例后更新 AGENTS「当前仪表盘」数字**
 
 ## CI 要求

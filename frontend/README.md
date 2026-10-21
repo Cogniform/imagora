@@ -8,7 +8,7 @@ React 19 + TypeScript + Vite + Tailwind v4 + React Flow（`@xyflow/react`）。�
 npm install
 npm run dev        # 开发模式（热更新；需后端已启动，见下）
 npm run build      # tsc --noEmit + vite build → dist/（git 忽略，由后端服务托管）
-npm test           # vitest run（1030 用例）
+npm test           # vitest run（1040 用例）
 npm run lint       # eslint
 npx tsc --noEmit   # 类型检查
 ```
@@ -19,7 +19,7 @@ npx tsc --noEmit   # 类型检查
 .\.venv\Scripts\python.exe -m main ui --no-browser --port 7860
 ```
 
-E2E（画布交互回归，真实浏览器；103 断言）：
+E2E（画布交互回归，真实浏览器；105 断言）：
 
 ```powershell
 # 前置：7860 服务已在跑 + playwright 已装
@@ -52,9 +52,13 @@ $env:IMAGORA_APP_ROOT = $h
 & "$repo\.venv\Scripts\python.exe" -m main ui --no-browser --port 7861
 # 3) 另开终端把 E2E 指过去
 & "$repo\.venv\Scripts\python.exe" "$repo\frontend\e2e\verify_canvas.py" --base http://127.0.0.1:7861
+# 来源/配置弹窗那条要额外带 --app-root：它断言的是隔离目录里的 providers.local.json
+& "$repo\.venv\Scripts\python.exe" "$repo\frontend\e2e\verify_provider.py" --base http://127.0.0.1:7861 --app-root $h
 ```
 
-只复验几条：`--only 拖拽`（按断言名子串过滤；一条都没匹配时退出码 1，避免假绿）。`--base` 也可以由 `IMAGORA_E2E_BASE` 环境变量提供，命令行优先。
+只复验几条：`--only 拖拽`（按断言名子串过滤；一条都没匹配时退出码 1，避免假绿）。`--base` 也可以由 `IMAGORA_E2E_BASE` 环境变量提供，命令行优先。两个脚本都吃这两个开关。
+
+`verify_provider.py` 还多一个 `--app-root`（也可用 `IMAGORA_APP_ROOT`，与起服务时那个变量同名）：它要读**服务写下的**那份 `providers.local.json`，默认按仓库根找；打隔离实例时漏了它就会去断言仓库里那份真实来源文件——第 4 步假红、第 7 步假绿。
 
 写新的画布断言时注意**视口是被测状态**：画布开着 `onlyRenderVisibleElements`，`.react-flow__node` 只含视口内的节点，而产物落地会主动把视野带过去（见 `.agents/notes/2026-10-21-canvas-result-reveal.md`）。所以「数节点」「拖节点」「点节点里的按钮」之前，用例要先用脚本里的 `set_zoom` / `frame_node` 自己把视口摆正，别假设上一步没挪视野；真按鼠标前用 `node_hit` 确认那个点确实点得到目标节点。
 
@@ -143,7 +147,7 @@ $env:IMAGORA_APP_ROOT = $h
 - 注意：格式规范见 [../docs/README.md](../docs/README.md)；缺漏进 issues 标红，绝不静默猜测。**铺排必须按卡片真实尺寸算**（`CARD_W = 380` / `CARD_H = 326`，列距 420、行距 366、每行 3 张）：旧实现整批共用 `origin + (i % 6) * 30` 的 30px 栅格，而卡片宽 380，一次导入 8 张会完全叠成一张
 
 ### [recovery.ts](src/recovery.ts)
-- 职责：恢复快照归一化（`buildRecoverySnapshot`，剥离动画类/运行期字段）
+- 职责：恢复快照归一化（`buildRecoverySnapshot`，剥离动画类与运行期字段 `startedAtMs` / `resultCount` / `message` / `cancelRequested`，并把 status 折回 `idle`）
 - 被谁依赖：useCanvasRecovery.ts
 
 ### [format.ts](src/format.ts)
@@ -340,9 +344,9 @@ $env:IMAGORA_APP_ROOT = $h
 
 ### 组件（components/；改后跑 `npm test` + E2E）
 
-- [`CanvasPage.tsx`](src/components/CanvasPage.tsx) — 无限画布主页面（React Flow 集成、选中操作栏、操作帮助弹窗、历史面板入口、**小地图显隐** + **缩放滑杆**（塞在左下角 `<Controls>` 按钮栈里，偏好见 [minimapVisible.ts](src/minimapVisible.ts)）+ **吸附开关** + **聚焦控件**（[canvasGeometry.ts](src/canvasGeometry.ts) 的 `focusViewportForNode`，让选中内容最多占视口 60%）；拖拽时经 [snapDrag.ts](src/snapDrag.ts) 吸到邻居边缘，对齐线由 [SnapGuides.tsx](src/components/SnapGuides.tsx) 单独订阅 [snapGuidesStore.ts](src/snapGuidesStore.ts) 画；**连线悬停高亮 / 选中降权**（[edgeStyle.ts](src/edgeStyle.ts)，选中一条线后其余连线淡出，避免满屏线里找不到刚点的那条）+ 选中连线后 `Delete` / `Backspace` 删除；**节点右键菜单**（[NodeContextMenu.tsx](src/components/NodeContextMenu.tsx)，动作与定位由 [contextMenu.ts](src/contextMenu.ts) 给出）；**蒙版局部重绘**入口）
+- [`CanvasPage.tsx`](src/components/CanvasPage.tsx) — 无限画布主页面（React Flow 集成、选中操作栏、操作帮助弹窗、历史面板入口、**取消入口**（工具栏「取消全部 (n)」只在有任务在跑时出现，单卡取消按钮在 [CanvasNodes.tsx](src/components/CanvasNodes.tsx)；取消是逻辑取消——排队出队后不再发上游、生成中跑完当前张才作废（产物仍落盘并计费，只是不派回画布），判定口径是本机意图 OR 服务端快照，见 [ARCHITECTURE.md](../docs/ARCHITECTURE.md) 5.4）+ **小地图显隐** + **缩放滑杆**（塞在左下角 `<Controls>` 按钮栈里，偏好见 [minimapVisible.ts](src/minimapVisible.ts)）+ **吸附开关** + **聚焦控件**（[canvasGeometry.ts](src/canvasGeometry.ts) 的 `focusViewportForNode`，让选中内容最多占视口 60%）；拖拽时经 [snapDrag.ts](src/snapDrag.ts) 吸到邻居边缘，对齐线由 [SnapGuides.tsx](src/components/SnapGuides.tsx) 单独订阅 [snapGuidesStore.ts](src/snapGuidesStore.ts) 画；**连线悬停高亮 / 选中降权**（[edgeStyle.ts](src/edgeStyle.ts)，选中一条线后其余连线淡出，避免满屏线里找不到刚点的那条）+ 选中连线后 `Delete` / `Backspace` 删除；**节点右键菜单**（[NodeContextMenu.tsx](src/components/NodeContextMenu.tsx)，动作与定位由 [contextMenu.ts](src/contextMenu.ts) 给出）；**蒙版局部重绘**入口）
 - [`SnapGuides.tsx`](src/components/SnapGuides.tsx) — 拖拽对齐线（`className="snap-guide"` + `data-axis`，E2E 依赖这套 DOM 契约）。**必须画在 React Flow 的 `ViewportPortal` 里**才随平移缩放跟随；`memo` + `useSyncExternalStore` 让它只在 store 真变化时重画，拖拽每帧不再整页重渲染
-- [`CanvasNodes.tsx`](src/components/CanvasNodes.tsx) — 三类节点（图片/图片组/提示词卡）+ `ActionButton`（nodrag 胶囊按钮）；`StatusLight` 状态灯 running 恒定「生成中」，`ElapsedText` 秒数文字以 `startedAtMs` 自计时（防逐秒重渲染，见 ARCHITECTURE 5.3）。图片节点的悬停操作栏七个按钮：预览大图 / **裁剪图片** / **放大图片** / **切分图片** / **蒙版重绘** / 替换图片 / 删除图片；图片带蒙版时左侧出现可点击的「清除蒙版」角标（蒙版会跟着图走、对后续每次生成都生效，用户会忘掉自己设过，角标本身就是撤销入口）。**操作栏是 `opacity-0 pointer-events-none`，不是 `invisible`** —— `visibility:hidden` 会把按钮从无障碍树摘掉（E2E 的 `get_by_role` 与读屏器都查不到）；用 `pointer-events` 拦命中测试才既不挡画布又能被查到。悬停区用 `pl-2` 内边距而不是 `ml-2` 外边距，否则鼠标从节点移向按钮途中会掉出 `.group` 而闪断。图片组节点用**叠卡**（`Math.min(n-1, 3)` 张错位背景卡）表达「这是一批」，纯 CSS 零状态。尺寸下拉经 `Select` 的 `renderOption` 挂 [AspectIcon.tsx](src/components/AspectIcon.tsx) 比例图标，并开 `searchable` + `allowCustom`（清单只有固定几档，而上游常认清单外的尺寸，如 `1280x720`；选项清单用 `mergeCustomOption` 把当前值合进去，否则选过自定义值后触发器会退化成「请选择」）
+- [`CanvasNodes.tsx`](src/components/CanvasNodes.tsx) — 三类节点（图片/图片组/提示词卡）+ `ActionButton`（nodrag 胶囊按钮）；`StatusLight` 状态灯 running 恒定「生成中」，`ElapsedText` 秒数文字以 `startedAtMs` 自计时（防逐秒重渲染，见 ARCHITECTURE 5.3）。图片节点的悬停操作栏七个按钮：预览大图 / **裁剪图片** / **放大图片** / **切分图片** / **蒙版重绘** / 替换图片 / 删除图片；图片带蒙版时左侧出现可点击的「清除蒙版」角标（蒙版会跟着图走、对后续每次生成都生效，用户会忘掉自己设过，角标本身就是撤销入口）。**操作栏是 `opacity-0 pointer-events-none`，不是 `invisible`** —— `visibility:hidden` 会把按钮从无障碍树摘掉（E2E 的 `get_by_role` 与读屏器都查不到）；用 `pointer-events` 拦命中测试才既不挡画布又能被查到。悬停区用 `pl-2` 内边距而不是 `ml-2` 外边距，否则鼠标从节点移向按钮途中会掉出 `.group` 而闪断。图片组节点用**叠卡**（`Math.min(n-1, 3)` 张错位背景卡）表达「这是一批」，纯 CSS 零状态。提示词卡底部在任务排队/生成中出现「取消」按钮（`cancelRequested` 为真时变「取消中…」并禁用，防重复点；终态到达才复位——后端是「排队的不发上游、生成中的跑完当前那张才作废，产物仍落盘并计费」，点完立刻复位等于撒谎）。尺寸下拉经 `Select` 的 `renderOption` 挂 [AspectIcon.tsx](src/components/AspectIcon.tsx) 比例图标，并开 `searchable` + `allowCustom`（清单只有固定几档，而上游常认清单外的尺寸，如 `1280x720`；选项清单用 `mergeCustomOption` 把当前值合进去，否则选过自定义值后触发器会退化成「请选择」）
 - [`AspectIcon.tsx`](src/components/AspectIcon.tsx) — 按比例画一个空心矩形（图形代替文字表达「1:1 / 16:9」），几何算 [aspectIcon.ts](src/aspectIcon.ts)。颜色只用 `currentColor`（写死 hex 会被 `surfaceAudit.test.ts` 拦下）
 - [`ModelIcon.tsx`](src/components/ModelIcon.tsx) — 模型品牌小徽标（OpenAI / Gemini / 通义…），品牌识别在 [modelIcon.ts](src/modelIcon.ts)。**未知品牌也渲染**（显示 `·`）而不是返回 null —— 列表里突然少一个图标会显得错位。底色用 `color-mix(in srgb, currentColor 12%, transparent)`，不写死颜色
 - [`ImageSplitDialog.tsx`](src/components/ImageSplitDialog.tsx) — 切分对话框：五个预设（2×2 / 2×3 / 3×2 / 3×3 / 4×4）+ 行列手填（即时夹到 1~8）、网格预览（在图片上铺 `grid` 格子而不是画 canvas）、文件名预览、1×1 时禁用确认（等于不切）。几何与导出在 [imageSplit.ts](src/imageSplit.ts)
@@ -370,8 +374,8 @@ $env:IMAGORA_APP_ROOT = $h
 - [`App.tsx`](src/App.tsx) — 根组件：顶栏（品牌区 3D `brand-swing` 系、`chip` 角标、`corner-note` 镜像小字）、经典/画布模式切换、**外观弹窗**（主体色 / 我的壁纸 / 画布边界：壁纸图存 IndexedDB 后铺成整页背景，`html[data-wallpaper]` / `html[data-canvas-bounds]` 属性驱动「底色让位」与「画布边界开关」）、**生图 API 配置弹窗**（选择器：选来源 + 选模型两件事，值 + 来源由 `/api/config` 的 `profileView` 下发，改地址/密钥请改文件）与 **添加第三方供应商弹窗**（`ProviderModal`，顶栏插头图标；建新来源写 `providers.local.json`）。品牌区参数（`BRAND_LAYERS`/`TEXT_Z_STEP`/`LOGO_Z_STEP`/`LOGO_FACE*`）在 App.tsx 顶部——**标题与 logo 挤出深度分档**（logo 线条细，同深度会糊成红块）
 - [`main.tsx`](src/main.tsx) — 入口（挂载 + accent 主题注入）
 - [`index.css`](src/index.css) — **唯一样式层**（Tailwind v4）：`:root` 设计 token + `@layer components` 组件类 + 动效层；导出的 token 与公共类清单见本文「样式体系」节，组件只引用类名、不写死尺寸与颜色
-- [`verify_canvas.py`](e2e/verify_canvas.py) — 画布交互 E2E（103 断言，Playwright headless）
-- [`verify_provider.py`](e2e/verify_provider.py) — 「添加第三方供应商」E2E（38 断言）：真实点顶栏插头 → 填表 → 真实落盘 `providers.local.json` → 断言文件内容（8 档尺寸单价全 0 / 7 个比例 / 模型目录 / **不含密钥** / 地址带 `/v1` 时路径不重复）→ 新来源出现在配置弹窗下拉。探测那步打一个不存在的域名（预期 400，不花外部配额）；Provider ID 用随机值，跑完不留残留
+- [`verify_canvas.py`](e2e/verify_canvas.py) — 画布交互 E2E（105 断言，Playwright headless）
+- [`verify_provider.py`](e2e/verify_provider.py) — 「添加第三方供应商」E2E（38 断言）：真实点顶栏插头 → 填表 → 真实落盘 `providers.local.json` → 断言文件内容（8 档尺寸单价全 0 / 7 个比例 / 模型目录 / **不含密钥** / 地址带 `/v1` 时路径不重复）→ 新来源出现在配置弹窗下拉。探测那步打一个不存在的域名（预期 400，不花外部配额）；Provider ID 用随机值，跑完不留残留。开关：`--base` / `--app-root`（要跟服务进程的应用根一致）/ `--only`
 
 ## 上下游依赖
 

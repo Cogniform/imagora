@@ -48,6 +48,8 @@ const h = vi.hoisted(() => {
     taskSubmit: vi.fn(async () => "task-1"),
     taskCancel: vi.fn(async () => undefined),
     taskSubscriber: null as null | ((taskId: string, view: any) => void),
+    /** 在跑的任务列表：mock 的 useGenerationTask 直接读它（工具栏「取消全部」的显隐与计数靠这个） */
+    tasks: [] as { taskId: string; status: string }[],
     clipboardWrite: vi.fn(async () => undefined),
   };
 });
@@ -90,7 +92,7 @@ vi.mock("../useGenerationTask", () => ({
       };
     },
     get: () => undefined,
-    tasks: [],
+    tasks: h.tasks,
   }),
 }));
 
@@ -196,6 +198,16 @@ vi.mock("./CanvasNodes", () => {
         <button type="button" aria-label={`运行-${id}`} onClick={(e) => { e.stopPropagation(); props.onRun(id); }}>
           运行
         </button>
+        {(data.status === "queued" || data.status === "running") && (
+          <button
+            type="button"
+            aria-label={`取消-${id}`}
+            disabled={data.cancelRequested === true}
+            onClick={(e) => { e.stopPropagation(); props.onCancel(id); }}
+          >
+            {data.cancelRequested === true ? "取消中…" : "取消"}
+          </button>
+        )}
         <button type="button" aria-label={`删除节点-${id}`} onClick={(e) => { e.stopPropagation(); props.onDelete(id); }}>
           删除
         </button>
@@ -640,6 +652,7 @@ beforeEach(() => {
   h.mounts.prompt = 0;
   h.mounts.group = 0;
   h.taskSubscriber = null;
+  h.tasks = [];
 
   h.zoomTo.mockReset();
   h.fitView.mockReset().mockResolvedValue(true);
@@ -1333,6 +1346,82 @@ describe("任务状态机", () => {
 
     expect(h.taskCancel).toHaveBeenCalledWith("task-1");
     expect(screen.queryByTestId(`prompt-node-${id}`)).toBeNull();
+  });
+});
+
+describe("取消入口（issue #33）", () => {
+  /** 建卡 → 填词 → 运行，直到提交完成（taskId 已登记，可以取消了） */
+  async function runCard() {
+    renderPage();
+    createPromptCard();
+    const id = indexed(promptNodeIds(), 0);
+    fireEvent.change(screen.getByLabelText(`提示词-${id}`), { target: { value: "a cat" } });
+    fireEvent.click(screen.getByRole("button", { name: `运行-${id}` }));
+    await waitFor(() => expect(h.taskSubmit).toHaveBeenCalled());
+    // 等提交的 promise 链落地：taskId 是在 await 之后才登记进 nodeTaskRef 的
+    await act(async () => {});
+    return id;
+  }
+
+  it("单卡取消：请求后端并置「取消中」，不立刻复位成就绪", async () => {
+    const id = await runCard();
+
+    fireEvent.click(screen.getByRole("button", { name: `取消-${id}` }));
+
+    expect(h.taskCancel).toHaveBeenCalledWith("task-1");
+    expect(screen.getByText(`节点 ${id}：已请求取消（生成中的会在当前这张完成后停下）`)).toBeTruthy();
+    // 关键：还在跑，状态不能假装已经停下（后端是「跑完当前张再丢弃结果」）
+    expect(screen.getByTestId(`status-${id}`).getAttribute("data-status")).toBe("queued");
+    expect((screen.getByRole("button", { name: `取消-${id}` }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("终态 cancelled 到达：取消中标记清掉，卡片回到就绪", async () => {
+    const id = await runCard();
+    fireEvent.click(screen.getByRole("button", { name: `取消-${id}` }));
+
+    act(() => {
+      h.taskSubscriber?.("task-1", { taskId: "task-1", status: "cancelled", results: [], elapsed: 1 });
+    });
+
+    expect(screen.getByTestId(`status-${id}`).getAttribute("data-status")).toBe("idle");
+    // 取消了就不该再有取消按钮（就绪卡片上没有可取消的东西）
+    expect(screen.queryByRole("button", { name: `取消-${id}` })).toBeNull();
+  });
+
+  it("服务端不认取消（任务已过期 404）：按钮要能回到可点，不能卡在「取消中」", async () => {
+    const id = await runCard();
+    fireEvent.click(screen.getByRole("button", { name: `取消-${id}` }));
+
+    // 服务端快照里 cancelRequested 仍是 false / 缺失 → 以快照为准回退
+    act(() => {
+      h.taskSubscriber?.("task-1", { taskId: "task-1", status: "running", startedAt: 1, results: [], elapsed: 2 });
+    });
+
+    const cancel = screen.getByRole("button", { name: `取消-${id}` }) as HTMLButtonElement;
+    expect(cancel.disabled).toBe(false);
+  });
+
+  it("工具栏「取消全部」：只在有任务在跑时出现，点击取消每个在跑任务", async () => {
+    h.tasks = [
+      { taskId: "task-1", status: "running" },
+      { taskId: "task-2", status: "queued" },
+      { taskId: "task-3", status: "done" },
+    ];
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "取消全部 (2)" }));
+
+    // 只有 queued/running 算「在跑」，done 不重复取消
+    expect(h.taskCancel).toHaveBeenCalledTimes(2);
+    expect(h.taskCancel).toHaveBeenCalledWith("task-1");
+    expect(h.taskCancel).toHaveBeenCalledWith("task-2");
+    expect(screen.getByText("已请求取消 2 个任务（生成中的会在当前这张完成后停下）")).toBeTruthy();
+  });
+
+  it("没有任务在跑时不出现「取消全部」（避免一个点了没反应的按钮）", () => {
+    renderPage();
+
+    expect(screen.queryByRole("button", { name: /取消全部/ })).toBeNull();
   });
 });
 

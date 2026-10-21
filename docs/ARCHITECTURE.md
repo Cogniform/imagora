@@ -47,7 +47,7 @@ Imagora 是本地单机工具，运行时分三层，方向单一：
 | `core/` | 后端核心逻辑（见 2.2），全部无 HTTP 依赖的纯业务模块；**双件**：规则层 core/AGENTS.md + 文件索引 core/README.md |
 | `frontend/` | React SPA（见 2.3）；**双件**：frontend/AGENTS.md（规则）+ frontend/README.md（索引） |
 | `scripts/` | 独立运维脚本：`migrate.py`（存储一步到最新，默认只报告、`--apply` 才落盘备份校验）；**双件**：scripts/AGENTS.md + scripts/README.md |
-| `tests/` | 后端 pytest（467 用例）+ 前端 vitest（1030 用例），全部不调上游；**双件**：tests/AGENTS.md + tests/README.md（逐文件覆盖） |
+| `tests/` | 后端 pytest（467 用例）+ 前端 vitest（1040 用例），全部不调上游；**双件**：tests/AGENTS.md + tests/README.md（逐文件覆盖） |
 | `docs/` | 设计圣经 `ARCHITECTURE.md`（本文档）+ `prompt-import-format.md` / `ecom-prompt-import-format.md`（格式规范）；**双件**：docs/AGENTS.md + docs/README.md |
 | `assets/` | **文档配图**（只服务 markdown 渲染，不是应用资源）：`screenshots/` 放 README「界面一览」的界面截图；**双件**：assets/AGENTS.md + assets/README.md |
 | `_ui-audit/` | 开发期 UI 审计图（本机产物，git 忽略）：由 [scripts/capture.py](../scripts/capture.py) 生成，与门面配图 `assets/screenshots/` 不是一回事 |
@@ -126,7 +126,7 @@ Imagora 是本地单机工具，运行时分三层，方向单一：
 
 生成走异步管线，`/api/generate` **提交即返回**：请求线程只做校验与 multipart 兜底文件落盘（临时文件路径存入任务对象，执行线程只读路径，跨线程安全），真正生成在 `ThreadPoolExecutor`（MAX_CONCURRENCY=10）中执行。
 
-状态机：`queued → running → done/failed`，任意状态可取消 → `cancelled`（运行中无法中断上游请求，跑完当前张丢弃结果）。终态保留 10 分钟（TTL 惰性清理），超时查询返回 404，由前端兜底标失败。
+状态机：`queued → running → done/failed`，任意状态可取消 → `cancelled`（排队中的直接出队、永不发上游请求；运行中无法中断上游请求，跑完当前张才作废，产物仍落盘并照常计费，只是不派回画布）。终态保留 10 分钟（TTL 惰性清理），超时查询返回 404，由前端兜底标失败。
 
 约束：任务表纯内存（重启丢失，已提交任务仍会在后台完成但不再回流界面）；必须单 worker 启动。
 
@@ -358,7 +358,7 @@ React Flow v12（`@xyflow/react`）受控模式：`nodes` / `edges` 状态由 `C
 | POST | `/api/generate` | multipart：prompt/size/quality/output_dir/win/allow_over_budget + images 或 ref_paths + `mask`（**data URL 字符串**，非文件字段；透明像素 = 要重绘区域，不透明 = 保持原样，有 mask 时强制走 edits 接口且必须有底图）（**不接收任何凭据**：配置在文件里，服务端自己读） | { taskId, status }（提交即返回；**预算闸门**：超出 `singleRunLimit`/`dailyLimit` 且 `allow_over_budget≠true` 时 409 + `detail{reason, estimate, spentToday, settings}`） |
 | POST | `/api/generate/batch` | { items[{prompt,size,quality,refPaths[]}], outputDir, win, allowOverBudget } | { submitted[{taskId,prompt,size,cost}], skipped[{index,reason}], estimate, budget }（CLI 批量用：一次提交多条，单条非法只跳过该条；全部被跳过或超预算未确认则不提交任何任务） |
 | GET | `/api/tasks/{task_id}` | 无 | 快照（queued → running → done/failed，可 cancelled；终态保留 10 分钟，超时 404） |
-| POST | `/api/tasks/{task_id}/cancel` | 无 | { ok }（排队立即取消；运行中跑完当前张丢弃结果） |
+| POST | `/api/tasks/{task_id}/cancel` | 无 | { ok }（排队出队、不再发上游；运行中跑完当前张作废，产物仍落盘计费） |
 | GET | `/api/history/stats` | ?days=（默认 14） | 成本看板：total/ok/error/successRate/cost/seconds/avgSeconds/todayCost + byDay[]/bySize[]/byMode[] + budget（**口径与 /api/history 不同**：这里取账本**原始行**，不去重不截断——每个成功行都真实花过钱，聚合会少算费用） |
 | GET | `/api/budget` | 无 | { dailyLimit, singleRunLimit, spentToday, remaining }（本机预算，`output/.budget.json`，0 = 不限；git 忽略，不进公开仓库） |
 | POST | `/api/budget` | { dailyLimit, singleRunLimit } | { ok, dailyLimit, singleRunLimit }（清洗后原子落盘；负数按 0） |
@@ -399,13 +399,14 @@ React Flow v12（`@xyflow/react`）受控模式：`nodes` / `edges` 状态由 `C
 ### 8.1 任务与并发
 
 - **提交即返回**：`/api/generate` 请求线程只做校验与兜底文件落盘，生成在线程池，事件循环永不阻塞（新开窗口/加载页面不受影响）。
-- **取消是逻辑取消**：running 无法中断上游请求，跑完当前张丢弃结果。
+- **取消是逻辑取消**：排队中的出队后永不发上游请求（不花钱）；running 无法中断上游请求，跑完当前张才作废——**产物仍落盘、仍计费**，只是不派回画布（界面明说这一点，不假装已停）。
 - **文件名并发唯一**：全局序号 + 时间戳防同秒碰撞；日志写 JSONL 用线程锁串行；tkinter 选择器与 explorer 置前用 `_UI_LOCK` 串行化；窗口计数器用锁保护自增。
 - **生成超时**：请求 300 秒（图生图 + 2K 可能 1-2 分钟）。
 
 ### 8.2 画布数据模型
 
 - **独立任务模型**：连线 = 参考图输入（非执行顺序），提示词节点间无依赖，「全部运行」= 全部提交到服务端并发队列。
+- **取消入口**（画布侧，任务侧语义见 5.3 任务驱动模型与后端任务状态机）：单卡「取消」按钮（仅排队/生成中出现）+ 工具栏「取消全部 (n)」（仅在跑任务 > 0 时出现，替代原先无处可点的 `cancelAllTasks`）。点完不立刻复位——先置节点 `cancelRequested` 显示「取消中…」并禁用，等终态快照到达才清（后面排着长队时要等 worker 取到它，状态才翻成已取消）。判定口径是**本机意图 OR 服务端快照**：`useGenerationTask` 记下「本窗口点过取消」（`requestedCancelRef`），终态之前一直压住「点取消那一刻之前」的旧快照——否则每秒的秒数推送会把「取消中…」冲回可点，用户能重复点；而服务端始终没认下时（404/过期）查询失败会兜成 failed 并清掉意图，按钮不会永久禁用。「运行」按钮排队中/生成中本就禁用，所以「取消」在忙碌期是卡片上唯一可点的动作。取消落地后卡片回 `idle`（`CanvasPromptNodeData.status` 不新增 `cancelled`，避免动持久化语义），只在画布日志留一行（服务端不记取消日志）。
 - **自动整理=布局管道**（`layout.ts`，纯函数、边不变）：① 裁剪（选中节点 + 未选中的「只读锚点」固定参与对齐、不移动）→ ② 最长路径分层（环回边不计层；孤立图/组 0、提示词 1）→ ③ pass A 浅→深按前驱质心排序（确定群顺序：左卡片组/右卡片组）→ ④ pass B **自底向上定位**（深→浅，按后继质心：图片组站到其卡片簇中央上方、图片站到组中央上方、共享图站到多组中央；叶子层保持不动）→ ⑤ 块化放置（同源提示词成块、块内标题序、块间标准间距）。**重复整理严格幂等**：无锚点选区以「输入选中块中心」为锚整体对齐，连续点击不漂移。直连卡与组连卡共用「参考锚点 = 直接前驱」抽象（一跳/两跳，无特例）。多层链（提示词→结果图→组→提示词…）由分层 + 自底向上自然延伸，结果图被复用时按多个后继质心对称分叉。
 - **派生路径不落盘**：图片节点只持久化 registryId，url/absPath 加载时实时重建——项目目录改名/移动后旧存档自愈；URL 构建单一入口 `registry.image_url()`（canvas shim re-export 同名），注册表解析单一入口 `resolve_asset(id)`。
 - **统一存储模型**：画布与经典表单走后端同一套存储——`kind`（canvas/result/ref）标记图片来源；一次生成即一份提交图快照（`output/submissions/`，图片组→提示词→结果）；账本（`generation.jsonl`）每行带 `submissionId/inputAssetIds/outputAssetIds` 联动。「导入画布」= 按 registryId 整图重建（前端 `mergeSubmissionGraph` 去重复用），不产生重复节点。
@@ -520,13 +521,13 @@ React Flow v12（`@xyflow/react`）受控模式：`nodes` / `edges` 状态由 `C
 ### 10.1 单元测试
 
 - 后端 pytest：**467 用例**（Windows 含 5 个专属测试，CI 必须 `windows-latest`；默认 tmp 路径的 WinError 5 历史坑已随目录重建恢复，见 AGENTS「活跃坑」）
-- 前端 vitest：**1030 用例**；`tsc --noEmit` + `vite build` 成功；`npm run lint` / `uv run ruff check .` 均零告警
+- 前端 vitest：**1040 用例**；`tsc --noEmit` + `vite build` 成功；`npm run lint` / `uv run ruff check .` 均零告警
 - 文档完整性：`python scripts/check_docs.py`（相对链接可解析 + AGENTS/tests-README/ARCHITECTURE/frontend-README 的测试计数与源码一致；改任何文档后必跑，见 [scripts/README.md](../scripts/README.md)）
 - **逐文件用例 / 覆盖范围 / 变更影响路由（完整表）见 [tests/README.md](../tests/README.md) 文件索引**
 
 ### 10.2 端到端（E2E）
 
-`frontend/e2e/verify_canvas.py`（Playwright，103 断言，自包含测试图，需服务已启动）：新建/上传居中（精确到像素）、视口不突变、右键菜单屏蔽、预览打开与点击空白关闭（含放大态）、文件拖拽添加（落点示意跟随光标与数量 / 落点精确 / 多图批次排开 / 非图片过滤）、工具栏按钮拖出新建 + **拖到画布外松开取消（示意切「松开取消」+ 红色 X 图标，拖回画布仍新建）**、缩放滑杆与视口双向同步（拖滑杆改视口 / 滚轮缩放回灌读数）、小地图开关（默认关 → 开 → 关，选择落 localStorage）、图片节点裁剪与放大（入口按钮 → 对话框 → 确认后派生新节点且原图保留，裁剪产物还能继续放大）、**切分 3×2 一次产 6 张**、**拖拽吸附**（对齐时出现 `.snap-guide`、关掉开关即消失）、**聚焦所选节点**（视口缩放变化且不失真）、**蒙版局部重绘**（涂一笔 → 确认 → 出现「蒙版」角标 → 点击清除）、**提示词 `@` 引用不存在的图会在运行前被拦下**（不发请求不花钱）、**节点右键菜单**、**连线三态**（idle 1.5px → hover 2.5px → 选中 → Delete 删除）、**尺寸下拉手填清单外尺寸**。改画布交互后必须跑通它再加 E2E 断言。运行前置条件与命令见 frontend/README.md。
+`frontend/e2e/verify_canvas.py`（Playwright，105 断言，自包含测试图，需服务已启动）：新建/上传居中（精确到像素）、视口不突变、右键菜单屏蔽、预览打开与点击空白关闭（含放大态）、文件拖拽添加（落点示意跟随光标与数量 / 落点精确 / 多图批次排开 / 非图片过滤）、工具栏按钮拖出新建 + **拖到画布外松开取消（示意切「松开取消」+ 红色 X 图标，拖回画布仍新建）**、缩放滑杆与视口双向同步（拖滑杆改视口 / 滚轮缩放回灌读数）、小地图开关（默认关 → 开 → 关，选择落 localStorage）、图片节点裁剪与放大（入口按钮 → 对话框 → 确认后派生新节点且原图保留，裁剪产物还能继续放大）、**切分 3×2 一次产 6 张**、**拖拽吸附**（对齐时出现 `.snap-guide`、关掉开关即消失）、**聚焦所选节点**（视口缩放变化且不失真）、**蒙版局部重绘**（涂一笔 → 确认 → 出现「蒙版」角标 → 点击清除）、**提示词 `@` 引用不存在的图会在运行前被拦下**（不发请求不花钱）、**节点右键菜单**、**连线三态**（idle 1.5px → hover 2.5px → 选中 → Delete 删除）、**尺寸下拉手填清单外尺寸**。改画布交互后必须跑通它再加 E2E 断言。运行前置条件与命令见 frontend/README.md。
 
 ### 10.3 未覆盖
 

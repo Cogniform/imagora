@@ -139,7 +139,7 @@ const DERIVED_NODE_OFFSET_X = 200;
 /** 操作帮助正文：画布 / 节点 / 连线三类交互 + 全局快捷键（内容与 README「画布工作流」一致） */
 const HELP_ROWS: [string, string][] = [
   ["画布", "右键框选 · Ctrl+点击加选 · 滚轮缩放 · 空白拖拽平移 · 左下角适应视图全览"],
-  ["节点", "悬停显右侧操作栏 · 选中后右上角可运行/整理/连线/设路径/删除 · 双击图片放大预览 · 拖右下角拉伸"],
+  ["节点", "悬停显右侧操作栏 · 选中后右上角可运行/整理/连线/设路径/删除 · 运行中可单卡取消，工具栏「取消全部」一次停掉全部（排队中的不再发出去，生成中的跑完当前张才作废——图仍落盘并计费） · 双击图片放大预览 · 拖右下角拉伸"],
   ["连线", "图片→提示词/图片组 · 图片组→提示词 · 提示词→图片；提示词仅一条入边，多图经图片组聚合"],
   ["快捷键", "Ctrl+A 全选 · Ctrl+Z/Y 撤销恢复 · Delete 删除选中 · Ctrl+S 保存 · 双击连线或选中后 Delete/Backspace 删除连线"],
 ];
@@ -148,12 +148,15 @@ const HELP_ROWS: [string, string][] = [
 function ToolbarButton({
   onClick,
   disabled,
+  title,
   children,
   dragStart,
   dragEnd,
 }: {
   onClick: () => void;
   disabled?: boolean;
+  /** 悬浮提示：给「为什么禁用 / 点了会发生什么」这类不自明的按钮补一句 */
+  title?: string;
   children: ReactNode;
   dragStart?: (event: DragEvent<HTMLButtonElement>) => void;
   dragEnd?: () => void;
@@ -164,6 +167,7 @@ function ToolbarButton({
       type="button"
       onClick={onClick}
       disabled={disabled}
+      title={title}
       draggable={draggable}
       onDragStart={dragStart}
       onDragEnd={dragEnd}
@@ -390,7 +394,11 @@ export function CanvasPage({
   const nodeTaskRef = useRef(new Map<string, string>());
   /** taskId → 提示词节点（订阅回调按此定位节点驱动状态） */
   const taskNodeRef = useRef(new Map<string, string>());
-  const runningAll = generationTask.tasks.some((task) => task.status === "queued" || task.status === "running");
+  /** 在跑的任务数（排队中 + 生成中）：工具栏「取消全部」只在 >0 时出现，并显示这个数 */
+  const activeTaskCount = generationTask.tasks.filter(
+    (task) => task.status === "queued" || task.status === "running",
+  ).length;
+  const runningAll = activeTaskCount > 0;
   /** 放大预览：当前预览的图片绝对路径（null 关闭）与文件名 */
   const [zoomImage, setZoomImage] = useState<string | null>(null);
   const [zoomName, setZoomName] = useState("");
@@ -1542,16 +1550,32 @@ export function CanvasPage({
       const nodeId = taskNodeRef.current.get(taskId);
       if (!nodeId) return;
       if (view.status === "queued") {
-        setNodes((nds) => updatePromptNode(nds, nodeId, { status: "queued", startedAtMs: undefined, message: undefined }));
+        // cancelRequested 由 hook 合成（本机「点过取消」意图 OR 服务端快照）：任务不知去向时
+        // 兜成 failed 会清掉，所以按钮不会永久禁用；这里只消费，不再自行判定
+        setNodes((nds) =>
+          updatePromptNode(nds, nodeId, {
+            status: "queued",
+            startedAtMs: undefined,
+            message: undefined,
+            cancelRequested: view.cancelRequested === true ? true : undefined,
+          }),
+        );
       } else if (view.status === "running") {
         // 只写一次开始锚点；后续轮询/计时推送的 running 快照幂等跳过（updatePromptNode 无变化不产生新引用），
         // 卡片与状态灯不再逐秒重渲染，秒数文字由组件以 startedAtMs 自计时刷新。
-        setNodes((nds) => updatePromptNode(nds, nodeId, { status: "running", startedAtMs: view.startedAt ?? undefined }));
+        // 注：秒数推送带的是「上一次轮询」的旧快照，取消那一刻的意图由 hook 合成进 view，这里照抄即可。
+        setNodes((nds) =>
+          updatePromptNode(nds, nodeId, {
+            status: "running",
+            startedAtMs: view.startedAt ?? undefined,
+            cancelRequested: view.cancelRequested === true ? true : undefined,
+          }),
+        );
       } else if (view.status === "done") {
         // 终态：解除映射（只处理一次），状态先落 done，回流完成后补张数
         nodeTaskRef.current.delete(nodeId);
         taskNodeRef.current.delete(taskId);
-        setNodes((nds) => updatePromptNode(nds, nodeId, { status: "done", message: undefined }));
+        setNodes((nds) => updatePromptNode(nds, nodeId, { status: "done", message: undefined, cancelRequested: undefined }));
         void reflowResults(nodeId, view).then((count) => {
           if (count > 0) setNodes((nds) => updatePromptNode(nds, nodeId, { resultCount: count }));
         });
@@ -1559,13 +1583,25 @@ export function CanvasPage({
         nodeTaskRef.current.delete(nodeId);
         taskNodeRef.current.delete(taskId);
         setNodes((nds) =>
-          updatePromptNode(nds, nodeId, { status: "failed", startedAtMs: undefined, message: view.error ?? "生成失败" }),
+          updatePromptNode(nds, nodeId, {
+            status: "failed",
+            startedAtMs: undefined,
+            message: view.error ?? "生成失败",
+            cancelRequested: undefined,
+          }),
         );
         pushLog(`节点 ${nodeId} 失败：${view.error ?? "未知错误"}`);
       } else if (view.status === "cancelled") {
         nodeTaskRef.current.delete(nodeId);
         taskNodeRef.current.delete(taskId);
-        setNodes((nds) => updatePromptNode(nds, nodeId, { status: "idle", startedAtMs: undefined, message: undefined }));
+        setNodes((nds) =>
+          updatePromptNode(nds, nodeId, {
+            status: "idle",
+            startedAtMs: undefined,
+            message: undefined,
+            cancelRequested: undefined,
+          }),
+        );
         pushLog(`节点 ${nodeId}：任务已取消`);
       }
     });
@@ -1578,6 +1614,42 @@ export function CanvasPage({
     },
     [runNodeInternal],
   );
+
+  /** 取消单个节点的任务（卡片上的「取消」按钮）。
+   *  后端语义：排队中立即取消，运行中要等当前这张生成完才停 —— 所以点完不立刻复位，
+   *  先把节点置成「取消中…」防重复点，终态（cancelled/done/failed）由订阅回调清掉。
+   *  taskId 为空字符串 = 提交请求还没回来，此时没有可取消的任务号，只能提示稍后再试。 */
+  const handleCancel = useCallback(
+    (nodeId: string) => {
+      const taskId = nodeTaskRef.current.get(nodeId);
+      if (!taskId) {
+        pushLog(`节点 ${nodeId}：任务号还没拿到（提交中），稍后再试`);
+        return;
+      }
+      setNodes((nds) => updatePromptNode(nds, nodeId, { cancelRequested: true }));
+      void cancelGenerationTask(taskId);
+      pushLog(`节点 ${nodeId}：已请求取消（生成中的会在当前这张完成后停下）`);
+    },
+    [cancelGenerationTask, pushLog, setNodes],
+  );
+
+  /** 取消全部在跑的任务（工具栏「取消全部」）：与单节点同一套「先置取消中」的处理 */
+  const handleCancelAll = useCallback(() => {
+    const active = generationTask.tasks.filter(
+      (task) => task.status === "queued" || task.status === "running",
+    );
+    if (!active.length) return;
+    const nodeIds = active
+      .map((task) => taskNodeRef.current.get(task.taskId))
+      .filter((nodeId): nodeId is string => !!nodeId);
+    cancelAllTasks();
+    if (nodeIds.length) {
+      setNodes((nds) =>
+        nodeIds.reduce((acc, nodeId) => updatePromptNode(acc, nodeId, { cancelRequested: true }), nds),
+      );
+    }
+    pushLog(`已请求取消 ${active.length} 个任务（生成中的会在当前这张完成后停下）`);
+  }, [cancelAllTasks, generationTask.tasks, pushLog, setNodes]);
 
   const handleRunAll = useCallback(async () => {
     const all = nodesRef.current.filter((n) => n.type === "prompt");
@@ -1978,6 +2050,7 @@ export function CanvasPage({
           {...(props as ComponentProps<typeof PromptNode>)}
           lod={lod}
           onRun={handleRun}
+          onCancel={handleCancel}
           onUpdate={handleNodeUpdate}
           onDelete={handleDeleteNode}
           sizeOptions={sizeOptions}
@@ -1989,6 +2062,7 @@ export function CanvasPage({
     [
       lod,
       handleRun,
+      handleCancel,
       handleNodeUpdate,
       handleDeleteNode,
       handleReplaceImage,
@@ -2093,6 +2167,15 @@ export function CanvasPage({
           <ToolbarButton onClick={() => void handleRunAll()} disabled={runningAll}>
             {runningAll ? "运行中..." : "全部运行"}
           </ToolbarButton>
+          {/* 取消全部：只在真有任务在跑时出现（没任务时这个按钮没有意义），带上数量好一眼看出在跑几个 */}
+          {activeTaskCount > 0 && (
+            <ToolbarButton
+              onClick={handleCancelAll}
+              title="取消所有在跑的任务：排队中的不再发出去；生成中的会等当前这张完成后作废（图仍落盘并计费，只是不派回画布）"
+            >
+              取消全部 ({activeTaskCount})
+            </ToolbarButton>
+          )}
         </div>
       </div>
 
