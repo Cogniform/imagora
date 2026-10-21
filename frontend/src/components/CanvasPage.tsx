@@ -30,7 +30,7 @@ import {
   type ReactFlowInstance,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { Crosshair, GripVertical, Magnet } from "lucide-react";
+import { CircleHelp, Crosshair, GripVertical, Magnet, Square, SquareDot } from "lucide-react";
 
 import {
   canvasUpload,
@@ -182,7 +182,7 @@ function ToolbarButton({
       draggable={draggable}
       onDragStart={dragStart}
       onDragEnd={dragEnd}
-      className={`btn-ghost relative !px-3 !py-1 text-xs ${draggable ? "btn-draggable" : ""} ${disabled ? "opacity-50" : ""}`}
+      className={`btn-ghost btn-sm relative ${draggable ? "btn-draggable" : ""} ${disabled ? "opacity-50" : ""}`}
     >
       {children}
       {/* 可拖出暗示：悬浮时右侧浮现拖拽图标（样式在 index.css .btn-draggable） */}
@@ -1973,7 +1973,7 @@ export function CanvasPage({
       {/* 工具栏：左侧创建，右侧工作流操作（按使用习惯分区） */}
       <div className="studio-toolbar enter-up flex flex-wrap items-start gap-2">
         <div className="flex flex-wrap items-center gap-2">
-          <button type="button" className="btn-primary !px-3 !py-1 text-xs" onClick={() => fileInputRef.current?.click()}>
+          <button type="button" className="btn-primary btn-sm" onClick={() => fileInputRef.current?.click()}>
             上传图片
           </button>
           <input
@@ -2040,26 +2040,27 @@ export function CanvasPage({
                 type="button"
                 onClick={handleRunSelected}
                 title={`运行 ${selectedPromptCount} 张选中的提示词卡片（只运行提示词，图片/图片组忽略）`}
-                className="nodrag btn-primary !px-2 !py-1 text-xs"
+                className="nodrag btn-primary btn-sm"
               >
-                运行所选 ({selectedPromptCount})
+                运行所选
+                {selectedPromptCount > 1 ? ` (${selectedPromptCount})` : null}
               </button>
             )}
             <button
               type="button"
               onClick={handleAutoLayout}
               title="局部整理选中的节点，其余保持原位（同层提示词卡片按左上角标题从左到右）"
-              className="nodrag btn-ghost !px-2 !py-1 text-xs"
+              className="nodrag btn-ghost btn-sm"
             >
-              自动整理 ({selectedCount})
+              自动整理{selectedCount > 1 ? ` (${selectedCount})` : null}
             </button>
             <button
               type="button"
               onClick={handleAutoConnectSelected}
               title="只对选中的节点自动补齐明显连线，未选中节点不受影响"
-              className="nodrag btn-ghost !px-2 !py-1 text-xs"
+              className="nodrag btn-ghost btn-sm"
             >
-              自动连线 ({selectedCount})
+              自动连线{selectedCount > 1 ? ` (${selectedCount})` : null}
             </button>
             {selectedPromptCount > 0 && (
               <button
@@ -2067,17 +2068,19 @@ export function CanvasPage({
                 onClick={() => void handleSetSelectedOutputDir()}
                 disabled={pickingSelectedOutputDir}
                 title={selectedPromptCount ? `设置 ${selectedPromptCount} 张提示词卡片的输出路径` : "所选节点中没有提示词卡片"}
-                className="nodrag btn-ghost !px-2 !py-1 text-xs"
+                className="nodrag btn-ghost btn-sm"
               >
-                {pickingSelectedOutputDir ? "选择中..." : `设置输出路径 (${selectedPromptCount})`}
+                {pickingSelectedOutputDir
+                  ? "选择中..."
+                  : `设置输出路径${selectedPromptCount > 1 ? ` (${selectedPromptCount})` : ""}`}
               </button>
             )}
             <button
               type="button"
               onClick={handleDeleteSelected}
-              className="nodrag btn-ghost btn-danger !px-2 !py-1 text-xs"
+              className="nodrag btn-ghost btn-danger btn-sm"
             >
-              删除所选 ({selectedCount})
+              删除所选{selectedCount > 1 ? ` (${selectedCount})` : null}
             </button>
           </div>
         )}
@@ -2139,7 +2142,7 @@ export function CanvasPage({
           <Controls fitViewOptions={{ padding: 0.15, minZoom: MIN_FIT_ZOOM, maxZoom: 2 }}>
             {/* 缩放滑杆：读数即百分比，拖动实时改视口（对数/线性已退化为线性，见 minimapVisible.ts） */}
             <div className="react-flow__controls-button !h-auto !w-auto !cursor-default flex-col !gap-1 !px-1 !py-2">
-              <span className="text-[10px] font-medium leading-none tabular-nums" aria-hidden="true">
+              <span className="text-[11px] font-medium leading-none tabular-nums" aria-hidden="true">
                 {zoomPercent}%
               </span>
               <input
@@ -2162,7 +2165,7 @@ export function CanvasPage({
               title="操作帮助与快捷键"
               aria-label="操作帮助与快捷键"
             >
-              <span aria-hidden="true" className="text-[13px] font-semibold leading-none">?</span>
+              <CircleHelp aria-hidden="true" size={14} />
             </ControlButton>
             {/* 小地图开关：同一栈里，避免再往画布上叠一块常驻 UI */}
             <ControlButton
@@ -2171,9 +2174,7 @@ export function CanvasPage({
               aria-label={minimapVisible ? "隐藏小地图" : "显示小地图"}
               aria-pressed={minimapVisible}
             >
-              <span aria-hidden="true" className="text-[13px] font-semibold leading-none">
-                {minimapVisible ? "▣" : "▢"}
-              </span>
+              {minimapVisible ? <SquareDot aria-hidden="true" size={14} /> : <Square aria-hidden="true" size={14} />}
             </ControlButton>
             {/* 吸附开关：默认开，关掉后拖拽完全自由（偏好落 localStorage） */}
             <ControlButton

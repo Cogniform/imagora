@@ -334,9 +334,9 @@ export function HistoryGallery({
                     )}
                     {item.inputRefMissing && <p className="text-[10px] text-amber-600">参考图缺失</p>}
                     <div className="mt-auto flex gap-1.5">
-                      <button type="button" className="btn-ghost min-w-0 flex-1 !px-1.5 !py-1 text-[11px]" onClick={() => void navigator.clipboard.writeText(item.prompt || "")}>复制提示词</button>
-                      <button type="button" disabled={!item.path} className="btn-ghost min-w-0 flex-1 !px-1.5 !py-1 text-[11px]" onClick={() => void openFolder(parentDirectory(item.path))}>打开目录</button>
-                      <button type="button" disabled={!item.path} className="btn-primary min-w-0 flex-1 !px-1.5 !py-1 text-[11px]" onClick={() => void onImport(item.path)}>导入当前画布</button>
+                      <button type="button" className="btn-ghost btn-xs min-w-0 flex-1" onClick={() => void navigator.clipboard.writeText(item.prompt || "")}>复制提示词</button>
+                      <button type="button" disabled={!item.path} className="btn-ghost btn-xs min-w-0 flex-1" onClick={() => void openFolder(parentDirectory(item.path))}>打开目录</button>
+                      <button type="button" disabled={!item.path} className="btn-primary btn-xs min-w-0 flex-1" onClick={() => void onImport(item.path)}>导入当前画布</button>
                     </div>
                   </div>
                 </li>
@@ -348,7 +348,7 @@ export function HistoryGallery({
               {loadingMore ? (
                 "正在加载更多..."
               ) : hasMore ? (
-                <button type="button" className="btn-ghost !px-3 !py-1 text-xs" onClick={() => void loadMore()}>
+                <button type="button" className="btn-ghost btn-sm" onClick={() => void loadMore()}>
                   加载更多
                 </button>
               ) : (

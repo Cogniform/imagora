@@ -39,6 +39,7 @@ import { ResultPanel } from "./components/ResultPanel";
 import { LogLine } from "./components/LogLine";
 import { ModalShell } from "./components/ModalShell";
 import { Select } from "./components/Select";
+import { SizeOptionIcon } from "./components/AspectIcon";
 import { ProviderModal } from "./components/ProviderModal";
 import { CanvasPage } from "./components/CanvasPage";
 
@@ -1436,6 +1437,7 @@ useEffect(() => {
                     options={sizeOptions}
                     value={size}
                     onChange={setSize}
+                    renderOption={(option) => <SizeOptionIcon label={option.label} />}
                     className="mt-1"
                   />
                 </div>
@@ -1455,9 +1457,10 @@ useEffect(() => {
                 )}
               </div>
               <p className="mt-2 text-[11px] leading-relaxed text-neutral-400">
+                {/* 这段整行铺在两列下方，左端对齐「尺寸」那列，不加前缀会被当成尺寸的说明 */}
                 {qualityEffective
-                  ? "low 最快最省 / medium 均衡 / high 最细（细节与文字更稳，只是更慢；按张计费，价格不变）"
-                  : "豆包 Seedream 接口没有质量参数，这一栏已隐藏 —— 它出图不区分 low / medium / high"}
+                  ? "质量：low 最快最省 / medium 均衡 / high 最细（细节与文字更稳，只是更慢；按张计费，价格不变）"
+                  : "质量：豆包 Seedream 接口没有质量参数，这一栏已隐藏 —— 它出图不区分 low / medium / high"}
               </p>
             </div>
 
@@ -1499,7 +1502,7 @@ useEffect(() => {
             <div className="mb-2 flex items-center justify-between gap-2">
               <span className="field-label mb-0">生成结果</span>
               {lastSubmissionId && (
-                <button type="button" onClick={handleImportToCanvas} className="btn-ghost text-xs">
+                <button type="button" onClick={handleImportToCanvas} className="btn-ghost btn-sm">
                   导入画布
                 </button>
               )}
