@@ -6,15 +6,20 @@ import {
   FOCUS_MIN_ZOOM,
   GROUP_WRAP_PADDING,
   GROUP_WRAP_TOP_PADDING,
+  REVEAL_MARGIN,
   collectGroupMemberNodes,
   containsCenter,
   findGroupDropTarget,
   focusViewportForNode,
   getGroupWrapRect,
   nodeBounds,
+  revealViewport,
   snapNodesIntoGroup,
   type FrameInsets,
   type NodeBox,
+  type Rect,
+  type Size,
+  type ViewportTransform,
 } from "./canvasGeometry";
 
 // 纯几何数学，不碰 DOM / localStorage，因此不加 `@vitest-environment jsdom`。
@@ -349,5 +354,73 @@ describe("focusViewportForNode", () => {
     expect(
       focusViewportForNode({ id: "n", position: { x: 10, y: 10 } }, size, NO_FRAME),
     ).toEqual({ x: 0, y: 0, k: 1 });
+  });
+});
+
+describe("revealViewport：新落地节点带进视野（只平移不改缩放）", () => {
+  const pane: Size = { width: 1000, height: 700 };
+  const identity: ViewportTransform = { x: 0, y: 0, k: 1 };
+  const target: Rect = { left: 100, top: 100, right: 300, bottom: 300 };
+
+  it("已完整可见 → null（调用方完全不碰视口）", () => {
+    expect(revealViewport(target, pane, identity)).toBeNull();
+  });
+
+  it("恰好贴住留白边界也算可见 → null", () => {
+    const rect: Rect = {
+      left: REVEAL_MARGIN,
+      top: REVEAL_MARGIN,
+      right: pane.width - REVEAL_MARGIN,
+      bottom: pane.height - REVEAL_MARGIN,
+    };
+    expect(revealViewport(rect, pane, identity)).toBeNull();
+  });
+
+  it("落在视口下方之外 → 向上平移，缩放原样返回", () => {
+    // 提示词卡片在视口内、结果图落在其正下方 → 屏幕 y 700 之外
+    const rect: Rect = { left: 400, top: 600, right: 544, bottom: 820 };
+    const next = revealViewport(rect, pane, identity);
+    expect(next).not.toBeNull();
+    expect(next?.k).toBe(1);
+    // 底边贴到「视口高 - 留白」处，位移正好是溢出的那段
+    expect(next?.y).toBe(700 - REVEAL_MARGIN - 820);
+    expect(next?.x).toBe(0);
+  });
+
+  it("落在视口上方 / 右方之外 → 反向平移", () => {
+    expect(revealViewport({ left: 100, top: -80, right: 300, bottom: 100 }, pane, identity)?.y).toBe(
+      REVEAL_MARGIN + 80,
+    );
+    expect(
+      revealViewport({ left: 900, top: 100, right: 1100, bottom: 300 }, pane, identity)?.x,
+    ).toBe(pane.width - REVEAL_MARGIN - 1100);
+  });
+
+  it("目标比可用区还大 → 左上对齐（内容从头可见）", () => {
+    const huge: Rect = { left: 500, top: 500, right: 2500, bottom: 2000 };
+    const next = revealViewport(huge, pane, identity);
+    expect(next).toEqual({ x: REVEAL_MARGIN - 500, y: REVEAL_MARGIN - 500, k: 1 });
+  });
+
+  it("按当前缩放换算屏幕坐标（k=0.5 时世界 100px = 屏幕 50px）", () => {
+    const rect: Rect = { left: 2000, top: 100, right: 2100, bottom: 200 };
+    const next = revealViewport(rect, pane, { x: 0, y: 0, k: 0.5 });
+    // 世界 2100 → 屏幕 1050，超出 1000-24，向左平移 74
+    expect(next?.x).toBe(-74);
+    expect(next?.y).toBe(0);
+  });
+
+  it("k ≤ 0 / 非有限坐标 / 退化盒 → null（绝不产出 Infinity）", () => {
+    expect(revealViewport(target, pane, { x: 0, y: 0, k: 0 })).toBeNull();
+    expect(revealViewport(target, pane, { x: Number.NaN, y: 0, k: 1 })).toBeNull();
+    expect(revealViewport({ left: 100, top: 100, right: 100, bottom: 300 }, pane, identity)).toBeNull();
+    expect(revealViewport(target, { width: 0, height: 700 }, identity)).toBeNull();
+  });
+
+  it("视口小到放不下两侧留白时退化为不留白，位移不反向", () => {
+    const tiny: Size = { width: 40, height: 40 };
+    const rect: Rect = { left: 100, top: 100, right: 140, bottom: 140 };
+    // pad 夹到 20：left(100) > 40-20 → 左移 80；top 同理
+    expect(revealViewport(rect, tiny, identity)).toEqual({ x: -80, y: -80, k: 1 });
   });
 });

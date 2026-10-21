@@ -95,7 +95,7 @@ import {
   workflowToCanvas,
 } from "../workflow";
 import { layoutPromptResults, layoutSelection, nodeSize } from "../layout";
-import { focusViewportForNode, nodeBounds, type NodeBox } from "../canvasGeometry";
+import { focusViewportForNode, nodeBounds, revealViewport, type NodeBox } from "../canvasGeometry";
 import { GroupNode, ImageNode, PromptNode } from "./CanvasNodes";
 import { HistoryGallery } from "./HistoryGallery";
 import { SnapGuides } from "./SnapGuides";
@@ -279,6 +279,39 @@ export function CanvasPage({
     nodesRef.current = nodes;
     edgesRef.current = edges;
   }, [nodes, edges]);
+  /**
+   * 系统自己落地的新节点（生成结果回流 / 裁剪·放大·切分产物），落地后把视野带过去。
+   *
+   * 为什么必须带：这些节点落在视口外时，React Flow（开着 `onlyRenderVisibleElements`）
+   * 根本不会挂载它 —— 画布上空白一片，用户只看到日志条说「已回流画布」，以为没生成出东西。
+   * 只平移不缩放（`revealViewport`）：用户没要求改缩放，抢走缩放比看不见更烦人。
+   * 真实事故与取舍见 `.agents/notes/2026-10-21-canvas-result-reveal.md`。
+   */
+  const pendingRevealRef = useRef<string[]>([]);
+  useEffect(() => {
+    const ids = pendingRevealRef.current;
+    if (ids.length === 0) return;
+    pendingRevealRef.current = [];
+    const rf = rfInstanceRef.current;
+    const el = canvasRef.current;
+    if (!rf || !el) return;
+    const landed = nodes.filter((node) => ids.includes(node.id));
+    if (landed.length === 0) return;
+    const boxes: NodeBox[] = landed.map((node) => {
+      const s = nodeSize(node);
+      return { id: node.id, type: node.type, position: node.position, width: s.width, height: s.height };
+    });
+    const rect = el.getBoundingClientRect();
+    const viewport = rf.getViewport();
+    // 底部日志条会盖住贴底的节点：可用高度按聚焦同一口径扣掉 FOCUS_BOTTOM_INSET
+    const next = revealViewport(
+      nodeBounds(boxes),
+      { width: rect.width, height: Math.max(0, rect.height - FOCUS_BOTTOM_INSET) },
+      { x: viewport.x, y: viewport.y, k: viewport.zoom },
+    );
+    if (!next) return;
+    void rf.setViewport({ x: next.x, y: next.y, zoom: next.k }, { duration: 220 });
+  }, [nodes]);
   /**
    * 接管 React Flow 的节点变更：拖拽时做对齐吸附，其余变更原样透传。
    *
@@ -1105,6 +1138,8 @@ export function CanvasPage({
           ...nds,
           ...canvasEntriesToNodes([entry], nds, origin).map((n, i) => withEnterAnim(n, i)),
         ]);
+        // 结果图在源图右侧，源图贴右边缘时会落到视口外：登记后由 effect 带视野
+        pendingRevealRef.current = [`img-${entry.id}`];
         pushLog(`${prefix === "crop" ? "已裁剪" : "已放大"}：${entry.name}`);
       } catch (err) {
         pushLog(`加工失败：${errMessage(err)}`);
@@ -1145,6 +1180,8 @@ export function CanvasPage({
           ...nds,
           ...canvasEntriesToNodes(images, nds, origin).map((n, i) => withEnterAnim(n, i)),
         ]);
+        // 切分产物一次铺 6 张，排在原图右侧：登记整组，由 effect 一并带进视野
+        pendingRevealRef.current = images.map((entry) => `img-${entry.id}`);
         pushLog(`已切分：${target.name} → ${images.length} 张`);
       } catch (err) {
         pushLog(`切分失败：${errMessage(err)}`);
@@ -1158,7 +1195,7 @@ export function CanvasPage({
    *  为什么需要它：画布上东西一多，`fitView` 会把缩放压到 5%，节点缩成看不见的色块。
    *  用户选中一两个节点后按这个键，要的是「看清楚它」，不是「看全所有东西」。
    *
-   *  算法在 canvasGeometry.focusViewportForNode（纯函数，45 个单测钉住）：
+   *  算法在 canvasGeometry.focusViewportForNode（纯函数，53 个单测钉住）：
    *  可用高度按「视口高 - 底部日志条」算，上方留 0 给悬停工具栏（工具栏在节点上方，
    *  已由 layout 保证不压），下方留 LOG_VISIBLE_COUNT 那条浮层的高度。
    *  多个选中节点时用包围盒当「一个虚拟节点」喂进去。 */
@@ -1379,6 +1416,8 @@ export function CanvasPage({
           const created = outputEdges.filter((edge) => !existing.has(`${edge.source}->${edge.target}`));
           return [...eds, ...created];
         });
+        // 结果图落在视口外时用户看不见（React Flow 不挂载视口外节点）：登记后由上面的 effect 带视野
+        pendingRevealRef.current = fresh.map((entry) => `img-${entry.id}`);
         pushLog(`节点 ${nodeId}：生成 ${imported.length} 张并已回流画布（自动连线）`);
         return imported.length;
       } catch (err) {

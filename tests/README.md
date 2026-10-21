@@ -51,7 +51,7 @@ cd frontend; npm test
 | [`test_main_process.py`](test_main_process.py) | 4 | 端口探测 / 祖先链回溯（Windows） |
 | [`test_main_cli.py`](test_main_cli.py) | 31 | CLI gen 子命令全链路（校验/输出解析/文生图+图生图+多参考/失败/--no-asset/比例档位）/ **`--n` 逐张请求（每次 `n=1`、各存各的账、部分失败保留已成功、默认单张行为不变）** / config 输出 |
 
-## 文件索引（前端 vitest，共 1020，位于 frontend/src/）
+## 文件索引（前端 vitest，共 1030，位于 frontend/src/）
 
 | 文件 | 用例 | 覆盖 |
 | --- | --- | --- |
@@ -75,7 +75,7 @@ cd frontend; npm test
 | [`imageOps.test.ts`](../frontend/src/imageOps.test.ts) | 49 | 裁剪/放大几何：`clampCrop` 最小尺寸与越界回收、`moveCrop` 与 `resizeCrop` 八向手柄、`fitCropToRatio` 保持中心收缩到能放下的最大尺寸（像素比与归一化比的换算必须乘框宽高比）、`resolveUpscaleSize` 长边上限与非法入参、`gcdRatio` 约分（含不可约分尺寸）、`centeredSquareCrop` 默认框。**B 层 canvas I/O 不测**（jsdom 的 `getContext("2d")` 返回 null） |
 | [`dataUrlFile.test.ts`](../frontend/src/dataUrlFile.test.ts) | 16 | dataUrl → `File` 转换（base64 与百分号编码两种载荷；非法输入**抛错而不是返回空 File**，0 字节上传会在画布多出永远加载失败的红框节点）、派生文件名（前缀 + 原名清洗 + 时间戳 + 扩展名，长度精确断言） |
 | [`aspectIcon.test.ts`](../frontend/src/aspectIcon.test.ts) | 12 | 比例图标几何：`aspectIconSize` 长边固定 24、短边按比例算且不低于 10（再矮就看不出是矩形）、横竖两个分支都只动短边、非法比例（NaN / 0 / 负数 / Infinity）回落正方形；`ratioFromSizeLabel` 三层解析（括号内 `a:b` → 裸 `a:b` → `WxH` 宽高比），**括号里只有中文方位词（如 `1024x1792 (竖版长图)`）必须退回宽高比**，否则这两项没有图标 |
-| [`canvasGeometry.test.ts`](../frontend/src/canvasGeometry.test.ts) | 45 | 视口聚焦与分组几何（移植 basketikun，MIT）：`nodeBounds` 空数组返回退化盒而不是 ±Infinity、`containsCenter` 用**中心点**判归属（整体包含会让大节点永远拖不进组）、`findGroupDropTarget` 倒序遍历让上层 group 优先且被拖集合含 group 时返回 null（禁止组嵌套组）、`snapNodesIntoGroup` 超宽贴左否则贴右、`getGroupWrapRect` 顶部多留 52 给工具栏、`focusViewportForNode` 的 60% 上限与下方有面板时的 3:1 上推 |
+| [`canvasGeometry.test.ts`](../frontend/src/canvasGeometry.test.ts) | 53 | 视口聚焦 / 带进视野与分组几何（移植 basketikun，MIT）：`nodeBounds` 空数组返回退化盒而不是 ±Infinity、`containsCenter` 用**中心点**判归属（整体包含会让大节点永远拖不进组）、`findGroupDropTarget` 倒序遍历让上层 group 优先且被拖集合含 group 时返回 null（禁止组嵌套组）、`snapNodesIntoGroup` 超宽贴左否则贴右、`getGroupWrapRect` 顶部多留 52 给工具栏、`focusViewportForNode` 的 60% 上限与下方有面板时的 3:1 上推、`revealViewport` **只平移不改 `k`**（已可见返回 null、目标大于可用区时左上对齐、留白大于视口时退化不留白、非法输入不产出 Infinity） |
 | [`imageSplit.test.ts`](../frontend/src/imageSplit.test.ts) | 30 | 切分几何：`clampGrid` 的 NaN / 超上限 / 小数取整且 1×1 合法（等于不切，不强行抬到 2）、`splitCells` 行优先且**用 `col/cols` 直算不累加**（累加会漂）、格子边界不重叠且覆盖满 0~1、`splitCellsByLines` 排序去重 + 丢弃贴端点的线 + 空线返回单格、`splitOutputName` 命名格式与非法字符清洗。`splitDataUrl` 不测（jsdom 无 2D context） |
 | [`modelIcon.test.ts`](../frontend/src/modelIcon.test.ts) | 22 | 模型品牌识别：9 类品牌各自的 `includes` 命中、匹配顺序（`claude` 先于 `openai`）、`dall-e-3` 归 openai、大小写不敏感、**全角连字符 U+2011 归一化后仍能认出 `gpt`**（中转站真实踩过的坑）、空串与未知模型回落 `unknown`、每个品牌都有非空字形与中文名 |
 | [`snapGuide.test.ts`](../frontend/src/snapGuide.test.ts) | 38 | 拖拽吸附纯函数：左/中/右与上/中/下三对齐线取最近目标、x 与 y **独立决策**（可能只吸一轴）、阈值用严格 `<`（等于阈值不吸）、无邻居或全部超阈值时**原样返回不做任何位移也不偷偷退回网格**、`snapToGrid` 的 8px 对齐（含负坐标与小数）且 guides 恒空、NaN / Infinity / step<=0 安全退化不抛错（每帧拖拽都跑，抛错会让画布白屏） |

@@ -1432,3 +1432,78 @@ describe("统计刷新（counts）", () => {
     expect(screen.getByTestId(`group-size-${groupId}`).textContent).toBe("5.0 MB");
   });
 });
+
+describe("结果回流：把新节点带进视野", () => {
+  /** 造一条「结果图已生成」的任务快照：url 里的 path 是回流导入的输入 */
+  const okResult = {
+    status: "ok" as const,
+    url: "/api/image?path=D%3A%5Cout%5Ca.png",
+  };
+
+  function landResult(): void {
+    act(() => {
+      h.taskSubscriber?.("task-1", {
+        taskId: "task-1",
+        status: "done",
+        startedAt: 1,
+        results: [okResult],
+        elapsed: 1,
+      });
+    });
+  }
+
+  it("结果图落在视口下沿之外时平移视口（缩放不被抢走）", async () => {
+    // 默认 getBoundingClientRect 是 800x600：卡片在视口中心（约 y=300），
+    // 结果图落在卡片正下方（y≈680），整块在视口外 —— 真实事故的几何复现。
+    vi.mocked(importHistoryAsset).mockResolvedValue({
+      imported: [asset("abc", "a.png")],
+      skipped: [],
+    });
+    renderPage();
+    createPromptCard();
+    const id = indexed(promptNodeIds(), 0);
+    fireEvent.change(screen.getByLabelText(`提示词-${id}`), { target: { value: "a cat" } });
+    fireEvent.click(screen.getByRole("button", { name: `运行-${id}` }));
+    await waitFor(() => expect(h.taskSubmit).toHaveBeenCalled());
+
+    landResult();
+
+    await waitFor(() => expect(h.setViewport).toHaveBeenCalledTimes(1));
+    // 无参 vi.fn() 的 calls 被推成 [[]]，args 取不出来，这里显式断言形状
+    const call = h.setViewport.mock.calls[0] as unknown as [unknown, unknown?];
+    const viewport = call[0] as { x: number; y: number; zoom: number };
+    expect(viewport.zoom).toBe(1);
+    expect(viewport.y).toBeLessThan(0);
+    expect(call[1]).toEqual({ duration: 220 });
+  });
+
+  it("结果图本来就在视野内时不碰视口", async () => {
+    // 把视口撑到 2000 高：卡片落在中心（y≈1000），结果图 y≈1380 仍可见 → 不该平移
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      left: 0,
+      top: 0,
+      right: 800,
+      bottom: 2000,
+      width: 800,
+      height: 2000,
+      toJSON: () => ({}),
+    });
+    vi.mocked(importHistoryAsset).mockResolvedValue({
+      imported: [asset("abc", "a.png")],
+      skipped: [],
+    });
+    renderPage();
+    createPromptCard();
+    const id = indexed(promptNodeIds(), 0);
+    fireEvent.change(screen.getByLabelText(`提示词-${id}`), { target: { value: "a cat" } });
+    fireEvent.click(screen.getByRole("button", { name: `运行-${id}` }));
+    await waitFor(() => expect(h.taskSubmit).toHaveBeenCalled());
+
+    landResult();
+
+    await waitFor(() => expect(screen.getByTestId("rf-node-img-abc")).toBeTruthy());
+    expect(h.setViewport).not.toHaveBeenCalled();
+  });
+});
