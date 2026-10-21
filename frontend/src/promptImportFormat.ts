@@ -197,18 +197,23 @@ export interface PromptNodeBuildConfig {
   defaultOutputDir: string;
 }
 
-/** 每张卡片产出一个 PromptNode；位置在 origin 基础上按 6 列栅格平铺，6 个后换行下移 */
+/** 每张卡片产出一个 PromptNode；落点由 `importCardPositions` 按卡片真实尺寸铺开
+ *  （每行 3 张、列距 420、行距 400，整行以 origin 为中心）。
+ *
+ *  历史坑：旧实现在 origin 上按 6 列 × 30px 步进平铺，而卡片实际宽 380px，
+ *  批量导入 8 张会完全叠成一张 —— 铺排逻辑只此一处，别在调用侧再算一遍。 */
 export function buildPromptNodes(
   cards: PromptCardSpec[],
   config: PromptNodeBuildConfig,
   origin: { x: number; y: number },
 ): WorkflowNode[] {
+  const positions = importCardPositions(origin, cards.length);
   return cards.map((card, i) => {
     const size = resolveCardSize(card.ratio, config.sizes);
     return {
       id: `prompt-${Date.now()}-${i}`,
       type: "prompt" as const,
-      position: { x: origin.x + (i % 6) * 30, y: origin.y + Math.floor(i / 6) * 30 },
+      position: positions[i] ?? origin,
       data: {
         prompt: card.prompt,
         size: size.value,
@@ -219,4 +224,67 @@ export function buildPromptNodes(
       },
     };
   });
+}
+
+// ---- 批量导入的卡片铺排：按卡片真实尺寸排，不能再用 30px 网格 ----
+
+/** 提示词卡片宽度：CanvasNodes 的 PromptNode 根节点写死 `!w-[380px]` */
+export const IMPORT_CARD_WIDTH = 380;
+
+/**
+ * 提示词卡片高度（约值，用于行距）。
+ *
+ * 依据 CanvasNodes.tsx:485-557 的固定结构逐项累加（box-sizing: border-box）：
+ * - 上下边框 2 + 内边距 `!p-3` 24
+ * - 标题 `text-xs` 16 + `mb-2` 8 = 24
+ * - textarea `rows=5`、`text-xs leading-relaxed` → 5 × 19.5 = 97.5，加 `py-2` 16 + 边框 2 = 115.5
+ * - 尺寸/质量行 `mt-2` 8 + label 16 + `mt-0.5` 2 + 控件 38 = 64
+ * - 输出路径行 同上 = 64
+ * - 运行按钮行 `mt-2` 8 + `btn-sm`（`py-1 text-xs`）24 = 32
+ * 合计 325.5px；LOD 占位卡 `min-h-[320px]` 也印证这一量级。取 326。
+ */
+export const IMPORT_CARD_HEIGHT = 326;
+
+/** 列间距：卡宽 380 之外再留 40，列距 420 ≥ 400（380 + 间距）的要求 */
+export const IMPORT_CARD_COLUMN_GAP = 40;
+
+/** 行间距：326 的卡高之外留 74，行距 400，避免上下两张贴在一起 */
+export const IMPORT_CARD_ROW_GAP = 74;
+
+/** 相邻两列的 x 距离 */
+export const IMPORT_CARD_COLUMN_PITCH = IMPORT_CARD_WIDTH + IMPORT_CARD_COLUMN_GAP;
+
+/** 相邻两行的 y 距离 */
+export const IMPORT_CARD_ROW_PITCH = IMPORT_CARD_HEIGHT + IMPORT_CARD_ROW_GAP;
+
+/** 每行最多放几张：3 列在 1280–1440 宽的视口里刚好铺满可视区，再多就要横向拖拽 */
+export const IMPORT_CARDS_PER_ROW = 3;
+
+/**
+ * 批量导入的卡片坐标：给定**单张卡应有的落点** origin 与数量，返回逐张不重叠的坐标。
+ *
+ * - 每行 `IMPORT_CARDS_PER_ROW` 张，列距 420（卡宽 380 + 40 间距），行距 400（卡高 326 + 74）。
+ * - 整行以 origin 的水平中心对齐：单张时坐标就是 origin（与「新建一张卡」的落点一致），
+ *   多张时向两侧展开，避免整批从视口中心往右溢出。
+ * - origin.y 是第一行的顶部，向下换行；不做垂直居中，否则首行会顶到工具栏下面。
+ */
+export function importCardPositions(
+  origin: { x: number; y: number },
+  count: number,
+): { x: number; y: number }[] {
+  const total = Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
+  const positions: { x: number; y: number }[] = [];
+  for (let i = 0; i < total; i++) {
+    const row = Math.floor(i / IMPORT_CARDS_PER_ROW);
+    const column = i % IMPORT_CARDS_PER_ROW;
+    const rowCount = Math.min(IMPORT_CARDS_PER_ROW, total - row * IMPORT_CARDS_PER_ROW);
+    // 每行按实际张数居中：最后一行不满时也居中，而不是全部靠左
+    const rowWidth = rowCount * IMPORT_CARD_WIDTH + (rowCount - 1) * IMPORT_CARD_COLUMN_GAP;
+    const startX = origin.x + IMPORT_CARD_WIDTH / 2 - rowWidth / 2;
+    positions.push({
+      x: startX + column * IMPORT_CARD_COLUMN_PITCH,
+      y: origin.y + row * IMPORT_CARD_ROW_PITCH,
+    });
+  }
+  return positions;
 }

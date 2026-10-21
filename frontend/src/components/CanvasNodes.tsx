@@ -121,7 +121,7 @@ interface ImageNodeExtraProps {
   onClearMask: (nodeId: string) => void;
 }
 
-export function ImageNode({
+export const ImageNode = memo(function ImageNode({
   id,
   data,
   selected,
@@ -168,7 +168,7 @@ export function ImageNode({
       }}
     >
       {data.url ? (
-        <img src={data.url} alt={data.name} className="block h-full w-full object-contain" draggable={false} />
+        <img src={data.url} alt={data.name} loading="lazy" decoding="async" className="block h-full w-full object-contain" draggable={false} />
       ) : (
         <div className="flex h-full w-full items-center justify-center p-2 text-center text-[11px] text-red-500">
           图片缺失
@@ -240,7 +240,7 @@ export function ImageNode({
       {meta}
     </div>
   );
-}
+});
 
 /* ---------------- 图片组节点：聚合多张图片后统一连到提示词节点 ---------------- */
 export type GroupFlowNode = Node<CanvasGroupNodeData, "group">;
@@ -249,7 +249,7 @@ interface GroupNodeExtraProps {
   onDelete: (nodeId: string) => void;
 }
 
-export function GroupNode({
+export const GroupNode = memo(function GroupNode({
   id,
   data,
   selected,
@@ -329,7 +329,7 @@ export function GroupNode({
       {body}
     </div>
   );
-}
+});
 
 /* ---------------- 提示词节点 ---------------- */
 export type PromptFlowNode = Node<CanvasPromptNodeData, "prompt">;

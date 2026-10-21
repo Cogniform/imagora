@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
 
-import { buildPromptNodes, parsePromptImportFormat, resolveCardSize } from "./promptImportFormat";
+import {
+  IMPORT_CARD_COLUMN_PITCH,
+  IMPORT_CARD_HEIGHT,
+  IMPORT_CARD_ROW_PITCH,
+  IMPORT_CARD_WIDTH,
+  buildPromptNodes,
+  importCardPositions,
+  parsePromptImportFormat,
+  resolveCardSize,
+} from "./promptImportFormat";
 
 /** 构造一块导入格式文本（标题 + ```text 围栏 + ratio 行 + 正文） */
 /** noUncheckedIndexedAccess 守卫：越界即失败，不把断言弱化为可选链 */
@@ -189,14 +198,61 @@ describe("buildPromptNodes", () => {
     expect(indexed(nodes, 1).data.size).toBe("1152x2048");
   });
 
-  it("位置按 6 列栅格平铺", () => {
+  it("位置按卡片真实尺寸铺开：列距 420，整行以 origin 为中心", () => {
     const nodes = buildPromptNodes(
       Array.from({ length: 3 }, (_, i) => ({ title: `图${i}`, ratio: "1:1", prompt: "p" })),
       config,
       { x: 100, y: 50 },
     );
-    expect(indexed(nodes, 0).position).toEqual({ x: 100, y: 50 });
-    expect(indexed(nodes, 1).position).toEqual({ x: 130, y: 50 });
-    expect(indexed(nodes, 2).position).toEqual({ x: 160, y: 50 });
+    // 3 张一行宽 380*3 + 40*2 = 1220，中心落在 origin.x → 首张 -320
+    expect(indexed(nodes, 0).position).toEqual({ x: -320, y: 50 });
+    expect(indexed(nodes, 1).position).toEqual({ x: 100, y: 50 });
+    expect(indexed(nodes, 2).position).toEqual({ x: 520, y: 50 });
+  });
+});
+
+describe("importCardPositions", () => {
+  it("单张卡仍落在 origin（与新建一张卡的落点一致）", () => {
+    expect(importCardPositions({ x: 100, y: 50 }, 1)).toEqual([{ x: 100, y: 50 }]);
+  });
+
+  it("三列铺开：第 4 张换行，列距 420 / 行距 400", () => {
+    const positions = importCardPositions({ x: 1000, y: 200 }, 4);
+    // 第一行三张以 origin 为中心：1000-420 / 1000 / 1000+420
+    expect(indexed(positions, 0)).toEqual({ x: 580, y: 200 });
+    expect(indexed(positions, 1)).toEqual({ x: 1000, y: 200 });
+    expect(indexed(positions, 2)).toEqual({ x: 1420, y: 200 });
+    // 第 4 张换到下一行，最后一行居中 → 回到 origin.x
+    expect(indexed(positions, 3)).toEqual({ x: 1000, y: 200 + IMPORT_CARD_ROW_PITCH });
+  });
+
+  it("8 张卡两两不重叠（列距 ≥ 卡宽 + 间距，行距 ≥ 卡高）", () => {
+    const positions = importCardPositions({ x: 0, y: 0 }, 8);
+    expect(positions).toHaveLength(8);
+    expect(IMPORT_CARD_COLUMN_PITCH).toBeGreaterThanOrEqual(400);
+    expect(IMPORT_CARD_ROW_PITCH).toBeGreaterThanOrEqual(IMPORT_CARD_HEIGHT);
+    for (let i = 0; i < positions.length; i++) {
+      for (let j = i + 1; j < positions.length; j++) {
+        const a = indexed(positions, i);
+        const b = indexed(positions, j);
+        const dx = Math.abs(a.x - b.x);
+        const dy = Math.abs(a.y - b.y);
+        // 矩形不重叠：只要有一个轴的距离 ≥ 卡宽 / 卡高，两张卡就不交叠
+        expect(dx >= IMPORT_CARD_WIDTH || dy >= IMPORT_CARD_HEIGHT, `第 ${i} 与 ${j} 张重叠`).toBe(
+          true,
+        );
+      }
+    }
+    // 坐标必须彼此不同，不能整批叠在同一个点
+    expect(new Set(positions.map((p) => `${p.x},${p.y}`)).size).toBe(8);
+  });
+
+  it("数量非法 / 为 0 时返回空数组，且不修改 origin", () => {
+    expect(importCardPositions({ x: 1, y: 2 }, 0)).toEqual([]);
+    expect(importCardPositions({ x: 1, y: 2 }, -3)).toEqual([]);
+    expect(importCardPositions({ x: 1, y: 2 }, Number.NaN)).toEqual([]);
+    const origin = { x: 7, y: 9 };
+    importCardPositions(origin, 5);
+    expect(origin).toEqual({ x: 7, y: 9 });
   });
 });

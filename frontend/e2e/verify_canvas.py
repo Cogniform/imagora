@@ -18,9 +18,11 @@
 前置：本地服务已启动（uv run python -m main ui --port 7860），且已安装：
   pip install playwright && playwright install chromium
 
-运行：python frontend/e2e/verify_canvas.py
+运行：python frontend/e2e/verify_canvas.py [--base URL] [--only 关键字]
+      --base 也可用 IMAGORA_E2E_BASE 环境变量提供（命令行优先）；--only 默认不过滤（全量）
 """
 
+import argparse
 import base64
 import os
 import struct
@@ -30,7 +32,8 @@ import zlib
 
 from playwright.sync_api import sync_playwright
 
-BASE = "http://127.0.0.1:7860"
+DEFAULT_BASE = "http://127.0.0.1:7860"
+BASE = os.environ.get("IMAGORA_E2E_BASE", DEFAULT_BASE)
 
 # 1x1 PNG（用于上传，避免依赖 output/.assets 里的真实图片）
 PNG_B64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
@@ -103,9 +106,13 @@ def node_pos(page, type_):
 
 
 results = []
+# --only 过滤词：空 = 全量。由 main() 按命令行覆盖。
+ONLY = ""
 
 
 def check(name, ok, detail=""):
+    if ONLY and ONLY.lower() not in name.lower():
+        return
     print(
         ("PASS" if ok else "FAIL") + " | " + name + ((" | " + detail) if detail else "")
     )
@@ -127,6 +134,21 @@ def click_hover_action(node_locator, name):
 
 
 def main():
+    global BASE, ONLY
+    parser = argparse.ArgumentParser(description="画布核心交互回归（E2E）")
+    parser.add_argument(
+        "--base",
+        default=BASE,
+        help=f"服务地址，默认 {DEFAULT_BASE}（也可用 IMAGORA_E2E_BASE 环境变量）",
+    )
+    parser.add_argument(
+        "--only",
+        default="",
+        help="只判定名称包含该关键字的断言（默认不过滤 = 全量）",
+    )
+    args = parser.parse_args()
+    BASE = args.base.rstrip("/")
+    ONLY = args.only.strip()
     # CI Windows runner 默认 stdout 为 cp1252，无法编码中文（PASS/FAIL 断言名）→ 强制 UTF-8
     sys.stdout.reconfigure(encoding="utf-8")
     # 自包含测试图片：写临时文件，通过 file chooser 上传
@@ -1141,6 +1163,10 @@ def main():
                     )
 
         browser.close()
+
+    if ONLY and not results:
+        print(f"\n--only {ONLY!r} 没有匹配任何断言（TOTAL 0），按失败处理")
+        return 1
 
     failed = [n for n, ok in results if not ok]
     print()
