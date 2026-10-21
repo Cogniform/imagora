@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { WorkflowEdge, WorkflowNode } from "./types";
-import { autoConnect, autoConnectSelection, buildGroupNode, buildPromptNode, canConnect, collectIncomingImages, computeCounts, extractAnimClasses, isImageFile, mergeSubmissionGraph, snapshotIncomingAbsPaths, staggerCreatePosition, updatePromptNode, updateSelectedPromptOutputDirs, withEnterAnim, workflowToCanvas } from "./workflow";
+import { autoConnect, autoConnectSelection, buildGroupNode, buildPromptNode, canConnect, collectIncomingImages, collectPromptRefImages, computeCounts, extractAnimClasses, isImageFile, mergeSubmissionGraph, snapshotIncomingAbsPaths, staggerCreatePosition, updatePromptNode, updateSelectedPromptOutputDirs, withEnterAnim, workflowToCanvas } from "./workflow";
 
 /** noUncheckedIndexedAccess 守卫：越界即失败，不把断言弱化为可选链 */
 function indexed<T>(items: ArrayLike<T>, at: number): T {
@@ -711,5 +711,81 @@ describe("mergeSubmissionGraph", () => {
     const edge = out.edges.find((e) => e.target === "img-bbb")!;
     expect(edge).toBeTruthy();
     expect(edge.source).toBe("prompt-sub-1-import-sub-1");
+  });
+});
+
+describe("collectPromptRefImages", () => {
+  // 提示词 p 的入边：img-a、img-b、img-c（图片组 g 里套 img-c，验证组递归仍算候选池）
+  const nodes = [promptNode("p"), imageNode("img-a"), imageNode("img-b"), imageNode("img-c"), groupNode("g")];
+  const edges = [edge("img-a", "p"), edge("img-b", "p"), edge("img-c", "g"), edge("g", "p")];
+
+  function names(list: WorkflowNode[]): string[] {
+    return list.map((n) => (n.type === "image" ? n.data.name : "?"));
+  }
+
+  it("mode all: a prompt without any reference keeps the old collect-all behaviour", () => {
+    const result = collectPromptRefImages(nodes, edges, "p", "product photo, studio light");
+    expect(result.mode).toBe("all");
+    expect(result.unknown).toEqual([]);
+    expect(names(result.images).sort()).toEqual(["img-a.png", "img-b.png", "img-c.png"]);
+  });
+
+  it("mode all: an email address alone does not switch the run to explicit", () => {
+    const result = collectPromptRefImages(nodes, edges, "p", "contact user@example.com");
+    expect(result.mode).toBe("all");
+    expect(result.images).toHaveLength(3);
+  });
+
+  it("mode all: an escaped trigger does not switch the run to explicit", () => {
+    const result = collectPromptRefImages(nodes, edges, "p", "@@img-a.png is literal");
+    expect(result.mode).toBe("all");
+    expect(result.images).toHaveLength(3);
+  });
+
+  it("mode explicit: only the referenced images are kept", () => {
+    const result = collectPromptRefImages(nodes, edges, "p", "use @img-b.png only");
+    expect(result.mode).toBe("explicit");
+    expect(result.unknown).toEqual([]);
+    expect(names(result.images)).toEqual(["img-b.png"]);
+  });
+
+  it("mode explicit: keeps reference order and dedupes repeats", () => {
+    const result = collectPromptRefImages(nodes, edges, "p", "@img-b.png then @img-a.png then @img-b.png");
+    expect(result.mode).toBe("explicit");
+    expect(names(result.images)).toEqual(["img-b.png", "img-a.png"]);
+  });
+
+  it("mode explicit: images reached through a group edge are referenceable", () => {
+    const result = collectPromptRefImages(nodes, edges, "p", "@{img-c.png}");
+    expect(result.mode).toBe("explicit");
+    expect(names(result.images)).toEqual(["img-c.png"]);
+  });
+
+  it("mode invalid: an unknown name is reported and the matched ones are still returned", () => {
+    const result = collectPromptRefImages(nodes, edges, "p", "@img-a.png and @nope.png");
+    expect(result.mode).toBe("invalid");
+    expect(result.unknown).toEqual(["nope.png"]);
+    expect(names(result.images)).toEqual(["img-a.png"]);
+  });
+
+  it("mode invalid: every reference unknown yields no images instead of falling back to all", () => {
+    const result = collectPromptRefImages(nodes, edges, "p", "@x.png @y.png");
+    expect(result.mode).toBe("invalid");
+    expect(result.unknown).toEqual(["x.png", "y.png"]);
+    expect(result.images).toEqual([]);
+  });
+
+  it("mode invalid: an image not wired to the prompt is not referenceable", () => {
+    const detached = [...nodes, imageNode("img-z")];
+    const result = collectPromptRefImages(detached, edges, "p", "@img-z.png");
+    expect(result.mode).toBe("invalid");
+    expect(result.unknown).toEqual(["img-z.png"]);
+    expect(result.images).toEqual([]);
+  });
+
+  it("mode all: a prompt with no incoming edges stays empty (unchanged legacy path)", () => {
+    const result = collectPromptRefImages([promptNode("p")], [], "p", "plain");
+    expect(result.mode).toBe("all");
+    expect(result.images).toEqual([]);
   });
 });

@@ -6,6 +6,8 @@
 - [`prompt-import-format.md`](prompt-import-format.md) — 通用粘贴导入格式（`=== 标题 ===` + 代码围栏 + `ratio: N:M`）
 - [`ecom-prompt-import-format.md`](ecom-prompt-import-format.md) — 电商专用模板（固定轮播/详情批次）
 - [`reference-survey.md`](reference-survey.md) — 参考实现调研：四份外部画布源码的可借鉴清单、license 边界、收益×成本路线（**只读设计，代码只可借鉴 MIT 的那一份**）
+- [`mask-inpainting-design.md`](mask-inpainting-design.md) — 蒙版局部重绘：alpha 语义反转只发生一次 / 坐标归一化 / 节流插值 / 单蒙版约束
+- [`prompt-refs-design.md`](prompt-refs-design.md) — 提示词 `@` 引用：候选池口径 / 语法与转义 / 引用对不上必须中止 / 发给上游前剥标记
 
 配置数据只有一份（`.env` / `config.json`），界面是它的一个编辑入口——分层与归属见 [ARCHITECTURE.md](ARCHITECTURE.md) 4.4。
 

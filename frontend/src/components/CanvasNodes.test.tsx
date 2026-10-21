@@ -6,6 +6,7 @@ import { ReactFlowProvider } from "@xyflow/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { GroupNode, ImageNode, PromptNode } from "./CanvasNodes";
+import type { CanvasImageNodeData } from "../types";
 
 afterEach(cleanup);
 
@@ -14,10 +15,17 @@ function nodeProps<T extends ElementType>(props: Partial<ComponentProps<T>>): Co
   return props as ComponentProps<T>;
 }
 
-function renderImageNode(onZoom = vi.fn(), onCanvasDoubleClick = vi.fn(), lod?: boolean) {
+function renderImageNode(
+  onZoom = vi.fn(),
+  onCanvasDoubleClick = vi.fn(),
+  lod?: boolean,
+  dataPatch: Partial<CanvasImageNodeData> = {},
+) {
   const onCrop = vi.fn();
   const onUpscale = vi.fn();
   const onSplit = vi.fn();
+  const onMask = vi.fn();
+  const onClearMask = vi.fn();
   const props = nodeProps<typeof ImageNode>({
     id: "image-1",
     type: "image",
@@ -29,6 +37,7 @@ function renderImageNode(onZoom = vi.fn(), onCanvasDoubleClick = vi.fn(), lod?: 
       ext: "png",
       refCount: 0,
       absPath: "C:\\sample.png",
+      ...dataPatch,
     },
     selected: false,
     lod,
@@ -38,6 +47,8 @@ function renderImageNode(onZoom = vi.fn(), onCanvasDoubleClick = vi.fn(), lod?: 
     onCrop,
     onUpscale,
     onSplit,
+    onMask,
+    onClearMask,
   });
 
   render(
@@ -47,7 +58,7 @@ function renderImageNode(onZoom = vi.fn(), onCanvasDoubleClick = vi.fn(), lod?: 
       </ReactFlowProvider>
     </div>,
   );
-  return { onZoom, onCanvasDoubleClick, onCrop, onUpscale, onSplit };
+  return { onZoom, onCanvasDoubleClick, onCrop, onUpscale, onSplit, onMask, onClearMask };
 }
 
 describe("ImageNode", () => {
@@ -75,6 +86,7 @@ describe("ImageNode", () => {
     expect(screen.getByRole("button", { name: "裁剪图片" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "放大图片" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "切分图片" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "蒙版重绘" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "替换图片" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "删除图片" })).toBeTruthy();
   });
@@ -108,6 +120,30 @@ describe("ImageNode", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "切分图片" }));
     expect(onSplit).toHaveBeenCalledWith("image-1");
+  });
+
+  it("wires the mask button to its handler", () => {
+    const { onMask } = renderImageNode();
+
+    fireEvent.click(screen.getByRole("button", { name: "蒙版重绘" }));
+    expect(onMask).toHaveBeenCalledWith("image-1");
+  });
+
+  it("hides the mask badge while the image carries no mask", () => {
+    renderImageNode();
+
+    // 没设过蒙版就不该出现角标：蒙版会一直跟着图走，多一个常驻标签等于噪声。
+    expect(screen.queryByRole("button", { name: "清除蒙版" })).toBeNull();
+  });
+
+  it("shows a clearable mask badge once the image carries a mask", () => {
+    const { onClearMask } = renderImageNode(vi.fn(), vi.fn(), undefined, {
+      maskDataUrl: "data:image/png;base64,AAAA",
+    });
+
+    // 蒙版对后续每次生成都生效，用户会忘掉自己设过 —— 角标本身就是撤销入口。
+    fireEvent.click(screen.getByRole("button", { name: "清除蒙版" }));
+    expect(onClearMask).toHaveBeenCalledWith("image-1");
   });
 
   it("leaves handle dimensions to the zoom-aware canvas styles", () => {

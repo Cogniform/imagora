@@ -5,7 +5,7 @@ FastAPI 路由级 + 纯逻辑测试，**不调真实上游 API、不花钱**。�
 ## 本地常用命令（在项目根目录执行）
 
 ```powershell
-# 后端全量（454 用例）
+# 后端全量（467 用例）
 .\.venv\Scripts\python.exe -m pytest
 # 按模块筛选
 .\.venv\Scripts\python.exe -m pytest tests/test_core_config.py tests/test_server_helpers.py
@@ -22,11 +22,11 @@ cd frontend; npm test
 - **测试数字是 AGENTS 仪表盘数据源**：增/删测试用例必须同步 AGENTS「当前仪表盘」；数字意外变化（非新增导致）必须报告维护者
 - **别按变量名读断言**：`test_core_api.py` 里的 `calls["n"] == 3` 是**重试次数**计数器，与生成张数无关。看名字以为"多张已覆盖"过一次误判（CLI `--n` 的真覆盖在 `test_main_cli.py`，见 issue #34）
 
-## 文件索引（后端 pytest，共 454）——每个 test_*.py 测什么
+## 文件索引（后端 pytest，共 467）——每个 test_*.py 测什么
 
 | 文件 | 用例 | 覆盖 |
 | --- | --- | --- |
-| [`test_core_api.py`](test_core_api.py) | 18 | 尺寸解析 / 默认输出路径（并发唯一）/ 错误格式化 / 写文件瞬时锁重试 |
+| [`test_core_api.py`](test_core_api.py) | 24 | 尺寸解析 / 默认输出路径（并发唯一）/ 错误格式化 / 写文件瞬时锁重试 / **蒙版局部重绘（mask_data_url 落临时文件并进 multipart 的 `mask` 字段、临时文件必删、无底图时报清晰错误、mask_path 优先、data URL 非法报错）** |
 | [`test_core_batch.py`](test_core_batch.py) | 10 | 配置读取 / 路径解析 / 模块过滤 / dry-run |
 | [`test_core_config.py`](test_core_config.py) | 26 | API Key 跟随 profile / profile 解析优先级与缺失回退 / 白名单校验 / RATIOS 表结构 / **配置来源视图（值 + 来自哪一层、.env 与系统环境变量区分、密钥不回传值）** / **`normalize_model_id` 只在当前 profile 内折叠连字符、不跨 profile 借名** |
 | [`test_core_config_override.py`](test_core_config_override.py) | 16 | `.env` 本机覆盖通道（`BASE_URL_` / `MODEL_` / `API_PATH_<PROFILE>`）：**未设环境变量时行为与没有覆盖时逐字相同**、覆盖只影响自己那一个键、只对当前 profile 生效、换 profile 后覆盖跟着换、空值视为未设置、来源标注区分 `.env` 与系统环境变量、删掉覆盖行后回到 config.json profile、非覆盖键没有环境变量名 |
@@ -46,16 +46,22 @@ cd frontend; npm test
 | [`test_server_helpers.py`](test_server_helpers.py) | 27 | 窗口分配 / 安全路径白名单 / upload-ref / delete-ref / generate 同步性 / history 注册表解析 + inputRefs/inputRefMissing / **/api/history 分页 hasMore** / _persist_submission 含 temp_bases / 导入与展示同源（注册表副本 + 账本 output 原路径双收，含画布回流回归）/ **静态产物 MIME 钉死（不受 Windows 注册表 `.js` 被写成 text/plain 影响）** |
 | [`test_server_canvas.py`](test_server_canvas.py) | 18 | canvas 路由 / workflow 往返（v2）/ missing 收集 / ref_paths 放行 |
 | [`test_server_tasks.py`](test_server_tasks.py) | 10 | generate 提交即返回 / multipart 临时文件清理 + temp 参考图注册账本 / **参考图提交时注册（源文件删后账本仍完整）** / 保存消息为绝对路径 / 路径校验 / 任务路由 |
+| [`test_server_generate_mask.py`](test_server_generate_mask.py) | 7 | 蒙版重绘链路：`/api/generate` 收 `mask` Form（空白视为未传、去掉首尾空白）并进 `GenerationTask` / `run_generation` 把 mask 转交 `generate_image` 且**强制走图生图**（无参考图时 `images=[]` 交给 core 报错、不静默跳过、消息记「蒙版重绘 · 无参考图」）/ 无 mask 时行为逐字不变 |
 | [`test_server_cost.py`](test_server_cost.py) | 15 | /api/history/stats 聚合与 days 窗口、空账本 / 预算读写（默认不限、落盘回读）/ /api/budget/check 预检（按张数、按 items、单次上限边界）/ /api/generate 预算闸门（超限 409 → 确认后放行、不限不拦）/ /api/generate/batch（合法提交 + 空提示词/坏参考图逐条跳过、空 items 400、全非法不提交、超预算未确认不提交、确认后提交） |
 | [`test_main_process.py`](test_main_process.py) | 4 | 端口探测 / 祖先链回溯（Windows） |
 | [`test_main_cli.py`](test_main_cli.py) | 31 | CLI gen 子命令全链路（校验/输出解析/文生图+图生图+多参考/失败/--no-asset/比例档位）/ **`--n` 逐张请求（每次 `n=1`、各存各的账、部分失败保留已成功、默认单张行为不变）** / config 输出 |
 
-## 文件索引（前端 vitest，共 730，位于 frontend/src/）
+## 文件索引（前端 vitest，共 930，位于 frontend/src/）
 
 | 文件 | 用例 | 覆盖 |
 | --- | --- | --- |
 | [`layout.test.ts`](../frontend/src/layout.test.ts) | 29 | 分层布局 / 复杂连接 / 局部整理不漂移 / 多对多摊平 |
-| [`workflow.test.ts`](../frontend/src/workflow.test.ts) | 48 | 自动连线 / 动画类 / 连线约束 / 落点阶梯 / 节点构建器 / **updatePromptNode 幂等（无变化不产生新引用，防 running 逐秒重渲染）** / **canConnect 连线规则（组连组中转）** / **computeCounts 组链递归聚合 + 去重口径（重复条目数）+ 防环** / **引用溯源（数据最终流到的提示词数）** / **collectIncomingImages 嵌套组链展开** |
+| [`workflow.test.ts`](../frontend/src/workflow.test.ts) | 58 | 自动连线 / 动画类 / 连线约束 / 落点阶梯 / 节点构建器 / **updatePromptNode 幂等（无变化不产生新引用，防 running 逐秒重渲染）** / **canConnect 连线规则（组连组中转）** / **computeCounts 组链递归聚合 + 去重口径（重复条目数）+ 防环** / **引用溯源（数据最终流到的提示词数）** / **collectIncomingImages 嵌套组链展开** |
+| [`promptRefs.test.ts`](../frontend/src/promptRefs.test.ts) | 34 | 提示词 `@` 引用解析：`@name` / `@{my cat.png}` / `@@` 转义 / `@` 前必须是行首·空白·标点（挡 `user@example.com`）/ **最长匹配靠贪婪 tokenize**（`@cat.png.bak` 不退化到 `cat.png`）/ 零 token 判 `all`、全对上判 `explicit`、有对不上判 `invalid` 且仍返回能对上的 / 同名候选不丢弃 / `stripPromptRefs` 只剥标记不改正文 |
+| [`maskBrush.test.ts`](../frontend/src/maskBrush.test.ts) | 30 | 蒙版笔刷几何：坐标归一化 0..1（存像素窗口一缩放就错位）、`size` 占**短边**比例（4K 与 512 视觉粗细一致）、`appendPoint` 节流命中返回**原数组引用**（pointermove 每秒上百次，不节流数组会涨到几十万点）、`interpolatePoints` 在**像素空间**量距离（归一化空间在 16:9 图上横竖疏密不一）、`hasPaint` 只认 paint 笔画（只擦不涂等于没涂）、`maskBoundingBox` 每点减半径并夹回 [0,1] |
+| [`customValue.test.ts`](../frontend/src/customValue.test.ts) | 23 | 自由输入的纯函数层：归一化只折空白**不折大小写**（模型 ID 是上游字面标识）、**不做格式校验**（前端猜格式就会拦掉合法值）、只挡空与超长、清单里已有的值不造新选项、`mergeCustomOption` 未变更时返回**入参数组本身**（引用相等，否则 Select 内部 useMemo 全部失效） |
+| [`contextMenu.test.ts`](../frontend/src/contextMenu.test.ts) | 26 | 右键菜单内容与定位：按节点类型给动作（图片给裁剪/放大/切分/替换、提示词给运行/复制）、`selectedCount > 1` 才置顶「删除选中」、图片无 url 时动作 disabled、`clampMenuPosition` 四边夹紧、`menuHeight` 按项数算、`isMenuDismissKey` 只认 Escape/Tab |
+| [`edgeStyle.test.ts`](../frontend/src/edgeStyle.test.ts) | 36 | 连线四态样式：优先级 `selected > hovered > dimmed > idle`、`dimmedEdgeIds` 两端都不在选中集才降权且选中集为空返回 `[]`（不是全部淡出）、宽度/透明度/描边查表、dimmed 关掉流动动画（淡线还跑动画比不降权更吵） |
 | [`canvasDrop.test.ts`](../frontend/src/canvasDrop.test.ts) | 14 | 拖拽意图解析 / 文件识别 / 数量统计 / 示意文案 / isInsideRect |
 | [`previewZoom.test.ts`](../frontend/src/previewZoom.test.ts) | 5 | 缩放范围 / 平移夹紧 |
 | [`canvasHistory.test.ts`](../frontend/src/canvasHistory.test.ts) | 5 | 撤销 / 恢复 / 新分支清空 |
@@ -78,14 +84,16 @@ cd frontend; npm test
 | [`minimapVisible.test.ts`](../frontend/src/minimapVisible.test.ts) | 16 | 画布小地图显隐与缩放滑杆偏好：默认值（小地图默认关、滑杆默认 100%）、`zoomToSliderPercent`/`sliderPercentToZoom` 互为反函数往返、NaN/±Infinity 夹到端点而不抛错、localStorage 不可用时静默降级 |
 | [`rankByName.test.ts`](../frontend/src/rankByName.test.ts) | 10 | 模糊排序：query 是 name 的大小写不敏感**有序子序列**（`gi25` 命中 `gpt-image-2.5`）、边界命中加分优先、相邻匹配加分、跳跃扣分、空 query 返回**同一数组引用**、全角 U+2011 折叠后比对 |
 | [`optionGroups.test.ts`](../frontend/src/optionGroups.test.ts) | 6 | 分组归并：组间按首次出现顺序、组内保持源顺序、无分组的项归入空标题兜底组、全部无分组时返回单组、混合时兜底组排最后 |
-| [`CanvasNodes.test.tsx`](../frontend/src/components/CanvasNodes.test.tsx) | 23 | 节点操作栏 / 双击行为 / 组卡去重提示渲染 |
+| [`CanvasNodes.test.tsx`](../frontend/src/components/CanvasNodes.test.tsx) | 26 | 节点操作栏（含**蒙版重绘**入口）/ 双击行为 / 组卡去重提示渲染 / **蒙版角标只在带蒙版时出现，点一下即清除** |
 | [`Field.test.tsx`](../frontend/src/components/Field.test.tsx) | 8 | 字段壳：label 与控件经 id 关联、`hint` 与 `error` **共用同一个消息槽位**（invalid 时 error 顶掉 hint、任何时刻至多一行）、`aria-describedby` 无内容时不写空串、`aria-invalid` 条件展开、`action` 插槽渲染 |
 | [`GenerationPending.test.tsx`](../frontend/src/components/GenerationPending.test.tsx) | 7 | 生成中占位卡：`role="status"` + `aria-live` 语义、受控 `elapsed` 优先于自走表、进度条只改 `transform: scaleX()`（不给 width 做动画）、文案随秒数轮播 |
 | [`ImageCropDialog.test.tsx`](../frontend/src/components/ImageCropDialog.test.tsx) | 7 | 裁剪对话框：比例预设按钮（`aria-pressed`）、八向手柄拖拽的位移换算（先除 stage 宽高再交给 `resizeCrop`）、遮罩用 `boxShadow` spread 覆盖整块视口、确认回传 dataUrl、取消关闭。测试用 `vi.mock("../imageOps", …)` 部分替身（`vi.importActual` 展开真身、只换 `readImageSize` / `cropDataUrl` 两个 canvas I/O 函数），几何纯函数全走真实实现 |
 | [`ImageUpscaleDialog.test.tsx`](../frontend/src/components/ImageUpscaleDialog.test.tsx) | 9 | 放大对话框：目标长边预设与自定义、默认值（原长边 ×2 且夹在 [1024, 4096]）、换算文案（`原 1024×768 → 2048×1536（2.0×）· 显示比例 4:3`）、busy 时按钮文案变化**必须按 `data-testid` 查不能按文本**（文案会变导致按名查丢）、卸载后迟到的放大结果不再回调 `onConfirm` |
+| [`MaskBrushDialog.test.tsx`](../frontend/src/components/MaskBrushDialog.test.tsx) | 13 | 蒙版笔刷对话框：涂改笔画累积 / 橡皮擦 / 笔刷粗细滑杆 / 清除 / **空蒙版时确认按钮禁用并给提示**（空蒙版等于整图重绘，花钱白干）/ 确认回传与原图同尺寸的 PNG data URL。jsdom 的 `getContext("2d")` 返回 null、`toDataURL` 抛 not implemented，故桩 `toDataURL` |
+| [`NodeContextMenu.test.tsx`](../frontend/src/components/NodeContextMenu.test.tsx) | 14 | 节点右键菜单：`role="menu"` 语义与每项 `role="menuitem"`、点外部 / Escape / Tab / resize / scroll 关闭、**disabled 项用 `aria-disabled` 而不是原生 disabled**（原生会让键盘焦点跳过）、挂载时 pushPopup 让 Esc 先收菜单、贴底右键不出屏（量真实高度再夹） |
 | [`ProviderModal.test.tsx`](../frontend/src/components/ProviderModal.test.tsx) | 22 | 添加第三方供应商弹窗：Provider ID 正则与地址协议的即时校验、协议预设切换与路径联动、探测模型（成功切下拉并选第一个 / 失败留文本框 / 「手填」可切回自由输入）、提交与错误提示 |
 | [`ModalShell.test.tsx`](../frontend/src/components/ModalShell.test.tsx) | 5 | 弹窗基座：dialog 语义 / 面板与遮罩点击分流 / Esc 关闭与焦点归还 / **下拉展开时 Esc 先收下拉、不关弹窗** |
-| [`Select.test.tsx`](../frontend/src/components/Select.test.tsx) | 13 | 自定义下拉：listbox 语义 / 键盘导航 / 点外部关闭 / **展开列表挂到 body（不被滚动容器裁切）** |
+| [`Select.test.tsx`](../frontend/src/components/Select.test.tsx) | 24 | 自定义下拉：listbox 语义 / 键盘导航 / 点外部关闭 / **展开列表挂到 body（不被滚动容器裁切）** / **自由输入（`allowCustom`：精确命中走正常选中、校验不过时 Enter 什么都不做、清单为空也能展开、自定义行放在 listbox 之外）** |
 | [`popupLayer.test.ts`](../frontend/src/popupLayer.test.ts) | 5 | 浮层计数：push/pop 配对、嵌套多层、**多余 pop 不弄成负数**（否则弹窗再也关不掉）/ reset |
 | [`ResultPanel.test.tsx`](../frontend/src/components/ResultPanel.test.tsx) | 7 | 结果区 5 态面板 / 切换交叉淡化（旧层保留至淡出移除） |
 | [`WorkflowModals.test.tsx`](../frontend/src/components/WorkflowModals.test.tsx) | 2 | ZoomModal Portal 点击隔离（点图片/空白不误关外层宿主遮罩） |

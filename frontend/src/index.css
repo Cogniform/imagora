@@ -27,6 +27,26 @@
   --bg-size: auto, auto, auto;
 }
 
+/* ============ 连线（edge）三态描边 ============
+ * 由 edgeStyle.ts 以 `var(--edge-stroke-*)` 字符串形式内联到 <path> 上（TS 里不写死颜色），
+ * 所以这三个 token 是连线的唯一取色处：换主体色 / 接暗色主题时连线跟着走。
+ * 亮色一套（本段），暗色一套（下方 body[data-ds-dark-theme]）。
+ * 目前产品只有亮色外观（grep 无 prefers-color-scheme / data-theme 机制），
+ * 暗色段是预留挂点：真接暗色主题时只要让根节点带上该属性即可生效，无需再动 TS。
+ * 为什么 hovered 与 selected 都偏主体色：悬停是"我现在指这条"，选中是"我要删这条"，
+ * 两者都要从背景连线里跳出来；用不同深度区分，避免同色同权分不清。 */
+:root {
+  --edge-stroke-idle: #7c8994;
+  --edge-stroke-hovered: var(--color-brand);
+  --edge-stroke-selected: var(--color-brand-dark);
+}
+
+body[data-ds-dark-theme] {
+  --edge-stroke-idle: #8b98a5;
+  --edge-stroke-hovered: #cbd5e1;
+  --edge-stroke-selected: #f1f5f9;
+}
+
 /* 纯白：不带纹理，也不跟主体色 */
 html[data-bg="plain"],
 .bg-swatch--plain {
@@ -640,8 +660,11 @@ html[data-canvas-bounds="off"] .studio-canvas .react-flow__renderer {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-brand) 16%, transparent), 0 14px 30px rgba(33,44,53,.16) !important;
 }
 .studio-canvas .node-pop .field-control { background: var(--surface-inset); }
-.studio-canvas .react-flow__edge-path { stroke: #7c8994; stroke-width: 1.5; }
-.studio-canvas .react-flow__edge.selected .react-flow__edge-path { stroke: var(--color-brand); stroke-width: 2.5; }
+/* 连线描边取 --edge-stroke-* 三个 token（见文件开头「连线三态描边」段）：
+   这两条是无内联样式时的兜底（如工作流加载后首帧、或 JS 未接管时），
+   实际悬停/选中/降权由 edgeStyle.ts 内联到 <path> 上，内联优先级更高。 */
+.studio-canvas .react-flow__edge-path { stroke: var(--edge-stroke-idle); stroke-width: 1.5; }
+.studio-canvas .react-flow__edge.selected .react-flow__edge-path { stroke: var(--edge-stroke-selected); stroke-width: 2.5; }
 .studio-canvas .react-flow__handle { box-shadow: 0 0 0 3px rgba(255,255,255,.85); }
 
 /* Gallery, history and modal surfaces share the same product language.
@@ -1545,17 +1568,16 @@ html[data-canvas-bounds="off"] .studio-canvas .react-flow__renderer {
   stroke: var(--color-brand) !important;
   stroke-width: 3 !important;
 }
-/* 直接悬停连线：0.1s 延迟后亮起（与 node 核验的 edge-highlight 同款视觉）。
-   延迟只在「进入 hover」方向生效（写在 :hover 规则里），离开时立即回退不拖沓。
-   只过渡 stroke/stroke-width 两个属性，不动 dasharray 动画（animated 边不受影响）。 */
+/* 连线状态过渡：线宽 / 透明度 / 描边色都走 120ms，悬停与降权是"渐变"而不是"跳变"。
+   为什么颜色也放进过渡：悬停/选中的描边色由 edgeStyle.ts 内联写入（内联只设值、不设 transition），
+   颜色不进 transition 就会硬切，与线宽渐变的节奏对不上。
+   过渡只写在这三个属性上，不动 dasharray —— animated 边的流动动画不受影响。 */
 .react-flow__edge .react-flow__edge-path {
-  transition: stroke 0.25s ease, stroke-width 0.25s ease;
+  transition: stroke 120ms ease, stroke-width 120ms ease, opacity 120ms ease;
 }
-.react-flow__edge:hover .react-flow__edge-path {
-  stroke: var(--color-brand);
-  stroke-width: 3;
-  transition-delay: 0.1s;
-}
+/* 悬停反馈由 edgeStyle.ts 驱动（edgeVisualState 的 hovered 态：加粗 + 描边色），
+   此处不再写 :hover 的 stroke / stroke-width —— 内联样式优先级更高，留着只会是
+   一套永远不生效、却让人以为"改这里就能调悬停样式"的死规则。 */
 .react-flow__node.node-related .panel-card,
 .react-flow__node.node-related .node-pop,
 .react-flow__node .panel-card.node-selected,

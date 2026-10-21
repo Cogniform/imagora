@@ -10,6 +10,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
+import { validateCustomValue } from "../customValue";
 import { groupOptions, type GroupedOption } from "../optionGroups";
 import { popPopup, pushPopup } from "../popupLayer";
 import { rankByName } from "../rankByName";
@@ -31,6 +32,12 @@ interface SelectProps {
   searchable?: boolean;
   /** 搜索无结果时的提示文案 */
   emptyLabel?: string;
+  /** 允许提交清单外的自由输入值（画布尺寸想填 `1280x720`、模型想填配置里还没有的 ID）。
+   *  **只在 `searchable` 同时为真时生效**：没有搜索框就没有打字入口，单开这个开关只会让人困惑。 */
+  allowCustom?: boolean | undefined;
+  /** 自由输入被确认时回调，收到的是归一化后的值（见 `customValue.ts`）。
+   *  开了 `allowCustom` 就要传它，否则「使用 “…”」那行点了没有下文。 */
+  onCreateCustom?: ((value: string) => void) | undefined;
   /** 由 Field 通过 cloneElement 注入，转发到触发器按钮上（按钮才是 label 的控件） */
   "aria-describedby"?: string;
   "aria-invalid"?: boolean;
@@ -74,6 +81,8 @@ export function Select({
   id,
   searchable = false,
   emptyLabel = "没有匹配项",
+  allowCustom = false,
+  onCreateCustom,
   "aria-describedby": describedBy,
   "aria-invalid": invalid,
   renderOption,
@@ -104,9 +113,33 @@ export function Select({
   const current = options.find((option) => option.value === value);
   const optionId = (index: number) => `${listboxId}-option-${index}`;
 
+  /** 自由输入只在「能打字 + 调用方允许」时成立：没有搜索框就没有输入入口。 */
+  const customEnabled = searchable && allowCustom === true;
+
+  /** 输入是否**精确**命中了某个可见选项（值或显示名都算，精确比对、大小写敏感）。 */
+  const exactMatch = useMemo<SelectOption | undefined>(() => {
+    const needle = query.trim();
+    if (needle === "") return undefined;
+    return visible.find((option) => option.value === needle || option.label === needle);
+  }, [visible, query]);
+
+  /**
+   * 待创建的自由输入值。四个条件同时成立才有值（否则 `null`）：
+   * 开关打开、输入非空、没有精确匹配、校验通过。
+   * 校验只挡「空」与「太长」，不做格式校验 —— 理由见 `customValue.ts` 文件头。
+   */
+  const customCandidate = useMemo<string | null>(() => {
+    if (!customEnabled || exactMatch !== undefined) return null;
+    const result = validateCustomValue(query);
+    return result.ok ? result.value : null;
+  }, [customEnabled, exactMatch, query]);
+
   const openList = (preferredIndex = selectedIndex >= 0 ? selectedIndex : 0) => {
-    if (!options.length) return;
-    setActiveIndex(Math.min(Math.max(preferredIndex, 0), options.length - 1));
+    // 没选项又没自由输入入口时不必展开；有入口时**清单为空也要能展开** ——
+    // 「一个选项都没有」正是最需要手填的场景（新供应商还没配模型）。
+    if (!options.length && !customEnabled) return;
+    // 清单为空时没有可高亮的项，activeIndex 保持 -1（Enter 会走自由输入分支）
+    setActiveIndex(options.length === 0 ? -1 : Math.min(Math.max(preferredIndex, 0), options.length - 1));
     setOpen(true);
   };
 
@@ -120,6 +153,12 @@ export function Select({
     const option = visible[index];
     if (!option) return;
     onChange(option.value);
+    closeList(true);
+  };
+
+  /** 提交自由输入：交给调用方落库，然后收起列表（与 `choose` 同一套收尾动作）。 */
+  const createCustom = (custom: string) => {
+    onCreateCustom?.(custom);
     closeList(true);
   };
 
@@ -184,11 +223,13 @@ export function Select({
   }, [open, visible.length]);
 
   useEffect(() => {
-    if (!options.length && open) {
+    // 清单为空时收起列表（避免一个空浮层飘着）。例外：开了自由输入就必须能展开 ——
+    // 「一个选项都没有」正是最需要手填的场景（新供应商还没配模型）。
+    if (!options.length && !customEnabled && open) {
       setOpen(false);
       setActiveIndex(-1);
     }
-  }, [open, options.length]);
+  }, [open, options.length, customEnabled]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -241,8 +282,27 @@ export function Select({
     }
     if (event.key === "Enter") {
       event.preventDefault();
-      if (open) choose(activeIndex);
-      else openList();
+      if (!open) {
+        openList();
+        return;
+      }
+      // 自由输入的三段判定（只在 searchable && allowCustom 时成立）：
+      // ① 输入**精确**命中某个可见项 → 走正常选中（`gpt-image-2.5` 打全了就该选它，
+      //    而不是造一个同名的新值）；
+      // ② 没精确命中且校验通过 → 提交自由输入；
+      // ③ 没精确命中但校验不过（超长）→ **什么都不做**，不回落到 `choose(activeIndex)`。
+      //    理由：此时用户的意图明确是「用我打的这串」，退化成选中某个模糊命中的行
+      //    等于悄悄改掉他要的值 —— 停在这里、让输入框留着让他改，是更小的错。
+      if (customEnabled && query.trim() !== "") {
+        if (exactMatch !== undefined) {
+          onChange(exactMatch.value);
+          closeList(true);
+        } else if (customCandidate !== null) {
+          createCustom(customCandidate);
+        }
+        return;
+      }
+      choose(activeIndex);
       return;
     }
     if (!fromInput && event.key === " ") {
@@ -391,6 +451,27 @@ export function Select({
                 </li>
               ))}
             </ul>
+            {/* 自由输入行：**放在 listbox 外面**，且是 role="button" 而不是 role="option"。
+                理由：`aria-activedescendant` 指向的是 listbox 内的 option 编号，这一行若
+                也算 option，要么得挤进 optionId 编号（上下键会停在它上面，用户以为能选），
+                要么就会被指到一个不存在的 id。它是「动作」不是「选项」，语义上就该分开。
+                也正因如此，`getAllByRole("option")` 的数量不受它影响。
+                固定在滚动区之外（`shrink-0`）：列表很长时它依然可见，不用滚到底才能手填。 */}
+            {customCandidate !== null && (
+              <div className="mt-1 shrink-0 border-t border-dashed border-neutral-200 pt-1">
+                <button
+                  type="button"
+                  role="button"
+                  data-testid="select-custom-option"
+                  className="select-option w-full"
+                  // 不抢焦点：搜索框保持聚焦，用户点错了还能接着改输入
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => createCustom(customCandidate)}
+                >
+                  <span className="truncate">使用 “{customCandidate}”</span>
+                </button>
+              </div>
+            )}
           </div>,
           document.body,
         )}

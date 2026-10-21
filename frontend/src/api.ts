@@ -215,6 +215,12 @@ export async function submitGenerate(
   formData.append("quality", params.quality);
   formData.append("output_dir", params.outputDir);
   formData.append("win", String(params.win)); // 与后端 Form 参数名一致，日志按窗口溯源
+  if (params.maskDataUrl) {
+    // 蒙版局部重绘：字段名必须与后端 `mask: str = Form("")` 一致。
+    // 传的是 data URL 而不是 File —— 后端把它随任务对象一起排队（core/tasks.py 的
+    // mask_data_url），落临时文件的时机在真正发请求前，避免排队久了临时文件被清掉。
+    formData.append("mask", params.maskDataUrl);
+  }
   if (params.allowOverBudget) {
     // 预算预检已确认：超限才放行（见 core/cost.py check_budget 与 /api/budget/check）
     formData.append("allow_over_budget", "true");

@@ -63,6 +63,7 @@ FastAPI 路由（`server.py`）与 CLI（`main.py`）共用的业务层。**不�
 - 被谁依赖：`server.py`（/api/generate）、`main.py`（gen 子命令）
 - 改后必测：`tests/test_core_api.py` + `tests/test_main_cli.py`
 - 注意：单测已 mock 上游，不花钱；改接口签名要同步 `server.py` 与 `main.py` 两处调用；落盘统一走 `write_file_with_retry`（Windows 杀软/云同步瞬时锁，只重试 PermissionError，见 [../docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md) 9.6）
+- 注意：**蒙版局部重绘**（`mask_path` / `mask_data_url`，后者优先被前者覆盖）。语义按 OpenAI `images/edits` 约定：**透明像素 = 要重绘的区域，不透明像素 = 保持原样**（前端 `MaskBrushDialog` 产出的正是这个格式）。有 mask 就必须走 edits 接口，所以 mask 没有底图时直接报 `mask 需要至少一张底图（image_path / images）`——OpenAI 契约里 mask 不能单独存在。`mask_data_url` 在函数内解析成临时文件、`try/finally` 保证返回前删除；**绝不能把 data URL 原样塞进 multipart**（上游必 400）
 
 ### [tasks.py](tasks.py)
 - 职责：生成任务状态机（纯内存 TaskManager：queued → running → done/failed/cancelled，终态 TTL 清理）
@@ -70,6 +71,7 @@ FastAPI 路由（`server.py`）与 CLI（`main.py`）共用的业务层。**不�
 - 被谁依赖：`server.py`（/api/generate、/api/tasks/*）
 - 改后必测：`tests/test_core_tasks.py` + `tests/test_server_tasks.py`
 - 注意：任务表纯内存；uvicorn 必须单 worker（见 ARCHITECTURE 9.6）
+- 注意：`GenerationTask.mask_data_url` 存的是**data URL 字符串而非临时文件路径**——任务可能排队很久，临时文件会被系统清理，data URL 随任务对象一起回收，不需要额外清理逻辑
 
 ### [registry.py](registry.py)
 - 职责：资产注册表（`output/.assets`，v2 包装，内容 sha1 去重，kind=canvas/result/ref，永不自动清理）
