@@ -51,7 +51,7 @@ cd frontend; npm test
 | [`test_main_process.py`](test_main_process.py) | 4 | 端口探测 / 祖先链回溯（Windows） |
 | [`test_main_cli.py`](test_main_cli.py) | 31 | CLI gen 子命令全链路（校验/输出解析/文生图+图生图+多参考/失败/--no-asset/比例档位）/ **`--n` 逐张请求（每次 `n=1`、各存各的账、部分失败保留已成功、默认单张行为不变）** / config 输出 |
 
-## 文件索引（前端 vitest，共 936，位于 frontend/src/）
+## 文件索引（前端 vitest，共 1020，位于 frontend/src/）
 
 | 文件 | 用例 | 覆盖 |
 | --- | --- | --- |
@@ -60,7 +60,7 @@ cd frontend; npm test
 | [`promptRefs.test.ts`](../frontend/src/promptRefs.test.ts) | 34 | 提示词 `@` 引用解析：`@name` / `@{my cat.png}` / `@@` 转义 / `@` 前必须是行首·空白·标点（挡 `user@example.com`）/ **最长匹配靠贪婪 tokenize**（`@cat.png.bak` 不退化到 `cat.png`）/ 零 token 判 `all`、全对上判 `explicit`、有对不上判 `invalid` 且仍返回能对上的 / 同名候选不丢弃 / `stripPromptRefs` 只剥标记不改正文 |
 | [`maskBrush.test.ts`](../frontend/src/maskBrush.test.ts) | 30 | 蒙版笔刷几何：坐标归一化 0..1（存像素窗口一缩放就错位）、`size` 占**短边**比例（4K 与 512 视觉粗细一致）、`appendPoint` 节流命中返回**原数组引用**（pointermove 每秒上百次，不节流数组会涨到几十万点）、`interpolatePoints` 在**像素空间**量距离（归一化空间在 16:9 图上横竖疏密不一）、`hasPaint` 只认 paint 笔画（只擦不涂等于没涂）、`maskBoundingBox` 每点减半径并夹回 [0,1] |
 | [`customValue.test.ts`](../frontend/src/customValue.test.ts) | 23 | 自由输入的纯函数层：归一化只折空白**不折大小写**（模型 ID 是上游字面标识）、**不做格式校验**（前端猜格式就会拦掉合法值）、只挡空与超长、清单里已有的值不造新选项、`mergeCustomOption` 未变更时返回**入参数组本身**（引用相等，否则 Select 内部 useMemo 全部失效） |
-| [`contextMenu.test.ts`](../frontend/src/contextMenu.test.ts) | 26 | 右键菜单内容与定位：按节点类型给动作（图片给裁剪/放大/切分/替换、提示词给运行/复制）、`selectedCount > 1` 才置顶「删除选中」、图片无 url 时动作 disabled、`clampMenuPosition` 四边夹紧、`menuHeight` 按项数算、`isMenuDismissKey` 只认 Escape/Tab |
+| [`contextMenu.test.ts`](../frontend/src/contextMenu.test.ts) | 29 | 右键菜单内容与定位：按节点类型给动作（图片给裁剪/放大/切分/替换、提示词给运行/复制）、`selectedCount > 1` 才置顶「删除选中」、图片无 url 时裁剪/放大/切分/蒙版 disabled 而**替换不禁用**（换图是丢图后的自救入口）、多选时给「仅删除此项」、**蒙版重绘项只在图片节点出现**、`clampMenuPosition` 四边夹紧、`menuHeight` 按项数算、`isMenuDismissKey` 只认 Escape/Tab |
 | [`edgeStyle.test.ts`](../frontend/src/edgeStyle.test.ts) | 36 | 连线四态样式：优先级 `selected > hovered > dimmed > idle`、`dimmedEdgeIds` 两端都不在选中集才降权且选中集为空返回 `[]`（不是全部淡出）、宽度/透明度/描边查表、dimmed 关掉流动动画（淡线还跑动画比不降权更吵） |
 | [`canvasDrop.test.ts`](../frontend/src/canvasDrop.test.ts) | 14 | 拖拽意图解析 / 文件识别 / 数量统计 / 示意文案 / isInsideRect |
 | [`previewZoom.test.ts`](../frontend/src/previewZoom.test.ts) | 5 | 缩放范围 / 平移夹紧 |
@@ -80,11 +80,15 @@ cd frontend; npm test
 | [`modelIcon.test.ts`](../frontend/src/modelIcon.test.ts) | 22 | 模型品牌识别：9 类品牌各自的 `includes` 命中、匹配顺序（`claude` 先于 `openai`）、`dall-e-3` 归 openai、大小写不敏感、**全角连字符 U+2011 归一化后仍能认出 `gpt`**（中转站真实踩过的坑）、空串与未知模型回落 `unknown`、每个品牌都有非空字形与中文名 |
 | [`snapGuide.test.ts`](../frontend/src/snapGuide.test.ts) | 38 | 拖拽吸附纯函数：左/中/右与上/中/下三对齐线取最近目标、x 与 y **独立决策**（可能只吸一轴）、阈值用严格 `<`（等于阈值不吸）、无邻居或全部超阈值时**原样返回不做任何位移也不偷偷退回网格**、`snapToGrid` 的 8px 对齐（含负坐标与小数）且 guides 恒空、NaN / Infinity / step<=0 安全退化不抛错（每帧拖拽都跑，抛错会让画布白屏） |
 | [`snapDrag.test.ts`](../frontend/src/snapDrag.test.ts) | 22 | 吸附接线层（纯函数 → React Flow `NodeChange`）：只拦 position 变更、多选拖拽按主节点算位移后整体平移、吸附位移写回 `position` 与 `positionAbsolute` 两个字段（少写一个节点会瞬移回原位）、对齐线只在拖拽帧产出、松手帧返回空 guides |
+| [`snapGuidesStore.test.ts`](../frontend/src/snapGuidesStore.test.ts) | 9 | 对齐线外置 store：拖拽每帧 `setSnapGuides` 时**按内容逐条比对**（同一组线重复写入不产生新快照），快照引用稳定 + `getSnapGuides` 返回同引用（否则 `useSyncExternalStore` 会死循环渲染）、订阅/退订、松手清空后通知一次 |
+| [`SnapGuides.test.tsx`](../frontend/src/components/SnapGuides.test.tsx) | 7 | 对齐线渲染组件：`axis` 决定竖线/横线、空快照不渲染任何线、位置只走 `style`（不进 React state）、订阅 store 后随变化重绘、卸载即退订（避免拖拽残留线） |
 | [`ImageSplitDialog.test.tsx`](../frontend/src/components/ImageSplitDialog.test.tsx) | 13 | 切分对话框：五个预设按钮与 `aria-pressed`、行列手填即时夹到 1~8、网格预览格子数（`split-cell` 数量）随行列变化、1×1 时确认禁用、文件名预览、确认后 `splitDataUrl` 收到 `{rows, cols}` 且 `onConfirm` 拿到数组、失败显示 `role="alert"` 且不回调。`vi.importActual` 部分替身只换 `splitDataUrl` / `readImageSize` |
 | [`minimapVisible.test.ts`](../frontend/src/minimapVisible.test.ts) | 16 | 画布小地图显隐与缩放滑杆偏好：默认值（小地图默认关、滑杆默认 100%）、`zoomToSliderPercent`/`sliderPercentToZoom` 互为反函数往返、NaN/±Infinity 夹到端点而不抛错、localStorage 不可用时静默降级 |
+| [`minimapColor.test.ts`](../frontend/src/minimapColor.test.ts) | 6 | 小地图节点取色（从 CanvasPage 抽出的模块级纯函数）：提示词用品牌色、图片/图片组两档中性灰、未知类型走更深的兜底色（旧工作流文件的 `node.type` 未必在当前三类里）、只做类型映射不读 DOM 与主题实值 |
 | [`rankByName.test.ts`](../frontend/src/rankByName.test.ts) | 10 | 模糊排序：query 是 name 的大小写不敏感**有序子序列**（`gi25` 命中 `gpt-image-2.5`）、边界命中加分优先、相邻匹配加分、跳跃扣分、空 query 返回**同一数组引用**、全角 U+2011 折叠后比对 |
 | [`optionGroups.test.ts`](../frontend/src/optionGroups.test.ts) | 6 | 分组归并：组间按首次出现顺序、组内保持源顺序、无分组的项归入空标题兜底组、全部无分组时返回单组、混合时兜底组排最后 |
-| [`CanvasNodes.test.tsx`](../frontend/src/components/CanvasNodes.test.tsx) | 28 | 节点操作栏（含**蒙版重绘**入口）/ 双击行为 / 组卡去重提示渲染 / **蒙版角标只在带蒙版时出现，点一下即清除** |
+| [`CanvasNodes.test.tsx`](../frontend/src/components/CanvasNodes.test.tsx) | 30 | 节点操作栏（含**蒙版重绘**入口）/ 双击行为 / 组卡去重提示渲染 / **蒙版角标只在带蒙版时出现，点一下即清除** / **`ImageNode` 与 `GroupNode` 的 memo 浅比较**（父组件重渲染但 props 全等时函数体不执行，用 getter 计数取证） |
+| [`CanvasPage.baseline.test.tsx`](../frontend/src/components/CanvasPage.baseline.test.tsx) | 53 | **CanvasPage 拆分护栏**（唯一渲染整页的文件）：`@xyflow/react` 走自建桩、真实渲染 `nodeTypes[type]`，钉住「拆了就崩」的接线——`nodeTypes` 身份在节点坐标变化时不变（否则全节点重挂）、14 个 deps 的回调身份、`modalOpen` 十条来源全为 true（拖放互斥）、撤销/重做与 Ctrl+A/Ctrl+S、吸附接线（`applySnapToChanges` 只拦 position）、右键菜单四项、保存/加载、任务状态机的 status 流转、画布偏好读写、counts 统计随节点增删刷新 |
 | [`Field.test.tsx`](../frontend/src/components/Field.test.tsx) | 8 | 字段壳：label 与控件经 id 关联、`hint` 与 `error` **共用同一个消息槽位**（invalid 时 error 顶掉 hint、任何时刻至多一行）、`aria-describedby` 无内容时不写空串、`aria-invalid` 条件展开、`action` 插槽渲染 |
 | [`GenerationPending.test.tsx`](../frontend/src/components/GenerationPending.test.tsx) | 7 | 生成中占位卡：`role="status"` + `aria-live` 语义、受控 `elapsed` 优先于自走表、进度条只改 `transform: scaleX()`（不给 width 做动画）、文案随秒数轮播 |
 | [`ImageCropDialog.test.tsx`](../frontend/src/components/ImageCropDialog.test.tsx) | 7 | 裁剪对话框：比例预设按钮（`aria-pressed`）、八向手柄拖拽的位移换算（先除 stage 宽高再交给 `resizeCrop`）、遮罩用 `boxShadow` spread 覆盖整块视口、确认回传 dataUrl、取消关闭。测试用 `vi.mock("../imageOps", …)` 部分替身（`vi.importActual` 展开真身、只换 `readImageSize` / `cropDataUrl` 两个 canvas I/O 函数），几何纯函数全走真实实现 |
@@ -98,7 +102,7 @@ cd frontend; npm test
 | [`ResultPanel.test.tsx`](../frontend/src/components/ResultPanel.test.tsx) | 7 | 结果区 5 态面板 / 切换交叉淡化（旧层保留至淡出移除） |
 | [`WorkflowModals.test.tsx`](../frontend/src/components/WorkflowModals.test.tsx) | 2 | ZoomModal Portal 点击隔离（点图片/空白不误关外层宿主遮罩） |
 | [`HistoryGallery.test.tsx`](../frontend/src/components/HistoryGallery.test.tsx) | 14 | 列表行渲染 / 参考图缺失琥珀提示 / 失败文案 / 提示词截断浮层（仅截断弹、跟随、离开消失） / **分页（首屏第 0 页、点加载更多按 offset 追加、搜索与状态筛选重置第 0 页、滚动接近底部自动追加、远离底部不触发）** / **成本看板指标、每行按钮与成败无关（复制 / 打开目录 / 导入画布）、参考图丢失只给条数提示且无重跑入口、保存预算回读** |
-| [`promptImportFormat.test.ts`](../frontend/src/promptImportFormat.test.ts) | 19 | 导入格式解析容错 / 尺寸映射 / 建卡 |
+| [`promptImportFormat.test.ts`](../frontend/src/promptImportFormat.test.ts) | 23 | 导入格式解析容错 / 尺寸映射 / 建卡 / **`importCardPositions` 按卡片真实尺寸铺排**（旧实现用 30px 栅格而卡片宽 380，整批导入会完全叠住；现按 420×326 间距、每行 3 张） |
 | [`cost.test.ts`](../frontend/src/cost.test.ts) | 6 | 金额/比例/耗时格式化（非法值回退 -）/ 预算摘要（不限与设限两种、兼容预检结果的 settings 形态）/ 看板主指标行顺序与文案 |
 | [`api-guards.test.ts`](../frontend/src/api-guards.test.ts) | 10 | `/api` 响应形状守卫（必填字段类型、可选字段「在但类型错」、多出的键放行）/ **providers 来源目录（缺字段放行、类型错拦下）** |
 | [`apiCatalog.test.ts`](../frontend/src/apiCatalog.test.ts) | 18 | 按接口地址命中来源 / 跨来源按 id 找模型（全角 U+2011 连字符折叠）/ 尺寸解析优先级（模型自带 > 来源级 > 后端兜底）/ 单价摘要与提示 / **qualityAppliesTo：豆包 Seedream 不认质量档（含中转站代理豆包的情形）** |

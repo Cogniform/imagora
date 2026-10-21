@@ -13,9 +13,13 @@
  *
  * ## 为什么「图片还没上传」时保留禁用项
  *
- * 图片节点的 URL 是异步来的（上传 / 生成回流）。此时若把预览 / 裁剪 / 放大 / 切分 / 替换
+ * 图片节点的 URL 是异步来的（上传 / 生成回流）。此时若把预览 / 裁剪 / 放大 / 切分 / 蒙版重绘
  * 直接从菜单里拿掉，用户只会看到孤零零一条「删除」，合理推断是「这个功能没有」，
  * 而不是「等图到了就有」。所以这些项**保留但 disabled**，菜单同时在教「能做什么」。
+ *
+ * 唯一的例外是「替换图片」：文件缺失（missing）时它正是恢复入口，不能再要求 hasUrl，
+ * 否则用户手里只剩一个点不亮的菜单。它只需要「这是一个图片节点」——而能弹出节点菜单
+ * 本身就意味着手里有一个真实节点（nodeId）。
  *
  * ## 为什么高度要算而不是写死
  *
@@ -88,9 +92,9 @@ const SEPARATOR: ContextMenuItem = { kind: "separator" };
  *
  * 动作 id（接线方按 id 分派，不要按 label 匹配 —— label 是给人看的，会改）：
  * - `delete-selection`：删除所有选中节点（仅 selectedCount > 1）
- * - `preview` / `crop` / `upscale` / `split` / `replace`：图片节点
+ * - `preview` / `crop` / `upscale` / `split` / `mask` / `replace`：图片节点
  * - `run` / `copy-prompt`：提示词节点
- * - `delete`：所有类型的单节点删除
+ * - `delete`：所有类型的单节点删除（多选时文案为「仅删除此项」，与顶部批量删除区分）
  */
 export function buildNodeMenu(nodeType: string, opts: NodeMenuOptions): ContextMenuItem[] {
   const items: ContextMenuItem[] = [];
@@ -102,14 +106,16 @@ export function buildNodeMenu(nodeType: string, opts: NodeMenuOptions): ContextM
   }
 
   if (nodeType === "image") {
-    // 没图时保留但禁用：直接消失会让用户以为功能不存在
+    // 没图时保留但禁用：直接消失会让用户以为功能不存在。
+    // 「替换图片」除外——文件缺失时它是最需要的恢复入口，不能在 missing 态再置灰。
     const disabled = !opts.hasUrl;
     items.push(
       makeAction("preview", "预览大图", { disabled }),
       makeAction("crop", "裁剪", { disabled }),
       makeAction("upscale", "放大", { disabled }),
       makeAction("split", "切分", { disabled }),
-      makeAction("replace", "替换图片", { disabled }),
+      makeAction("mask", "蒙版重绘", { disabled }),
+      makeAction("replace", "替换图片"),
       SEPARATOR,
     );
   } else if (nodeType === "prompt") {
@@ -117,7 +123,10 @@ export function buildNodeMenu(nodeType: string, opts: NodeMenuOptions): ContextM
   }
   // group 与未知类型：只剩删除
 
-  items.push(makeAction("delete", "删除", { danger: true }));
+  // 多选时顶部已有「删除所选 N 项」，底部若仍叫「删除」，两个范围不同的动作字面几乎一样，
+  // 用户很容易点错。这里把单节点删除显式写成「仅删除此项」。
+  const deleteLabel = opts.selectedCount > 1 ? "仅删除此项" : "删除";
+  items.push(makeAction("delete", deleteLabel, { danger: true }));
   return items;
 }
 

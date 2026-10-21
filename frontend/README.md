@@ -8,7 +8,7 @@ React 19 + TypeScript + Vite + Tailwind v4 + React Flow（`@xyflow/react`）。�
 npm install
 npm run dev        # 开发模式（热更新；需后端已启动，见下）
 npm run build      # tsc --noEmit + vite build → dist/（git 忽略，由后端服务托管）
-npm test           # vitest run（936 用例）
+npm test           # vitest run（1020 用例）
 npm run lint       # eslint
 npx tsc --noEmit   # 类型检查
 ```
@@ -36,6 +36,25 @@ E2E 报 `Executable doesn't exist` 但机器上其实装了别的修订版 Chrom
 # 或显式指定
 $env:IMAGORA_CHROMIUM = 'C:\path\to\chrome.exe'
 ```
+
+E2E 会往资产库里写测试图（上传/裁剪/切分都真落盘）。别让它打你的真实实例——起一个隔离实例，再用 `--base` 指过去：
+
+```powershell
+# 1) 隔离数据目录（放仓库外，避免被 git 看见；拷一份配置进去）
+$repo = 'D:\path\to\imagora'
+$h    = 'D:\tmp\imagora-e2e-home'
+New-Item -ItemType Directory -Force $h | Out-Null
+Copy-Item "$repo\config.json", "$repo\providers.local.json", "$repo\.env" $h -Force
+# 2) 用隔离目录当应用根起服务（output/ 与配置都落在 $h）
+cd $h
+$env:PYTHONPATH = $repo
+$env:IMAGORA_APP_ROOT = $h
+& "$repo\.venv\Scripts\python.exe" -m main ui --no-browser --port 7861
+# 3) 另开终端把 E2E 指过去
+& "$repo\.venv\Scripts\python.exe" "$repo\frontend\e2e\verify_canvas.py" --base http://127.0.0.1:7861
+```
+
+只复验几条：`--only 拖拽`（按断言名子串过滤；一条都没匹配时退出码 1，避免假绿）。`--base` 也可以由 `IMAGORA_E2E_BASE` 环境变量提供，命令行优先。
 
 ## 该目录特有坑
 
@@ -117,9 +136,9 @@ $env:IMAGORA_CHROMIUM = 'C:\path\to\chrome.exe'
 - 被谁依赖：CanvasPage（undo/restore）
 
 ### [promptImportFormat.ts](src/promptImportFormat.ts)
-- 职责：粘贴导入解析（`parsePromptImportFormat` 容错解析）、尺寸映射（`resolveCardSize`）、批量建卡（`buildPromptNodes`）
+- 职责：粘贴导入解析（`parsePromptImportFormat` 容错解析）、尺寸映射（`resolveCardSize`）、批量建卡（`buildPromptNodes`）、落点铺排（`importCardPositions`）
 - 被谁依赖：PromptImportModal、CanvasPage
-- 注意：格式规范见 [../docs/README.md](../docs/README.md)；缺漏进 issues 标红，绝不静默猜测
+- 注意：格式规范见 [../docs/README.md](../docs/README.md)；缺漏进 issues 标红，绝不静默猜测。**铺排必须按卡片真实尺寸算**（`CARD_W = 380` / `CARD_H = 326`，列距 420、行距 366、每行 3 张）：旧实现整批共用 `origin + (i % 6) * 30` 的 30px 栅格，而卡片宽 380，一次导入 8 张会完全叠成一张
 
 ### [recovery.ts](src/recovery.ts)
 - 职责：恢复快照归一化（`buildRecoverySnapshot`，剥离动画类/运行期字段）
@@ -140,7 +159,7 @@ $env:IMAGORA_CHROMIUM = 'C:\path\to\chrome.exe'
 ### [dataUrlFile.ts](src/dataUrlFile.ts)
 - 职责：把前端 canvas 导出的 `data:image/png;base64,...` 转成可上传的 `File`（`dataUrlToFile`），并生成派生图文件名（`derivedImageName`，形如 `crop-红苹果-20261020-130405.png`）
 - 被谁依赖：`components/CanvasPage.tsx`（裁剪 / 放大对话框的产出落库）
-- 注意：**非法 dataUrl 必须抛错而不是返回空 File** —— 上传 0 字节会在画布上多出一个永远加载失败的红框节点，比直接报错难排查得多。转换独立成模块的理由：`canvasUpload(files: File[])` 只收 `File`，这层 `atob` / `Blob` 不该撒进 1800 行的 CanvasPage.tsx，独立后能单测。支持 base64 与百分号编码两种载荷
+- 注意：**非法 dataUrl 必须抛错而不是返回空 File** —— 上传 0 字节会在画布上多出一个永远加载失败的红框节点，比直接报错难排查得多。转换独立成模块的理由：`canvasUpload(files: File[])` 只收 `File`，这层 `atob` / `Blob` 不该撒进 2357 行的 CanvasPage.tsx，独立后能单测。支持 base64 与百分号编码两种载荷
 
 ### [aspectIcon.ts](src/aspectIcon.ts)
 - 职责：尺寸比例图标几何（`aspectIconSize(ratio, long?)` 算空矩形的像素宽高、`ratioFromSizeLabel(label)` 从尺寸标签反解比例）
@@ -191,6 +210,11 @@ $env:IMAGORA_CHROMIUM = 'C:\path\to\chrome.exe'
 - 职责：吸附**接线层**——把 `snapGuide` 的纯函数结果翻译成 React Flow 的 `NodeChange[]`（`snapPositionChanges`），并算出要画的对齐线
 - 被谁依赖：`components/CanvasPage.tsx` 的 `onNodesChange`
 - 注意：吸附位移必须**同时写 `position` 与 `positionAbsolute`**（只写一个节点会瞬移回原位）；多选拖拽按主节点算位移再整体平移，不能各算各的；对齐线只在拖拽帧产出，松手帧返回空数组
+
+### [snapGuidesStore.ts](src/snapGuidesStore.ts)
+- 职责：对齐线的**外置 store**（`setSnapGuides` / `getSnapGuides` / `subscribe`），供 `components/SnapGuides.tsx` 用 `useSyncExternalStore` 订阅
+- 被谁依赖：`components/CanvasPage.tsx` 的 `onNodesChange`（写入）、`components/SnapGuides.tsx`（读取）
+- 注意：拖拽时每秒会写几十次，`setSnapGuides` **必须按内容逐条比对**（axis/position/targetId 全等就不换快照），否则 `useSyncExternalStore` 每帧重画；`getSnapGuides` 也必须返回稳定引用，返回新数组会触发 React 的无限重渲染保护。对齐线以前是 CanvasPage 的 state，等于拖一个节点就整页重渲染（2346 行的渲染树），抽出来是纯性能重构、DOM 契约不变
 
 ### [modelIcon.ts](src/modelIcon.ts)
 - 职责：从模型 ID 猜品牌（`modelBrand`）、品牌字形（`MODEL_BRAND_GLYPH`）、中文名（`modelBrandLabel`）
@@ -267,6 +291,11 @@ $env:IMAGORA_CHROMIUM = 'C:\path\to\chrome.exe'
 - 被谁依赖：`components/CanvasPage.tsx`（`<MiniMap>` 显隐 + `<Controls>` 里的缩放滑杆）
 - 注意：小地图默认 **`false`**——它固定占画布右下角 160×110，卡片少时是纯负担，用户显式打开才落盘。滑杆**用直接百分比 `p = 100z` 而不是对数刻度**：滑杆行程 5%~200% 与缩放区间 0.05~2 的跨度都正好是 40 倍，端点对齐后对数映射在数学上精确退化为直线（`ln p = ln 100 + ln z` 系数恰为 1），写一套 log 运算只是把同一根直线算两遍还多出浮点误差；直接百分比另有两个好处——读数就是用户看到的缩放百分比、100% 天然落在行程 48.7% 处接近居中。`ZOOM_SLIDER_MIN_PERCENT = 5` / `ZOOM_SLIDER_MAX_PERCENT = 200` **刻意写成模块常量而不是函数参数**，与 `CanvasPage.tsx` 的 ReactFlow `minZoom={0.05}` / `maxZoom={2}` 对齐；做成参数两处数字必然漂移（滑杆拖到底但视口还在缩是最难查的一类 bug）。两个换算函数互为反函数（往返误差 < 1e-9，单测钉住）；非法输入（NaN / ±Infinity）一律夹到端点而不抛错——滑杆是受控组件，抛错会让整个画布白屏
 
+### [minimapColor.ts](src/minimapColor.ts)
+- 职责：小地图节点取色（`minimapNodeColor(node)`）——提示词用 `var(--color-brand)`，图片 `#7c8994`、图片组 `#c4ccd4`、未知类型 `#a8b0b8`
+- 被谁依赖：`components/CanvasPage.tsx` 的 `<MiniMap nodeColor={minimapNodeColor}>`
+- 注意：**纯映射，不读 DOM 与主题实际值**（`MiniMap` 每次重画时按节点逐个调，读 `getComputedStyle` 会让小地图变成布局抖动源）；颜色取自现有色板，不新增第五套配色。它是从 CanvasPage 渲染体里抽出的模块级函数，抽出来只为可单测
+
 ### [recentPrompts.ts](src/recentPrompts.ts)
 - 职责：最近提示词挑选（`pickRecentPrompts(items, limit = 5, prefixLen = 40)`）——从生成历史里挑可直接复用的条目：按前 `prefixLen` 字归并近似版本并保留最新那条、丢弃空白与缺失项、取满 `limit` 即停；只做挑选不截断长度（视觉截断归展示层）
 - 被谁依赖：`App.tsx`（拉到历史后算出列表并存进 state）；再以 `recentPrompts` prop 经 `components/ResultPanel.tsx` 转给 `components/Gallery.tsx` 渲染成空态那一行（两个组件本身不 import 本模块）
@@ -309,7 +338,8 @@ $env:IMAGORA_CHROMIUM = 'C:\path\to\chrome.exe'
 
 ### 组件（components/；改后跑 `npm test` + E2E）
 
-- [`CanvasPage.tsx`](src/components/CanvasPage.tsx) — 无限画布主页面（React Flow 集成、选中操作栏、操作帮助弹窗、历史面板入口、**小地图显隐** + **缩放滑杆**（塞在左下角 `<Controls>` 按钮栈里，偏好见 [minimapVisible.ts](src/minimapVisible.ts)）+ **吸附开关** + **聚焦控件**（[canvasGeometry.ts](src/canvasGeometry.ts) 的 `focusViewportForNode`，让选中内容最多占视口 60%）；拖拽时经 [snapDrag.ts](src/snapDrag.ts) 吸到邻居边缘并画对齐线；**连线悬停高亮 / 选中降权**（[edgeStyle.ts](src/edgeStyle.ts)，选中一条线后其余连线淡出，避免满屏线里找不到刚点的那条）+ 选中连线后 `Delete` / `Backspace` 删除；**节点右键菜单**（[NodeContextMenu.tsx](src/components/NodeContextMenu.tsx)，动作与定位由 [contextMenu.ts](src/contextMenu.ts) 给出）；**蒙版局部重绘**入口）
+- [`CanvasPage.tsx`](src/components/CanvasPage.tsx) — 无限画布主页面（React Flow 集成、选中操作栏、操作帮助弹窗、历史面板入口、**小地图显隐** + **缩放滑杆**（塞在左下角 `<Controls>` 按钮栈里，偏好见 [minimapVisible.ts](src/minimapVisible.ts)）+ **吸附开关** + **聚焦控件**（[canvasGeometry.ts](src/canvasGeometry.ts) 的 `focusViewportForNode`，让选中内容最多占视口 60%）；拖拽时经 [snapDrag.ts](src/snapDrag.ts) 吸到邻居边缘，对齐线由 [SnapGuides.tsx](src/components/SnapGuides.tsx) 单独订阅 [snapGuidesStore.ts](src/snapGuidesStore.ts) 画；**连线悬停高亮 / 选中降权**（[edgeStyle.ts](src/edgeStyle.ts)，选中一条线后其余连线淡出，避免满屏线里找不到刚点的那条）+ 选中连线后 `Delete` / `Backspace` 删除；**节点右键菜单**（[NodeContextMenu.tsx](src/components/NodeContextMenu.tsx)，动作与定位由 [contextMenu.ts](src/contextMenu.ts) 给出）；**蒙版局部重绘**入口）
+- [`SnapGuides.tsx`](src/components/SnapGuides.tsx) — 拖拽对齐线（`className="snap-guide"` + `data-axis`，E2E 依赖这套 DOM 契约）。**必须画在 React Flow 的 `ViewportPortal` 里**才随平移缩放跟随；`memo` + `useSyncExternalStore` 让它只在 store 真变化时重画，拖拽每帧不再整页重渲染
 - [`CanvasNodes.tsx`](src/components/CanvasNodes.tsx) — 三类节点（图片/图片组/提示词卡）+ `ActionButton`（nodrag 胶囊按钮）；`StatusLight` 状态灯 running 恒定「生成中」，`ElapsedText` 秒数文字以 `startedAtMs` 自计时（防逐秒重渲染，见 ARCHITECTURE 5.3）。图片节点的悬停操作栏七个按钮：预览大图 / **裁剪图片** / **放大图片** / **切分图片** / **蒙版重绘** / 替换图片 / 删除图片；图片带蒙版时左侧出现可点击的「清除蒙版」角标（蒙版会跟着图走、对后续每次生成都生效，用户会忘掉自己设过，角标本身就是撤销入口）。**操作栏是 `opacity-0 pointer-events-none`，不是 `invisible`** —— `visibility:hidden` 会把按钮从无障碍树摘掉（E2E 的 `get_by_role` 与读屏器都查不到）；用 `pointer-events` 拦命中测试才既不挡画布又能被查到。悬停区用 `pl-2` 内边距而不是 `ml-2` 外边距，否则鼠标从节点移向按钮途中会掉出 `.group` 而闪断。图片组节点用**叠卡**（`Math.min(n-1, 3)` 张错位背景卡）表达「这是一批」，纯 CSS 零状态。尺寸下拉经 `Select` 的 `renderOption` 挂 [AspectIcon.tsx](src/components/AspectIcon.tsx) 比例图标，并开 `searchable` + `allowCustom`（清单只有固定几档，而上游常认清单外的尺寸，如 `1280x720`；选项清单用 `mergeCustomOption` 把当前值合进去，否则选过自定义值后触发器会退化成「请选择」）
 - [`AspectIcon.tsx`](src/components/AspectIcon.tsx) — 按比例画一个空心矩形（图形代替文字表达「1:1 / 16:9」），几何算 [aspectIcon.ts](src/aspectIcon.ts)。颜色只用 `currentColor`（写死 hex 会被 `surfaceAudit.test.ts` 拦下）
 - [`ModelIcon.tsx`](src/components/ModelIcon.tsx) — 模型品牌小徽标（OpenAI / Gemini / 通义…），品牌识别在 [modelIcon.ts](src/modelIcon.ts)。**未知品牌也渲染**（显示 `·`）而不是返回 null —— 列表里突然少一个图标会显得错位。底色用 `color-mix(in srgb, currentColor 12%, transparent)`，不写死颜色

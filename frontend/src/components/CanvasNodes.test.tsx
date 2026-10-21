@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
 
-import { type ComponentProps, type ElementType } from "react";
+import { type ComponentProps, type ElementType, type ReactNode, useState } from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { ReactFlowProvider } from "@xyflow/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { GroupNode, ImageNode, PromptNode } from "./CanvasNodes";
-import type { CanvasImageNodeData } from "../types";
+import type { CanvasGroupNodeData, CanvasImageNodeData } from "../types";
 
 afterEach(cleanup);
 
@@ -185,6 +185,143 @@ describe("node-pop animation wrapper", () => {
   it("adds the node-pop class to the image node card for inner animation", () => {
     renderImageNode();
     expect(document.querySelector(".node-pop")).toBeTruthy();
+  });
+});
+
+/* ---------------- memo：父组件重渲染、props 全等时子组件不重渲染 ----------------
+ *
+ * memo 命中时 DOM 完全不变，靠查询/快照断言不了「没渲染」，所以把计数挂在 data 的 getter 上：
+ * 组件函数体每次执行都会读 `missing` / `totalSize`，函数体没跑，计数就不涨。
+ * 父组件侧同时统计自身渲染次数 —— 先证明「确实重渲染了」，否则「子组件计数不增」可能只是没触发更新。
+ * 最后再翻一个真 prop（selected）断言计数必须上涨，证明探针灵敏、不是恒定的假阳性。
+ */
+function countDataReads<T extends object>(target: T, key: keyof T): () => number {
+  let reads = 0;
+  const value = target[key];
+  Object.defineProperty(target, key, {
+    configurable: true,
+    enumerable: true,
+    get() {
+      reads += 1;
+      return value;
+    },
+  });
+  return () => reads;
+}
+
+/** 探针宿主：自己重渲染（子组件 props 不变），另有按钮翻转 selected（props 真变）。 */
+function ParentRerenderProbe({
+  renderChild,
+  onParentRender,
+}: {
+  renderChild: (props: { selected: boolean }) => ReactNode;
+  onParentRender: () => void;
+}) {
+  const [, setTick] = useState(0);
+  const [selected, setSelected] = useState(false);
+  onParentRender();
+  return (
+    <>
+      <button type="button" onClick={() => setTick((t) => t + 1)}>
+        同 props 重渲染
+      </button>
+      <button type="button" onClick={() => setSelected((v) => !v)}>
+        翻转 selected
+      </button>
+      {renderChild({ selected })}
+    </>
+  );
+}
+
+describe("memo 浅比较", () => {
+  it("ImageNode：父组件重渲染但 props 全等时不重渲染，props 真变才重渲染", () => {
+    let parentRuns = 0;
+    const data: CanvasImageNodeData = {
+      registryId: "registry-1",
+      name: "sample.png",
+      url: "/sample.png",
+      size: 1,
+      ext: "png",
+      refCount: 0,
+      absPath: "C:\\sample.png",
+    };
+    const bodyReads = countDataReads(data, "missing");
+    const props = nodeProps<typeof ImageNode>({
+      id: "image-1",
+      type: "image",
+      data,
+      selected: false,
+      onZoom: vi.fn(),
+      onReplace: vi.fn(),
+      onDelete: vi.fn(),
+      onCrop: vi.fn(),
+      onUpscale: vi.fn(),
+      onSplit: vi.fn(),
+      onMask: vi.fn(),
+      onClearMask: vi.fn(),
+    });
+
+    const { getByRole } = render(
+      <ReactFlowProvider>
+        <ParentRerenderProbe
+          onParentRender={() => {
+            parentRuns += 1;
+          }}
+          renderChild={({ selected }) => <ImageNode {...props} selected={selected} />}
+        />
+      </ReactFlowProvider>,
+    );
+
+    // 挂载：父组件渲染 1 次、子组件函数体至少跑过 1 次（探针已接通）
+    const afterMount = bodyReads();
+    expect(parentRuns).toBe(1);
+    expect(afterMount).toBeGreaterThan(0);
+
+    // 父组件强制重渲染、子组件 props 全等 → memo 命中，函数体不得再执行
+    fireEvent.click(getByRole("button", { name: "同 props 重渲染" }));
+    expect(parentRuns).toBe(2);
+    expect(bodyReads()).toBe(afterMount);
+
+    // 对照：真 prop 变了就必须重渲染（证明上面的「不增」不是探针失灵）
+    fireEvent.click(getByRole("button", { name: "翻转 selected" }));
+    expect(parentRuns).toBe(3);
+    expect(bodyReads()).toBeGreaterThan(afterMount);
+  });
+
+  it("GroupNode：父组件重渲染但 props 全等时不重渲染，props 真变才重渲染", () => {
+    let parentRuns = 0;
+    const data: CanvasGroupNodeData = { name: "图片组", imageCount: 3, totalSize: 3 * 1024 * 1024 };
+    const bodyReads = countDataReads(data, "totalSize");
+    const props = nodeProps<typeof GroupNode>({
+      id: "group-1",
+      type: "group",
+      data,
+      selected: false,
+      onDelete: vi.fn(),
+    });
+
+    const { getByRole } = render(
+      <ReactFlowProvider>
+        <ParentRerenderProbe
+          onParentRender={() => {
+            parentRuns += 1;
+          }}
+          renderChild={({ selected }) => <GroupNode {...props} selected={selected} />}
+        />
+      </ReactFlowProvider>,
+    );
+
+    const afterMount = bodyReads();
+    expect(parentRuns).toBe(1);
+    expect(afterMount).toBeGreaterThan(0);
+
+    fireEvent.click(getByRole("button", { name: "同 props 重渲染" }));
+    expect(parentRuns).toBe(2);
+    expect(bodyReads()).toBe(afterMount);
+
+    fireEvent.click(getByRole("button", { name: "翻转 selected" }));
+    expect(parentRuns).toBe(3);
+    expect(bodyReads()).toBeGreaterThan(afterMount);
   });
 });
 

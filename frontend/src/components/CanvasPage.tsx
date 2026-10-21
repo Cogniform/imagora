@@ -19,7 +19,6 @@ import {
   ReactFlow,
   useEdgesState,
   useNodesState,
-  ViewportPortal,
   type Connection,
   type Edge,
   type EdgeMouseHandler,
@@ -46,6 +45,7 @@ import { buildNodeMenu } from "../contextMenu";
 import { dataUrlToFile, derivedImageName, derivedImageSeries } from "../dataUrlFile";
 import { dimmedEdgeIds, edgeStyle, edgeVisualState } from "../edgeStyle";
 import { errMessage } from "../format";
+import { minimapNodeColor } from "../minimapColor";
 import {
   readMinimapVisible,
   readZoomSliderPercent,
@@ -61,7 +61,7 @@ import {
   readSnapEnabled,
   saveSnapEnabled,
 } from "../snapDrag";
-import type { SnapGuide } from "../snapGuide";
+import { setSnapGuides } from "../snapGuidesStore";
 import { stripPromptRefs } from "../promptRefs";
 import { useGenerationTask, type GenerationTaskView } from "../useGenerationTask";
 import { useCanvasRecovery } from "../useCanvasRecovery";
@@ -98,6 +98,7 @@ import { layoutPromptResults, layoutSelection, nodeSize } from "../layout";
 import { focusViewportForNode, nodeBounds, type NodeBox } from "../canvasGeometry";
 import { GroupNode, ImageNode, PromptNode } from "./CanvasNodes";
 import { HistoryGallery } from "./HistoryGallery";
+import { SnapGuides } from "./SnapGuides";
 import { ImageCropDialog } from "./ImageCropDialog";
 import { ImageSplitDialog } from "./ImageSplitDialog";
 import { ImageUpscaleDialog } from "./ImageUpscaleDialog";
@@ -122,22 +123,6 @@ const LOD_OUT_ZOOM = 0.2;
 /** 聚焦节点时底部要让出的高度：画布日志浮层常驻右下角，聚焦后节点压在日志上等于白聚焦。
  *  取 96px ≈ 五行日志条（LOG_VISIBLE_COUNT = 5）加上边距，宁多留一点。 */
 const FOCUS_BOTTOM_INSET = 96;
-
-/** 小地图里按节点类型取色：三类节点在小缩略图上仍能分辨结构。
- *  取的是 index.css 里的品牌色与两个中性色，不新增色板 —— 小地图是导航辅助，
- *  不该引入第五套配色。未知类型走中性灰兜底（工作流文件可能来自旧版本）。 */
-function minimapNodeColor(node: Node): string {
-  switch (node.type) {
-    case "prompt":
-      return "var(--color-brand)";
-    case "image":
-      return "#7c8994";
-    case "group":
-      return "#c4ccd4";
-    default:
-      return "#a8b0b8";
-  }
-}
 
 /** 裁剪 / 放大对话框的加工对象：源图 url + 文件名 + 源节点 id。
  *  带上 nodeId 是为了把产出图摆到源图右侧（用户视线自然落在加工前后的对照上），
@@ -231,13 +216,10 @@ export function CanvasPage({
 }: CanvasPageProps) {
   const [nodes, setNodes, onNodesChangeBase] = useNodesState<WorkflowNode>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
-  /** 画布容器引用：把实时 zoom 写入 --canvas-zoom CSS 变量（连接点绝对大小用） */
+  /** 画布容器引用：拖放落点换算与 ReactFlow 容器 */
   const canvasRef = useRef<HTMLDivElement>(null);
   /** React Flow 实例引用：自动布局后调 fitView 自适应居中 */
   const rfInstanceRef = useRef<ReactFlowInstance<WorkflowNode, Edge> | null>(null);
-  const setCanvasZoom = useCallback((zoom: number) => {
-    canvasRef.current?.style.setProperty("--canvas-zoom", String(zoom));
-  }, []);
   /** LOD 抽象模式：缩小视图后节点降级为轻量卡片（图片仍可双击放大、连线动画静止、不可编辑），
    *  迟滞切换防抖动；只影响渲染，拖拽/选中/连线等基础交互不变 */
   const [lod, setLod] = useState(false);
@@ -252,7 +234,6 @@ export function CanvasPage({
   const draggingSliderRef = useRef(false);
   const handleViewportMove = useCallback(
     (_event: unknown, viewport: { zoom: number }) => {
-      setCanvasZoom(viewport.zoom);
       // 拖滑杆时视口跟着滑杆走，此时若把视口值再灌回滑杆会与拖动互相拉扯（读数抖动）
       if (!draggingSliderRef.current) setZoomPercent(zoomToSliderPercent(viewport.zoom));
       const z = viewport.zoom;
@@ -264,7 +245,7 @@ export function CanvasPage({
         setLod(false);
       }
     },
-    [setCanvasZoom],
+    [],
   );
   /** 滑杆拖动：立刻改视口缩放（围绕视口中心，不跳位），松手才落盘 */
   const handleZoomSlider = useCallback((percent: number) => {
@@ -285,8 +266,8 @@ export function CanvasPage({
   }, []);
   /** 拖拽吸附开关（纯本机偏好，默认开：对齐是画布的默认期望，想自由摆放的人才去关） */
   const [snapEnabled, setSnapEnabled] = useState(readSnapEnabled);
-  /** 当前帧需要画出来的对齐线（松手即清空） */
-  const [snapGuides, setSnapGuides] = useState<SnapGuide[]>([]);
+  /** 对齐线不进 CanvasPage 的 state：拖拽时每帧都可能变，写模块级 store，
+   *  只让订阅它的 <SnapGuides /> 重渲染（见 snapGuidesStore.ts） */
   /** 节点/边的最新引用：回调经 ref 读取，避免 useCallback 依赖 nodes/edges
    *  导致 nodeTypes 每次拖拽重建 -> 全节点重渲染闪烁 */
   const nodesRef = useRef<WorkflowNode[]>(nodes);
@@ -313,14 +294,14 @@ export function CanvasPage({
     (changes: NodeChange<WorkflowNode>[]) => {
       const outcome = applySnapToChanges(changes, nodesRef.current, snapEnabled);
       onNodesChangeBase(outcome.changes as NodeChange<WorkflowNode>[]);
-      // 拖拽结束的那一条（dragging=false）也会走到这里，此时 guides 恒为空 → 自动清线
-      setSnapGuides((prev) => {
-        if (outcome.guides.length === 0 && prev.length === 0) return prev;
-        return outcome.guides;
-      });
+      // 拖拽结束的那一条（dragging=false）也会走到这里，此时 guides 恒为空 → 自动清线。
+      // store 按内容去重：guides 没变的帧不会通知 <SnapGuides />。
+      setSnapGuides(outcome.guides);
     },
     [onNodesChangeBase, snapEnabled],
   );
+  /** 对齐线是拖拽的瞬时反馈：卸载时清掉模块级 store，避免重新挂载时读到上一次残留的线 */
+  useEffect(() => () => setSnapGuides([]), []);
   const toggleSnap = useCallback(() => {
     setSnapEnabled((enabled) => {
       saveSnapEnabled(!enabled);
@@ -563,6 +544,26 @@ export function CanvasPage({
     [pushLog, recordHistory, setEdges],
   );
 
+  /** ReactFlow 的 onEdgeDoubleClick 是 (event, edge) 签名，包一层稳定引用 */
+  const handleEdgeDoubleClickEvent = useCallback(
+    (_event: unknown, edge: Edge) => handleEdgeDoubleClick(edge),
+    [handleEdgeDoubleClick],
+  );
+
+  /** 点空白清连线悬停态（稳定引用：内联箭头每次渲染都会触发 store 更新） */
+  const handlePaneClick = useCallback(() => setHoveredEdgeId(null), []);
+
+  /** 拖拽开始先记历史（稳定引用，理由同上） */
+  const handleNodeDragStart = useCallback(() => recordHistory(), [recordHistory]);
+
+  /** ReactFlow 实例就绪：接管 ref 并初始化 LOD（稳定引用） */
+  const handleInit = useCallback((instance: ReactFlowInstance<WorkflowNode, Edge>) => {
+    rfInstanceRef.current = instance;
+    const { zoom } = instance.getViewport();
+    lodRef.current = zoom < LOD_IN_ZOOM;
+    setLod(lodRef.current);
+  }, []);
+
   /* ---------------- 节点参数就地更新（PromptNode 上抛） ---------------- */
   const handleNodeUpdate = useCallback(
     (nodeId: string, patch: Partial<CanvasPromptNodeData>) => {
@@ -571,39 +572,57 @@ export function CanvasPage({
     [setNodes],
   );
 
-  /* ---------------- 引用计数 / 分组计数：由连线推导，随 edges 变化刷新 ---------------- */
-  useEffect(() => {
+  /* ---------------- 引用计数 / 分组计数：由节点 + 连线纯派生 ----------------
+   * 历史 bug：effect 依赖只写了 [edges]，函数体却读 nodes —— 新增/删除/替换图片后
+   * refCount / imageCount / totalSize 要等某条连线变化才刷新。改成渲染期现算、不写 state，
+   * 天然不会漏依赖，也少一轮 setNodes 渲染。
+   * 每个节点的派生结果按「源节点对象 + 计算值」缓存：拖动时只有被拖的节点换新对象，
+   * 其余节点引用稳定，CanvasNodes 的 memo 不会被计数派生打破。 */
+  const derivedNodeCacheRef = useRef(
+    new Map<string, { source: WorkflowNode; derived: WorkflowNode; values: (number | undefined)[] }>(),
+  );
+  const nodesWithCounts = useMemo(() => {
     const { refCounts, groupCounts, groupSizes, groupDups } = computeCounts(nodes, edges);
-    setNodes((nds) => {
-      let changed = false;
-      const next = nds.map((n) => {
-        if (n.type === "image") {
-          const count = refCounts.get(n.data.registryId) ?? 0;
-          if (n.data.refCount !== count) {
-            changed = true;
-            return { ...n, data: { ...n.data, refCount: count } };
-          }
+    const cache = derivedNodeCacheRef.current;
+    const next = nodes.map((n) => {
+      const hit = cache.get(n.id);
+      if (n.type === "image") {
+        const refCount = refCounts.get(n.data.registryId) ?? 0;
+        if (hit && hit.source === n && hit.values[0] === refCount) return hit.derived;
+        const derived = { ...n, data: { ...n.data, refCount } };
+        cache.set(n.id, { source: n, derived, values: [refCount] });
+        return derived;
+      }
+      if (n.type === "group") {
+        const imageCount = groupCounts.get(n.id) ?? 0;
+        const totalSize = groupSizes.get(n.id) ?? 0;
+        const duplicate = groupDups.get(n.id) ?? 0;
+        const duplicateCount = duplicate > 0 ? duplicate : undefined;
+        if (
+          hit &&
+          hit.source === n &&
+          hit.values[0] === imageCount &&
+          hit.values[1] === totalSize &&
+          hit.values[2] === duplicateCount
+        ) {
+          return hit.derived;
         }
-        if (n.type === "group") {
-          const count = groupCounts.get(n.id) ?? 0;
-          const size = groupSizes.get(n.id) ?? 0;
-          const duplicate = groupDups.get(n.id) ?? 0;
-          const duplicateCount = duplicate > 0 ? duplicate : undefined;
-          if (
-            n.data.imageCount !== count ||
-            n.data.totalSize !== size ||
-            n.data.duplicateCount !== duplicateCount
-          ) {
-            changed = true;
-            return { ...n, data: { ...n.data, imageCount: count, totalSize: size, duplicateCount } };
-          }
-        }
-        return n;
-      });
-      return changed ? next : nds;
+        const derived = { ...n, data: { ...n.data, imageCount, totalSize, duplicateCount } };
+        cache.set(n.id, { source: n, derived, values: [imageCount, totalSize, duplicateCount] });
+        return derived;
+      }
+      return n;
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [edges]);
+    // 缓存按 id 常驻：删掉的节点不清掉就会把整份 data（含图片 url/文件名）一直留在内存里。
+    // 只在「缓存条目多于现有节点」时才扫一遍，正常拖拽/编辑不会走到这里。
+    if (cache.size > nodes.length) {
+      const alive = new Set(nodes.map((n) => n.id));
+      for (const id of cache.keys()) {
+        if (!alive.has(id)) cache.delete(id);
+      }
+    }
+    return next;
+  }, [nodes, edges]);
 
   /* ---------------- 高亮核验：hover/选中提示词节点 -> 入边加粗 + 图片描边 ---------------- */
   // 注意：setEdges/setNodes 必须条件更新（className 无变化返回原引用），
@@ -1246,6 +1265,7 @@ export function CanvasPage({
       const origin = getCreatePosition();
       setNodes((nds) => [
         ...nds,
+        // 铺排（按卡片真实尺寸、每行 3 张）在 buildPromptNodes 内部完成
         ...buildPromptNodes(
           cards,
           { sizes: config.sizes, defaultQuality, defaultOutputDir: config.defaultOutputDir },
@@ -1850,6 +1870,9 @@ export function CanvasPage({
         case "split":
           handleSplitImage(nodeId);
           break;
+        case "mask":
+          handleMaskImage(nodeId);
+          break;
         case "replace":
           handleReplaceImage(nodeId);
           break;
@@ -1879,6 +1902,7 @@ export function CanvasPage({
       handleCropImage,
       handleUpscaleImage,
       handleSplitImage,
+      handleMaskImage,
       handleReplaceImage,
       handleRun,
       handleDeleteNode,
@@ -1940,6 +1964,12 @@ export function CanvasPage({
       qualityEffective,
     ],
   );
+
+  /* ---------------- 默认边样式：必须是稳定引用 ----------------
+   * React Flow 的 StoreUpdater 对 defaultEdgeOptions 做浅比较，不等就写 store，
+   * 内联对象会让 edge = {...defaultEdgeOptions, ...edge} 每次新建 → EdgeWrapper memo 全失效。
+   * 只有 animated 随 LOD 变，将来加默认边样式记得同步依赖。 */
+  const defaultEdgeOptions = useMemo(() => ({ animated: !lod }), [lod]);
 
   /* ---------------- 拖放接管（useCanvasDrop：意图解析/落点示意/窗口守卫/工作区四事件） ----------------
    * 挂在整个工作区（含工具栏）：落点夹紧到画布，UI 上不再出现浏览器禁止标志；
@@ -2086,35 +2116,30 @@ export function CanvasPage({
         )}
         <div ref={canvasRef} className="relative h-full w-full">
         <ReactFlow
-          nodes={nodes}
+          nodes={nodesWithCounts}
           edges={edges}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
-          onEdgeDoubleClick={(_event, edge) => handleEdgeDoubleClick(edge)}
+          onEdgeDoubleClick={handleEdgeDoubleClickEvent}
           // 连线 hover 反馈：@xyflow/react 12 的 onEdgeMouseEnter / onEdgeMouseLeave（命中区是
           // 覆盖在可见路径上的 20px 透明 interaction path，所以线很细也好指）
           onEdgeMouseEnter={onEdgeMouseEnter}
           onEdgeMouseLeave={onEdgeMouseLeave}
           // 点空白处清掉连线悬停态（否则指针移出画布后 last-hovered 线一直亮着）
-          onPaneClick={() => setHoveredEdgeId(null)}
+          onPaneClick={handlePaneClick}
           isValidConnection={isValidConnection}
           nodeTypes={nodeTypes}
           onNodeMouseEnter={onNodeMouseEnter}
           onNodeMouseLeave={onNodeMouseLeave}
-          onNodeDragStart={() => recordHistory()}
+          onNodeDragStart={handleNodeDragStart}
           onSelectionChange={onSelectionChange}
           onMove={handleViewportMove}
-          onInit={(instance) => {
-            rfInstanceRef.current = instance;
-            setCanvasZoom(instance.getViewport().zoom);
-            lodRef.current = instance.getViewport().zoom < LOD_IN_ZOOM;
-            setLod(lodRef.current);
-          }}
+          onInit={handleInit}
           minZoom={0.05}
           maxZoom={2}
           // LOD 抽象模式：连线动画静止（省逐帧重排）；完整模式保持流动
-          defaultEdgeOptions={{ animated: !lod }}
+          defaultEdgeOptions={defaultEdgeOptions}
           // 视口虚拟化：只渲染可视区域的节点，节点多时拖拽/平移不卡
           onlyRenderVisibleElements
           deleteKeyCode={null}
@@ -2196,22 +2221,8 @@ export function CanvasPage({
           </Controls>
           {/* 对齐线：画在 React Flow 的视口坐标层里，随平移/缩放自动跟随。
               只在拖拽的那几帧存在，松手即清空（见 onNodesChange）。
-              横向线（axis="x"）是竖直的一条，纵向线（axis="y"）是水平的一条。 */}
-          <ViewportPortal>
-            {snapGuides.map((guide) => (
-              <div
-                key={`${guide.axis}-${guide.position}-${guide.targetId}`}
-                className="snap-guide"
-                data-axis={guide.axis}
-                data-testid="snap-guide"
-                style={
-                  guide.axis === "x"
-                    ? { left: guide.position, top: -10000, width: 1, height: 20000 }
-                    : { left: -10000, top: guide.position, width: 20000, height: 1 }
-                }
-              />
-            ))}
-          </ViewportPortal>
+              订阅与渲染都在 <SnapGuides /> 里，CanvasPage 不读 guides，也不因它重渲染。 */}
+          <SnapGuides />
         </ReactFlow>
         {/* 拖拽落点示意（useCanvasDrop 提供：portal 到 body 跟随光标，显示图片数量/新建类型） */}
         {dropChip}

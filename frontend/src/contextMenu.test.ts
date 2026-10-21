@@ -32,13 +32,29 @@ function actionOf(items: ContextMenuItem[], id: string) {
 const single = { hasUrl: true, selectedCount: 1 };
 
 describe("buildNodeMenu", () => {
-  it("图片节点（有图）给出完整的五项 + 分隔线 + 删除，顺序固定", () => {
+  it("图片节点（有图）给出完整的七项 + 分隔线 + 删除，顺序固定", () => {
     const items = buildNodeMenu("image", single);
-    expect(ids(items)).toEqual(["preview", "crop", "upscale", "split", "replace", "delete"]);
-    expect(labels(items)).toEqual(["预览大图", "裁剪", "放大", "切分", "替换图片", "删除"]);
-    // 五个动作之后是一条分隔线，然后才是删除
-    expect(items[5]).toEqual({ kind: "separator" });
-    expect(items.length).toBe(7);
+    expect(ids(items)).toEqual([
+      "preview",
+      "crop",
+      "upscale",
+      "split",
+      "mask",
+      "replace",
+      "delete",
+    ]);
+    expect(labels(items)).toEqual([
+      "预览大图",
+      "裁剪",
+      "放大",
+      "切分",
+      "蒙版重绘",
+      "替换图片",
+      "删除",
+    ]);
+    // 七个动作之后是一条分隔线，然后才是删除
+    expect(items[6]).toEqual({ kind: "separator" });
+    expect(items.length).toBe(8);
   });
 
   it("图片节点（有图）没有任何禁用项", () => {
@@ -49,13 +65,39 @@ describe("buildNodeMenu", () => {
     }
   });
 
-  it("图片节点没有图时保留前五项但全部禁用（让人看见「这里能做什么」）", () => {
+  it("图片节点没有图时保留操作项，除「替换图片」外全部禁用（让人看见「这里能做什么」）", () => {
     const items = buildNodeMenu("image", { hasUrl: false, selectedCount: 1 });
     // 关键：不是「消失」，而是「留着且置灰」
-    expect(ids(items)).toEqual(["preview", "crop", "upscale", "split", "replace", "delete"]);
-    for (const id of ["preview", "crop", "upscale", "split", "replace"]) {
+    expect(ids(items)).toEqual([
+      "preview",
+      "crop",
+      "upscale",
+      "split",
+      "mask",
+      "replace",
+      "delete",
+    ]);
+    for (const id of ["preview", "crop", "upscale", "split", "mask"]) {
       expect(actionOf(items, id).disabled, `${id} 应禁用`).toBe(true);
     }
+    // 替换是 missing 态的恢复入口，不能跟着一起灰
+    expect(actionOf(items, "replace").disabled).not.toBe(true);
+  });
+
+  it("没有图时「替换图片」仍可用（B6：文件缺失时这是唯一恢复入口）", () => {
+    const replace = actionOf(buildNodeMenu("image", { hasUrl: false, selectedCount: 1 }), "replace");
+    expect(replace.label).toBe("替换图片");
+    expect(replace.disabled).not.toBe(true);
+  });
+
+  it("「蒙版重绘」排在「替换图片」之前，有图时可用", () => {
+    const items = buildNodeMenu("image", single);
+    const maskIndex = ids(items).indexOf("mask");
+    const replaceIndex = ids(items).indexOf("replace");
+    expect(maskIndex).toBeGreaterThan(0);
+    expect(maskIndex).toBe(replaceIndex - 1);
+    expect(actionOf(items, "mask").label).toBe("蒙版重绘");
+    expect(actionOf(items, "mask").disabled).not.toBe(true);
   });
 
   it("图片节点没有图时「删除」仍可用（否则这个节点就没法清理了）", () => {
@@ -101,6 +143,7 @@ describe("buildNodeMenu", () => {
       "crop",
       "upscale",
       "split",
+      "mask",
       "replace",
       "delete",
     ]);
@@ -110,6 +153,21 @@ describe("buildNodeMenu", () => {
       action: { id: "delete-selection", label: "删除所选 3 项", danger: true },
     });
     expect(items[1]).toEqual({ kind: "separator" });
+  });
+
+  it("多选时底部单节点删除改叫「仅删除此项」，单选仍是「删除」", () => {
+    const multi = buildNodeMenu("image", { hasUrl: true, selectedCount: 2 });
+    expect(actionOf(multi, "delete").label).toBe("仅删除此项");
+    expect(actionOf(multi, "delete").danger).toBe(true);
+    const one = buildNodeMenu("image", { hasUrl: true, selectedCount: 1 });
+    expect(actionOf(one, "delete").label).toBe("删除");
+    // 提示词 / 分组节点同样适用：范围不同的两个删除不能同名
+    expect(actionOf(buildNodeMenu("prompt", { hasUrl: true, selectedCount: 3 }), "delete").label).toBe(
+      "仅删除此项",
+    );
+    expect(actionOf(buildNodeMenu("group", { hasUrl: true, selectedCount: 3 }), "delete").label).toBe(
+      "仅删除此项",
+    );
   });
 
   it("只选中 1 个（或 0 个）时不出现「删除所选」", () => {
@@ -189,7 +247,7 @@ describe("menuHeight", () => {
   it("每个 action 计一个 MENU_ITEM_HEIGHT", () => {
     expect(menuHeight(buildNodeMenu("group", single))).toBe(MENU_ITEM_HEIGHT);
     expect(menuHeight(buildNodeMenu("prompt", single))).toBe(MENU_ITEM_HEIGHT * 3 + 9);
-    expect(menuHeight(buildNodeMenu("image", single))).toBe(MENU_ITEM_HEIGHT * 6 + 9);
+    expect(menuHeight(buildNodeMenu("image", single))).toBe(MENU_ITEM_HEIGHT * 7 + 9);
   });
 
   it("分隔线算 1px 线 + 上下各 4px 间距 = 9", () => {
