@@ -105,6 +105,114 @@ def node_pos(page, type_):
     )
 
 
+def set_zoom(page, percent):
+    """用左下角缩放滑杆把视口设成指定百分比（绝对值，控件范围 5–200）。
+
+    为什么要有它：画布开着 onlyRenderVisibleElements，`.react-flow__node` 只包含
+    **视口内**的节点。任何「数了画布上有几个节点」的断言，都先得把缩放拉到能一屏
+    装下的档位，否则数出来的是「当前视口内有几个」而不是「画布上有几个」。"""
+    slider = page.get_by_role("slider", name="画布缩放")
+    slider.fill(str(percent))
+    slider.dispatch_event("pointerup")
+    page.wait_for_timeout(500)
+
+
+# 滑杆下限 5%（ZOOM_SLIDER_MIN_PERCENT）：1400×900 的 pane 一屏能装下 2 万多 flow px，
+# 哪怕几十个节点也全在视口内 —— 「整块画布都在屏上」的那一档。
+ZOOM_ALL_VISIBLE = 5
+
+
+def pane_blank_point(page):
+    """在画布上找一个真正的空白点（elementFromPoint 命中 .react-flow__pane）。
+
+    空白处按住拖动 = 平移视口（.react-flow__pane 的 drag），是唯一不依赖滚轮缩放、
+    也不依赖工具栏的平移手段；节点上按下会变成拖节点，所以必须先确认是空白。"""
+    return page.evaluate("""() => {
+      const rf = document.querySelector(".react-flow");
+      if (!rf) return null;
+      const r = rf.getBoundingClientRect();
+      for (let fy = 0.85; fy > 0.1; fy -= 0.1) {
+        for (let fx = 0.05; fx < 0.96; fx += 0.07) {
+          const x = r.left + r.width * fx;
+          const y = r.top + r.height * fy;
+          const el = document.elementFromPoint(x, y);
+          if (el && el.classList.contains("react-flow__pane")) return { x, y };
+        }
+      }
+      return null;
+    }""")
+
+
+def node_hit(page, locator, offset):
+    """节点盒内 offset=(dx,dy) 处的屏幕点，命中的最上层节点是不是它自己。
+
+    `bounding_box()` 只说明节点有位置，不说明那个位置点得到它 —— 顶栏、日志浮层、
+    压在上面的另一个节点都会把指针截走，于是 mouse.down 落在别处、断言假失败
+    （「拖了但 moved=0」就是这么来的）。真按鼠标前先问一句 elementFromPoint。"""
+    box = locator.bounding_box()
+    node_id = locator.get_attribute("data-id")
+    if box is None or node_id is None:
+        return False
+    return page.evaluate(
+        """([x, y, id]) => {
+      const el = document.elementFromPoint(x, y);
+      const node = el && el.closest ? el.closest(".react-flow__node") : null;
+      return !!node && node.getAttribute("data-id") === id;
+    }""",
+        [box["x"] + offset[0], box["y"] + offset[1], node_id],
+    )
+
+
+def center_node(page, locator, tries=6, probe_offset=None):
+    """拖空白处平移视口，把目标节点挪到画布正中（只平移，不改缩放）。
+
+    用途：节点在视口里的位置是**视口状态**，不该由测试的隐含前提决定。节点贴着画布
+    上沿、或落在视口外时，按 `bounding_box()` 算出的抓取点会打不到它，拖拽断言就假
+    失败。传 probe_offset（节点盒内偏移，如抓取点）时，还要求该点真的点到这个节点
+    本身，否则继续微调，直到命中或次数用尽。"""
+    for _ in range(tries):
+        box = locator.bounding_box()
+        pane = page.locator(".react-flow").bounding_box()
+        if box is None or pane is None:
+            return False
+        if probe_offset is not None and node_hit(page, locator, probe_offset(box)):
+            return True
+        dx = (pane["x"] + pane["width"] / 2) - (box["x"] + box["width"] / 2)
+        dy = (pane["y"] + pane["height"] / 2) - (box["y"] + box["height"] / 2)
+        if probe_offset is None and abs(dx) < 4 and abs(dy) < 4:
+            return True
+        blank = pane_blank_point(page)
+        if blank is None:
+            return False
+        page.mouse.move(blank["x"], blank["y"])
+        page.mouse.down()
+        page.mouse.move(blank["x"] + dx, blank["y"] + dy, steps=10)
+        page.mouse.up()
+        page.wait_for_timeout(300)
+    # 次数用尽：如实回报「抓取点到底点不点得到」，别把失败谎报成成功
+    if probe_offset is None:
+        return True
+    box = locator.bounding_box()
+    return box is not None and node_hit(page, locator, probe_offset(box))
+
+
+def frame_node(page, locator, zoom=100, probe_offset=None):
+    """把目标节点摆到画布正中，并把缩放落到 zoom 档（默认 100%）。
+
+    视口是被测状态的一部分，不是测试可以默默依赖的前提：画布开着
+    onlyRenderVisibleElements，节点不在视口里就**根本不进 DOM**；而任何真按鼠标的
+    用例（拖节点、点节点内的按钮）还要求节点在屏幕上真的可按到。切分/放大这类
+    「产物落地会带视野过去」的路径会顺手把视野挪走，所以碰具体节点之前先自己摆正。
+    缩放围绕视口中心，因此在 5% 档把节点摆到中心后，回到 100% 它仍在中心。"""
+    if locator.count() == 0:
+        set_zoom(page, ZOOM_ALL_VISIBLE)
+    center_node(page, locator)
+    if zoom != ZOOM_ALL_VISIBLE:
+        set_zoom(page, zoom)
+        center_node(page, locator, probe_offset=probe_offset)
+    return locator.count() > 0
+
+
 results = []
 # --only 过滤词：空 = 全量。由 main() 按命令行覆盖。
 ONLY = ""
@@ -824,7 +932,6 @@ def main():
         before_split = len(image_positions())
         split_dialog.locator('[data-testid="image-split-confirm"]').click()
         page.wait_for_timeout(5000)
-        after_split = len(image_positions())
         # 不能用「节点数 +6」当判据：画布开了 onlyRenderVisibleElements，切分产物排在
         # 原图右侧，多数落在视口外、根本不进 DOM。产物张数以画布日志为准（一次上传一次
         # 落库，日志里明确写了张数），节点数只断言「确实新增了」。
@@ -834,6 +941,13 @@ def main():
             "→ 6 张" in split_logs,
             f"logs={split_logs[-120:]}",
         )
+        # 数之前先把缩放拉到「整块画布都在屏上」那一档：
+        # 切分产物落地后系统会把视野带过去（revealViewport），视口一变、可见集就变，
+        # 拿「平移后的可见节点数」跟「平移前的可见节点数」比，会把平移误读成没新增。
+        # 前后两次都在同一档缩放下数，断言才真的在说「产物进了画布」。
+        set_zoom(page, ZOOM_ALL_VISIBLE)
+        after_split = len(image_positions())
+        set_zoom(page, 100)
         check(
             "确认切分后画布新增节点",
             after_split > before_split,
@@ -855,6 +969,14 @@ def main():
         )
         # 先把两个节点摆成同一列：拖第一个到第二个的正下方附近，应吸住竖直对齐线。
         drag_target = page.locator(".react-flow__node-prompt").first
+
+        # 拖拽要真的按到节点本体，而切分那一步把视野带到了产物那边 —— 先自己摆正，
+        # 并要求抓取点（节点上沿往下 14px）确实点得到这个节点。
+        def grab_probe(b):
+            return (b["width"] / 2, 14)
+
+        if not frame_node(page, drag_target, probe_offset=grab_probe):
+            check("找到可拖拽的提示词节点", False)
         tbox = drag_target.bounding_box()
         if tbox is None:
             check("找到可拖拽的提示词节点", False)
@@ -888,6 +1010,12 @@ def main():
             "吸附偏好写入 localStorage",
             page.evaluate("() => window.localStorage.getItem('imagora.canvas-snap.v1')")
             == "0",
+        )
+        # 第二次拖拽同样先摆正：上一次拖动把节点挪了几十像素，抓取点可能已经贴边。
+        frame_node(
+            page,
+            page.locator(".react-flow__node-prompt").first,
+            probe_offset=grab_probe,
         )
         tbox2 = page.locator(".react-flow__node-prompt").first.bounding_box()
         if tbox2 is not None:
@@ -1021,7 +1149,10 @@ def main():
         #     这条守卫的意义正是「宁可报错也不偷偷退回全收集」：退回全收集等于拿别的图
         #     去改，用户看不出来，只有账单能看出来。
         prompt_node = page.locator(".react-flow__node-prompt").first
-        prompt_box = prompt_node.bounding_box()
+        # 先把这个节点摆到画布正中：它得在 DOM 里（fill 要求可见），点击也别被别的节点压住。
+        prompt_box = (
+            prompt_node.bounding_box() if frame_node(page, prompt_node) else None
+        )
         if prompt_box is None:
             check("找到提示词节点", False)
         else:
@@ -1029,7 +1160,10 @@ def main():
                 "@nonexistent.png a red apple"
             )
             page.wait_for_timeout(300)
-            prompt_node.get_by_role("button", name="运行").click()
+            # 派发 DOM click 而不是 locator.click()：画布节点在 100% 缩放下会互相压住，
+            # 上面的图片节点会把指针事件截走（同第 18 节的说明）。这条用例验的是
+            # @ 引用的前端校验，不是按钮的指针可达性，可达性由第 18/21 节覆盖。
+            prompt_node.get_by_role("button", name="运行").dispatch_event("click")
             page.wait_for_timeout(900)
             run_logs = " | ".join(page.locator(".log-toast").all_inner_texts())
             check(
@@ -1093,20 +1227,34 @@ def main():
         if edge_total >= 1:
 
             def edge_probe():
-                """第一条连线的中点屏幕坐标 + 当前线宽/透明度。
+                """第一条连线的**可命中点**屏幕坐标 + 当前线宽/透明度。
 
-                中点用 getPointAtLength 算：连线是贝塞尔曲线，两个端点的中点
-                不在曲线上，鼠标移过去命不中（交互路径只有 20px 宽）。"""
+                曲线用 getPointAtLength 取（两个端点的中点不在曲线上）；但不能拿中点
+                直接用：两节点挨着时曲线会从节点身下穿过，而节点层在连线层之上，鼠标
+                移过去命中的是节点，hover / 单击都不会落到连线上（假失败）。所以沿曲线
+                找一个 elementFromPoint 真的命中这条连线自己的采样点。"""
                 return page.evaluate("""() => {
                   const edge = document.querySelector(".react-flow__edge");
                   if (!edge) return null;
                   const path = edge.querySelector(".react-flow__edge-path");
                   if (!path) return null;
                   const len = path.getTotalLength();
-                  const mid = path.getPointAtLength(len / 2).matrixTransform(path.getScreenCTM());
+                  const ctm = path.getScreenCTM();
+                  let at = null;
+                  for (let d = 0; d <= 0.5 && !at; d += 0.05) {
+                    const fracs = d === 0 ? [0.5] : [0.5 - d, 0.5 + d];
+                    for (const f of fracs) {
+                      const p = path.getPointAtLength(len * f).matrixTransform(ctm);
+                      const el = document.elementFromPoint(p.x, p.y);
+                      if (el && el.closest && el.closest(".react-flow__edge") === edge) {
+                        at = { x: p.x, y: p.y };
+                        break;
+                      }
+                    }
+                  }
                   const cs = getComputedStyle(path);
                   return {
-                    x: mid.x, y: mid.y,
+                    x: at ? at.x : null, y: at ? at.y : null,
                     strokeWidth: parseFloat(cs.strokeWidth),
                     opacity: parseFloat(cs.opacity),
                   };
@@ -1118,7 +1266,7 @@ def main():
                 idle is not None and abs(idle["strokeWidth"] - 1.5) < 0.01,
                 f"idle={idle}",
             )
-            if idle is not None:
+            if idle is not None and idle["x"] is not None:
                 page.mouse.move(idle["x"], idle["y"])
                 page.wait_for_timeout(500)
                 hovered = edge_probe()
@@ -1126,6 +1274,7 @@ def main():
                     "hover 连线后线宽变粗",
                     hovered is not None
                     and hovered["strokeWidth"] > idle["strokeWidth"] + 0.1,
+                    f"at={idle['x']:.0f},{idle['y']:.0f} "
                     f"{idle['strokeWidth']}->{hovered['strokeWidth'] if hovered else None}",
                 )
                 # 移开再单击：验证的是「点击选中」而不是「鼠标还停在上面」

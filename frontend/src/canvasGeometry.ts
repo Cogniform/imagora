@@ -1,5 +1,5 @@
 /**
- * 画布几何纯函数：节点包围盒、拖拽入组、组成员收集、分组包裹矩形、聚焦视口。
+ * 画布几何纯函数：节点包围盒、拖拽入组、组成员收集、分组包裹矩形、聚焦视口、新落地节点带进视野。
  *
  * 移植自 basketikun/infinite-canvas（MIT License），语义重写为 imagora 纯函数：
  * 原 `web/src/lib/canvas/canvas-node-geometry.ts` 直接吃 `CanvasNodeData`（宽高必填、
@@ -279,4 +279,65 @@ export function focusViewportForNode(
     y: blockTop + blockHeight / 2 - centerY * k - (frame.below - frame.above) / 2,
     k,
   };
+}
+
+/** 「带进视野」时目标四周至少留出的屏幕像素（贴着边缘会看起来被切了一半） */
+export const REVEAL_MARGIN = 24;
+
+/**
+ * 系统自己落地了新节点时（生成结果回流、裁剪/放大/切分产物）把视野带过去：**只平移，不缩放**。
+ *
+ * 与 `focusViewportForNode` 的分工：聚焦是用户主动说「我要看清它」，于是重算缩放；
+ * 这里是「生成完成」的副作用，用户没要求改缩放，所以 `k` 原样返回，只在目标不完整可见时
+ * 给出最小位移。公式与 `focusViewportForNode` 同一套视口约定（世界坐标乘 `k` 再加 `x`/`y`）。
+ *
+ * 为什么必须做：结果图落在视口外时，React Flow 开着 `onlyRenderVisibleElements` 不会挂载它 ——
+ * 画布上空白一片，用户只看到日志条说「已回流画布」，以为生成失败（真实事故见
+ * `.agents/notes/2026-10-21-canvas-result-reveal.md`）。
+ *
+ * 返回值：新的视口变换；目标已完整可见（含 `margin`）返回 `null`，调用方据此完全不碰视口，
+ * 不给用户制造无谓抖动。目标比可用区还大时按左 / 上对齐（内容从头读起）。
+ * 尺寸或坐标非法（非正、NaN、退化盒、`k ≤ 0`）返回 `null`，绝不产出 Infinity。
+ */
+export function revealViewport(
+  bounds: Rect,
+  size: Size,
+  viewport: ViewportTransform,
+  margin = REVEAL_MARGIN,
+): ViewportTransform | null {
+  const k = viewport.k;
+  const width = bounds.right - bounds.left;
+  const height = bounds.bottom - bounds.top;
+  const finite = [
+    k,
+    size.width,
+    size.height,
+    viewport.x,
+    viewport.y,
+    bounds.left,
+    bounds.top,
+    width,
+    height,
+  ].every((value) => Number.isFinite(value));
+  if (!finite || k <= 0 || size.width <= 0 || size.height <= 0 || width <= 0 || height <= 0) {
+    return null;
+  }
+  // 视口比两侧留白还小时退化为不留白，否则 `size - 2 * pad` 变负、位移会反向
+  const pad = clamp(margin, 0, Math.min(size.width, size.height) / 2);
+  const left = bounds.left * k + viewport.x;
+  const top = bounds.top * k + viewport.y;
+  const right = bounds.right * k + viewport.x;
+  const bottom = bounds.bottom * k + viewport.y;
+  const roomX = size.width - 2 * pad;
+  const roomY = size.height - 2 * pad;
+  let dx = 0;
+  if (left < pad) dx = pad - left;
+  else if (right > size.width - pad) dx = width * k > roomX ? pad - left : size.width - pad - right;
+  let dy = 0;
+  if (top < pad) dy = pad - top;
+  else if (bottom > size.height - pad) {
+    dy = height * k > roomY ? pad - top : size.height - pad - bottom;
+  }
+  if (dx === 0 && dy === 0) return null;
+  return { x: viewport.x + dx, y: viewport.y + dy, k };
 }

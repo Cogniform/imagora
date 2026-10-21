@@ -8,7 +8,7 @@ React 19 + TypeScript + Vite + Tailwind v4 + React Flow（`@xyflow/react`）。�
 npm install
 npm run dev        # 开发模式（热更新；需后端已启动，见下）
 npm run build      # tsc --noEmit + vite build → dist/（git 忽略，由后端服务托管）
-npm test           # vitest run（1030 用例）
+npm test           # vitest run（1040 用例）
 npm run lint       # eslint
 npx tsc --noEmit   # 类型检查
 ```
@@ -59,6 +59,8 @@ $env:IMAGORA_APP_ROOT = $h
 只复验几条：`--only 拖拽`（按断言名子串过滤；一条都没匹配时退出码 1，避免假绿）。`--base` 也可以由 `IMAGORA_E2E_BASE` 环境变量提供，命令行优先。两个脚本都吃这两个开关。
 
 `verify_provider.py` 还多一个 `--app-root`（也可用 `IMAGORA_APP_ROOT`，与起服务时那个变量同名）：它要读**服务写下的**那份 `providers.local.json`，默认按仓库根找；打隔离实例时漏了它就会去断言仓库里那份真实来源文件——第 4 步假红、第 7 步假绿。
+
+写新的画布断言时注意**视口是被测状态**：画布开着 `onlyRenderVisibleElements`，`.react-flow__node` 只含视口内的节点，而产物落地会主动把视野带过去（见 `.agents/notes/2026-10-21-canvas-result-reveal.md`）。所以「数节点」「拖节点」「点节点里的按钮」之前，用例要先用脚本里的 `set_zoom` / `frame_node` 自己把视口摆正，别假设上一步没挪视野；真按鼠标前用 `node_hit` 确认那个点确实点得到目标节点。
 
 ## 该目录特有坑
 
@@ -161,7 +163,7 @@ $env:IMAGORA_APP_ROOT = $h
 - 注意：**比例换算必须乘框的宽高比**——`normalizedRatio = aspectRatio * boxAspect`（`boxAspect = boxHeight / boxWidth`），漏了这一步「1:1」会裁成长方形。B 层**不写单测**：jsdom 的 `canvas.getContext("2d")` 返回 `null`（不装 canvas npm 包也不许装），只由 A 层纯函数兜底。裁剪与放大全部在前端 canvas 完成，后端零参与（不新增接口、不改 `generate_image` 契约）
 
 ### [dataUrlFile.ts](src/dataUrlFile.ts)
-- 职责：把前端 canvas 导出的 `data:image/png;base64,...` 转成可上传的 `File`（`dataUrlToFile`），并生成派生图文件名（`derivedImageName`，形如 `crop-红苹果-20261020-130405.png`）
+- 职责：把前端 canvas 导出的 `data:image/png;base64,...` 转成可上传的 `File`（`dataUrlToFile`），并生成派生图文件名（`derivedImageName`，形如 `crop-红苹果-20261030-130405.png`）
 - 被谁依赖：`components/CanvasPage.tsx`（裁剪 / 放大对话框的产出落库）
 - 注意：**非法 dataUrl 必须抛错而不是返回空 File** —— 上传 0 字节会在画布上多出一个永远加载失败的红框节点，比直接报错难排查得多。转换独立成模块的理由：`canvasUpload(files: File[])` 只收 `File`，这层 `atob` / `Blob` 不该撒进 2357 行的 CanvasPage.tsx，独立后能单测。支持 base64 与百分号编码两种载荷
 
@@ -171,9 +173,9 @@ $env:IMAGORA_APP_ROOT = $h
 - 注意：`ASPECT_ICON_LONG = 24` 是长边上限（再大会撑高下拉行）、`ASPECT_ICON_MIN_SHORT = 10` 是短边下限（再矮看不出是矩形）。**标签解析必须三层回退**：括号内 `a:b` → 裸 `a:b` → `WxH` 宽高比——真实尺寸里有 `1024x1792 (竖版长图)`、`1792x1024 (横版长图)` 两项括号内只有中文方位词，不退回宽高比这两项就没图标
 
 ### [canvasGeometry.ts](src/canvasGeometry.ts)
-- 职责：视口聚焦 + 分组几何纯函数（移植自 basketikun/infinite-canvas，MIT）。`nodeBounds` / `containsCenter` / `findGroupDropTarget` / `snapNodesIntoGroup` / `collectGroupMemberNodes` / `getGroupWrapRect` / `focusViewportForNode`
-- 被谁依赖：`components/CanvasPage.tsx`（「聚焦」控件）
-- 注意：`focusViewportForNode` 让节点**最多占视口 60%**（`FOCUS_MAX_VIEWPORT_RATIO`），下方有浮层时按 3:1 把节点往上推；`containsCenter` 判的是**节点中心点**而不是整体包含（整体包含会让大节点永远拖不进小组）；`nodeBounds` 空数组必须返回退化盒 `{0,0,0,0}`，返回 `±Infinity` 会让调用方算出 NaN
+- 职责：视口聚焦 / 带进视野 + 分组几何纯函数（移植自 basketikun/infinite-canvas，MIT）。`nodeBounds` / `containsCenter` / `findGroupDropTarget` / `snapNodesIntoGroup` / `collectGroupMemberNodes` / `getGroupWrapRect` / `focusViewportForNode` / `revealViewport`
+- 被谁依赖：`components/CanvasPage.tsx`（「聚焦」控件、生成结果回流 / 派生图落地后把新节点带进视野）
+- 注意：`focusViewportForNode` 让节点**最多占视口 60%**（`FOCUS_MAX_VIEWPORT_RATIO`），下方有浮层时按 3:1 把节点往上推；`containsCenter` 判的是**节点中心点**而不是整体包含（整体包含会让大节点永远拖不进小组）；`nodeBounds` 空数组必须返回退化盒 `{0,0,0,0}`，返回 `±Infinity` 会让调用方算出 NaN。`revealViewport` 与聚焦分工相反：**只平移、`k` 原样返回**（用户没要求改缩放），目标已完整可见时返回 `null` 让调用方完全不碰视口 —— 结果图落到视口外时 React Flow 不会挂载它，画布看起来「什么都没发生」（见 `.agents/notes/2026-10-21-canvas-result-reveal.md`）
 
 ### [imageSplit.ts](src/imageSplit.ts)
 - 职责：图像切分几何 + canvas 导出。`clampGrid` / `splitCells`（网格）/ `splitCellsByLines`（自定义切割线）/ `splitCellCount` / `splitOutputName` / `splitDataUrl`

@@ -47,7 +47,7 @@ Imagora 是本地单机工具，运行时分三层，方向单一：
 | `core/` | 后端核心逻辑（见 2.2），全部无 HTTP 依赖的纯业务模块；**双件**：规则层 core/AGENTS.md + 文件索引 core/README.md |
 | `frontend/` | React SPA（见 2.3）；**双件**：frontend/AGENTS.md（规则）+ frontend/README.md（索引） |
 | `scripts/` | 独立运维脚本：`migrate.py`（存储一步到最新，默认只报告、`--apply` 才落盘备份校验）；**双件**：scripts/AGENTS.md + scripts/README.md |
-| `tests/` | 后端 pytest（467 用例）+ 前端 vitest（1030 用例），全部不调上游；**双件**：tests/AGENTS.md + tests/README.md（逐文件覆盖） |
+| `tests/` | 后端 pytest（467 用例）+ 前端 vitest（1040 用例），全部不调上游；**双件**：tests/AGENTS.md + tests/README.md（逐文件覆盖） |
 | `docs/` | 设计圣经 `ARCHITECTURE.md`（本文档）+ `prompt-import-format.md` / `ecom-prompt-import-format.md`（格式规范）；**双件**：docs/AGENTS.md + docs/README.md |
 | `assets/` | **文档配图**（只服务 markdown 渲染，不是应用资源）：`screenshots/` 放 README「界面一览」的界面截图；**双件**：assets/AGENTS.md + assets/README.md |
 | `_ui-audit/` | 开发期 UI 审计图（本机产物，git 忽略）：由 [scripts/capture.py](../scripts/capture.py) 生成，与门面配图 `assets/screenshots/` 不是一回事 |
@@ -249,6 +249,7 @@ React Flow v12（`@xyflow/react`）受控模式：`nodes` / `edges` 状态由 `C
 - **图片切分（`ImageSplitDialog`）**：同一套「派生新图」链路，一次产出多张。几何在 `imageSplit.ts`（纯函数）：`splitCells` 用 `x = col / cols` 直算而不是累加——累加会在最后几格漂出 1 之外的坐标；自定义切割线走 `splitCellsByLines`，先过滤到 `(0,1)` 开区间、排序、1e-6 去重、丢弃距端点 < 0.02 的线，再相邻成对。1×1 是合法输入（等于不切），界面在 `splitCellCount < 2` 时禁用确认并说明理由，而不是悄悄改成 2×2。
 - **拖拽吸附（`snapGuide` + `snapDrag`）**：拆两层——`snapGuide.ts` 是纯几何（被拖盒的左/中/右与上/中/下三对齐线，与其它节点的同三条线比差取最近），`snapDrag.ts` 是接线层（把结果翻译成 React Flow 的 `NodeChange`，并算出要画的对齐线）。拆开的理由：几何能被单测穷举（38 个用例），接线层只做形状转换（22 个用例），混在一起就都得靠模拟拖拽才能测。**x 与 y 独立决策**（可能只吸一个轴）；阈值用严格 `<`；**没有可吸目标时原样返回，绝不偷偷退回网格**——否则「关掉吸附」与「没有邻居」会变成两套行为，用户无法预期。吸附位移必须**同时写 `position` 与 `positionAbsolute`**：React Flow 读后者渲染，只写前者节点会在下一帧瞬移回原位。开关默认开，偏好落 `imagora.canvas-snap.v1`。
 - **聚焦控件（`focusViewportForNode`）**：取代 `fitView` 的「把所有东西塞进屏幕」——节点一多，fitView 会把缩放压到 5%，节点缩成看不见的色块。用户按「聚焦」要的是「看清楚它」。算法在 `canvasGeometry.ts`（纯函数）：可用高度扣掉底部日志条，节点最多占视口 60%（`FOCUS_MAX_VIEWPORT_RATIO`），下方有浮层时按 3:1 把节点往上推。有选中就聚焦选中的包围盒，没选中就聚焦全图。
+- **系统自己落地的新节点必须带进视野（`revealViewport`）**：生成结果回流、裁剪 / 放大 / 切分产物都是**在源节点旁边落地**（结果图在提示词正下方 `resultGap = 60`，派生图在源图右侧 `DERIVED_NODE_OFFSET_X = 200`）。源节点一旦靠近视口边缘，新节点就落在视口外 —— 而画布开着 `onlyRenderVisibleElements`，**视口外的节点根本不挂载**：画布上空白一片，用户只看到日志条说「已回流画布」，会以为生成失败（真实事故见 `.agents/notes/2026-10-21-canvas-result-reveal.md`）。修法不是关掉可见性裁剪（那只会让节点进 DOM、屏幕上看不见的东西还是看不见），而是落地后**只平移**视口把新节点带进来：`revealViewport` 的 `k` 原样返回（用户没要求改缩放，抢缩放比看不见更烦人），已完整可见时返回 `null`、调用方完全不碰视口。底部日志条按聚焦同一口径扣掉（`FOCUS_BOTTOM_INSET = 96`）。
 - **节点悬停操作栏必须用 `opacity` + `pointer-events` 控制，不能用 `visibility` / `display`**：`visibility: hidden` 会把按钮从无障碍树摘掉，E2E 的 `get_by_role` 与读屏器都查不到；`display: none` 则让按钮脱离布局，鼠标移过去时元素才出现，悬停区会闪。正确做法是常驻布局、`opacity-0 pointer-events-none`，`group-hover` 时两者一起翻转。另外悬停区要用**内边距（`pl-2`）而不是外边距（`ml-2`）**：外边距不参与命中测试，鼠标从节点移向按钮的 8px 途中会掉出 `.group`，操作栏闪断。
 
 ### 5.5 持久化
@@ -520,7 +521,7 @@ React Flow v12（`@xyflow/react`）受控模式：`nodes` / `edges` 状态由 `C
 ### 10.1 单元测试
 
 - 后端 pytest：**467 用例**（Windows 含 5 个专属测试，CI 必须 `windows-latest`；默认 tmp 路径的 WinError 5 历史坑已随目录重建恢复，见 AGENTS「活跃坑」）
-- 前端 vitest：**1030 用例**；`tsc --noEmit` + `vite build` 成功；`npm run lint` / `uv run ruff check .` 均零告警
+- 前端 vitest：**1040 用例**；`tsc --noEmit` + `vite build` 成功；`npm run lint` / `uv run ruff check .` 均零告警
 - 文档完整性：`python scripts/check_docs.py`（相对链接可解析 + AGENTS/tests-README/ARCHITECTURE/frontend-README 的测试计数与源码一致；改任何文档后必跑，见 [scripts/README.md](../scripts/README.md)）
 - **逐文件用例 / 覆盖范围 / 变更影响路由（完整表）见 [tests/README.md](../tests/README.md) 文件索引**
 
