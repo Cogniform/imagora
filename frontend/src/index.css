@@ -660,6 +660,15 @@ html[data-canvas-bounds="off"] .studio-canvas .react-flow__renderer {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-brand) 16%, transparent), 0 14px 30px rgba(33,44,53,.16) !important;
 }
 .studio-canvas .node-pop .field-control { background: var(--surface-inset); }
+/* 节点里的尺寸下拉：标签带单价，比表单那栏长；14px 在 7fr 列里会被截成「1024x1024 (1:1) (0…」，
+   截在数字中间比换行更糟。节点本来就该比表单紧凑 —— 触发值降到 12px 并收紧左右内边距，完整标签正好放下。
+   只作用于节点，表单那边保持 14px。 */
+.studio-canvas .node-pop .select-trigger {
+  font-size: 12px;
+  padding-left: 8px;
+  padding-right: 8px;
+  gap: 6px;
+}
 /* 连线描边取 --edge-stroke-* 三个 token（见文件开头「连线三态描边」段）：
    这两条是无内联样式时的兜底（如工作流加载后首帧、或 JS 未接管时），
    实际悬停/选中/降权由 edgeStyle.ts 内联到 <path> 上，内联优先级更高。 */
@@ -939,6 +948,14 @@ html[data-canvas-bounds="off"] .studio-canvas .react-flow__renderer {
   /* 字段标签 */
   .field-label {
     @apply text-sm font-medium text-neutral-700;
+  }
+
+  /* 画布节点内的紧凑标签：与 .field-label 同一族，小一号（12px）。
+   * 节点固定 380px 宽、两列字段并排，14px 标签会把「尺寸 / 质量」挤到换行；
+   * 但也不该像以前那样在调用点写 text-[10px] —— 那会让节点标签比全站任何一处都小一档。 */
+  .field-label-compact {
+    @apply text-xs font-medium text-neutral-600;
+    display: block;
   }
 
   /* 次要提示文字 */

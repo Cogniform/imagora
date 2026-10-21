@@ -146,6 +146,51 @@ describe("Select", () => {
     expect(screen.getByRole("button", { name: /选项 A/ }).getAttribute("aria-expanded")).toBe("true");
   });
 
+  it("searchable 缺省：选项数不超阈值（3 项）时不出搜索框", () => {
+    // 同一套控件契约：经典表单里的尺寸下拉只有 3~5 项，不该出现搜索框。
+    render(<Select options={options} value="a" onChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /选项 A/ }));
+    expect(screen.getByRole("listbox")).toBeTruthy();
+    expect(screen.queryByLabelText("筛选选项")).toBeNull();
+  });
+
+  it("searchable 缺省：选项数超阈值（5 项）时出搜索框且焦点落在搜索框", () => {
+    // 画布节点里的尺寸下拉有十几项，展开就该能直接打字 —— 与上面的 3 项形成对照。
+    const many = [
+      { value: "s1", label: "尺寸 1" },
+      { value: "s2", label: "尺寸 2" },
+      { value: "s3", label: "尺寸 3" },
+      { value: "s4", label: "尺寸 4" },
+      { value: "s5", label: "尺寸 5" },
+    ];
+    render(<Select options={many} value="s1" onChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /尺寸 1/ }));
+    const search = screen.getByLabelText("筛选选项");
+    // 焦点必须真的落进搜索框：历史缺陷是 rect 未算出的首帧聚焦失败后永不重试
+    expect(document.activeElement).toBe(search);
+    expect(screen.getAllByRole("option")).toHaveLength(many.length);
+  });
+
+  it("searchable={false}：5 项也强制不出搜索框", () => {
+    const many = [
+      { value: "s1", label: "尺寸 1" },
+      { value: "s2", label: "尺寸 2" },
+      { value: "s3", label: "尺寸 3" },
+      { value: "s4", label: "尺寸 4" },
+      { value: "s5", label: "尺寸 5" },
+    ];
+    render(<Select options={many} value="s1" onChange={vi.fn()} searchable={false} />);
+    fireEvent.click(screen.getByRole("button", { name: /尺寸 1/ }));
+    expect(screen.getByRole("listbox")).toBeTruthy();
+    expect(screen.queryByLabelText("筛选选项")).toBeNull();
+  });
+
+  it("searchable（true）：3 项也强制出搜索框（向后兼容显式开启）", () => {
+    render(<Select options={options} value="a" onChange={vi.fn()} searchable />);
+    fireEvent.click(screen.getByRole("button", { name: /选项 A/ }));
+    expect(screen.getByLabelText("筛选选项")).toBeTruthy();
+  });
+
   it("分组：渲染组标题，键盘上下键跨组连续（标题不参与导航）", () => {
     const grouped = [
       { value: "volc-a", label: "volc-a", group: { id: "volc", label: "出厂来源" } },

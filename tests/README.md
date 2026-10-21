@@ -51,7 +51,7 @@ cd frontend; npm test
 | [`test_main_process.py`](test_main_process.py) | 4 | 端口探测 / 祖先链回溯（Windows） |
 | [`test_main_cli.py`](test_main_cli.py) | 31 | CLI gen 子命令全链路（校验/输出解析/文生图+图生图+多参考/失败/--no-asset/比例档位）/ **`--n` 逐张请求（每次 `n=1`、各存各的账、部分失败保留已成功、默认单张行为不变）** / config 输出 |
 
-## 文件索引（前端 vitest，共 930，位于 frontend/src/）
+## 文件索引（前端 vitest，共 936，位于 frontend/src/）
 
 | 文件 | 用例 | 覆盖 |
 | --- | --- | --- |
@@ -84,7 +84,7 @@ cd frontend; npm test
 | [`minimapVisible.test.ts`](../frontend/src/minimapVisible.test.ts) | 16 | 画布小地图显隐与缩放滑杆偏好：默认值（小地图默认关、滑杆默认 100%）、`zoomToSliderPercent`/`sliderPercentToZoom` 互为反函数往返、NaN/±Infinity 夹到端点而不抛错、localStorage 不可用时静默降级 |
 | [`rankByName.test.ts`](../frontend/src/rankByName.test.ts) | 10 | 模糊排序：query 是 name 的大小写不敏感**有序子序列**（`gi25` 命中 `gpt-image-2.5`）、边界命中加分优先、相邻匹配加分、跳跃扣分、空 query 返回**同一数组引用**、全角 U+2011 折叠后比对 |
 | [`optionGroups.test.ts`](../frontend/src/optionGroups.test.ts) | 6 | 分组归并：组间按首次出现顺序、组内保持源顺序、无分组的项归入空标题兜底组、全部无分组时返回单组、混合时兜底组排最后 |
-| [`CanvasNodes.test.tsx`](../frontend/src/components/CanvasNodes.test.tsx) | 26 | 节点操作栏（含**蒙版重绘**入口）/ 双击行为 / 组卡去重提示渲染 / **蒙版角标只在带蒙版时出现，点一下即清除** |
+| [`CanvasNodes.test.tsx`](../frontend/src/components/CanvasNodes.test.tsx) | 28 | 节点操作栏（含**蒙版重绘**入口）/ 双击行为 / 组卡去重提示渲染 / **蒙版角标只在带蒙版时出现，点一下即清除** |
 | [`Field.test.tsx`](../frontend/src/components/Field.test.tsx) | 8 | 字段壳：label 与控件经 id 关联、`hint` 与 `error` **共用同一个消息槽位**（invalid 时 error 顶掉 hint、任何时刻至多一行）、`aria-describedby` 无内容时不写空串、`aria-invalid` 条件展开、`action` 插槽渲染 |
 | [`GenerationPending.test.tsx`](../frontend/src/components/GenerationPending.test.tsx) | 7 | 生成中占位卡：`role="status"` + `aria-live` 语义、受控 `elapsed` 优先于自走表、进度条只改 `transform: scaleX()`（不给 width 做动画）、文案随秒数轮播 |
 | [`ImageCropDialog.test.tsx`](../frontend/src/components/ImageCropDialog.test.tsx) | 7 | 裁剪对话框：比例预设按钮（`aria-pressed`）、八向手柄拖拽的位移换算（先除 stage 宽高再交给 `resizeCrop`）、遮罩用 `boxShadow` spread 覆盖整块视口、确认回传 dataUrl、取消关闭。测试用 `vi.mock("../imageOps", …)` 部分替身（`vi.importActual` 展开真身、只换 `readImageSize` / `cropDataUrl` 两个 canvas I/O 函数），几何纯函数全走真实实现 |
@@ -93,7 +93,7 @@ cd frontend; npm test
 | [`NodeContextMenu.test.tsx`](../frontend/src/components/NodeContextMenu.test.tsx) | 14 | 节点右键菜单：`role="menu"` 语义与每项 `role="menuitem"`、点外部 / Escape / Tab / resize / scroll 关闭、**disabled 项用 `aria-disabled` 而不是原生 disabled**（原生会让键盘焦点跳过）、挂载时 pushPopup 让 Esc 先收菜单、贴底右键不出屏（量真实高度再夹） |
 | [`ProviderModal.test.tsx`](../frontend/src/components/ProviderModal.test.tsx) | 22 | 添加第三方供应商弹窗：Provider ID 正则与地址协议的即时校验、协议预设切换与路径联动、探测模型（成功切下拉并选第一个 / 失败留文本框 / 「手填」可切回自由输入）、提交与错误提示 |
 | [`ModalShell.test.tsx`](../frontend/src/components/ModalShell.test.tsx) | 5 | 弹窗基座：dialog 语义 / 面板与遮罩点击分流 / Esc 关闭与焦点归还 / **下拉展开时 Esc 先收下拉、不关弹窗** |
-| [`Select.test.tsx`](../frontend/src/components/Select.test.tsx) | 24 | 自定义下拉：listbox 语义 / 键盘导航 / 点外部关闭 / **展开列表挂到 body（不被滚动容器裁切）** / **自由输入（`allowCustom`：精确命中走正常选中、校验不过时 Enter 什么都不做、清单为空也能展开、自定义行放在 listbox 之外）** |
+| [`Select.test.tsx`](../frontend/src/components/Select.test.tsx) | 28 | 自定义下拉：listbox 语义 / 键盘导航 / 点外部关闭 / **展开列表挂到 body（不被滚动容器裁切）** / **自由输入（`allowCustom`：精确命中走正常选中、校验不过时 Enter 什么都不做、清单为空也能展开、自定义行放在 listbox 之外）** |
 | [`popupLayer.test.ts`](../frontend/src/popupLayer.test.ts) | 5 | 浮层计数：push/pop 配对、嵌套多层、**多余 pop 不弄成负数**（否则弹窗再也关不掉）/ reset |
 | [`ResultPanel.test.tsx`](../frontend/src/components/ResultPanel.test.tsx) | 7 | 结果区 5 态面板 / 切换交叉淡化（旧层保留至淡出移除） |
 | [`WorkflowModals.test.tsx`](../frontend/src/components/WorkflowModals.test.tsx) | 2 | ZoomModal Portal 点击隔离（点图片/空白不误关外层宿主遮罩） |
@@ -127,7 +127,7 @@ cd frontend; npm test
 - 改 `core/api.py` → `test_core_api.py` + `test_main_cli.py`
 - 改 `server.py` 路由 → 对应 `test_server_*.py` + 前端 `types.ts`/`api.ts`
 - 改前端纯函数 → 对应 `*.test.ts`（同目录同名）
-- 改前端组件 → 组件单测 + E2E（`../frontend/e2e/verify_canvas.py` 81 断言；改来源/配置相关再跑 `verify_provider.py` 38 断言）
+- 改前端组件 → 组件单测 + E2E（`../frontend/e2e/verify_canvas.py` 103 断言；改来源/配置相关再跑 `verify_provider.py` 38 断言）
 - **增/删用例后更新 AGENTS「当前仪表盘」数字**
 
 ## CI 要求

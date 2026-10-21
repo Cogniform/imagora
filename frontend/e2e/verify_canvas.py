@@ -1047,9 +1047,10 @@ def main():
         # 22. 连线三态：默认 1.5px → hover 加粗 → 单击选中 → Delete 删除
         #     线宽/透明度由 edgeStyle.ts 以**内联样式**写到 <path> 上，
         #     所以判据读 computedStyle 而不是查 CSS 类名。
-        # exact=True：有选中节点时工具栏还会多出一颗「自动连线 (N)」（只补选区），
-        # 非精确匹配会同时命中两颗按钮，Playwright strict 模式当场报错。
-        page.get_by_role("button", name="自动连线", exact=True).click()
+        # 作用域锁死工具栏：有选中节点时检查器里还有一颗「自动连线」（只补选区），
+        # 它现在单选时不带计数（(1) 是噪音），两颗按钮的可访问名完全一样，
+        # 全局 get_by_role 会命中 2 个、Playwright strict 模式当场报错。
+        page.locator(".studio-toolbar").get_by_role("button", name="自动连线").click()
         page.wait_for_timeout(700)
         edge_total = page.locator(".react-flow__edge").count()
         check("自动连线后画布出现连线", edge_total >= 1, f"edges={edge_total}")
