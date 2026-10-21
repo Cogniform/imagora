@@ -1,5 +1,12 @@
 """端到端验证「添加第三方供应商」：真实浏览器 + 真实服务，不 mock。
 
+运行：python frontend/e2e/verify_provider.py [--base URL] [--app-root DIR] [--only 关键字]
+      `--base` 也可用 IMAGORA_E2E_BASE 环境变量提供，`--app-root` 也可用 IMAGORA_APP_ROOT
+      （都是命令行优先）。`--app-root` 必须与**服务进程**的应用根一致 —— config.json /
+      providers.local.json / .env 三者同级（core/config.py 的 `_APP_ROOT`）；
+      打隔离实例时如果漏了它，脚本会去断言仓库里那份真实 providers.local.json：
+      第 4 步假红（文件里没有测试来源），第 7 步假绿（没写进去，自然也「已无该来源」）。
+
 覆盖：
 1. 顶栏插头按钮存在、可点
 2. 弹窗字段齐全
@@ -11,35 +18,71 @@
 
 from __future__ import annotations
 
+import argparse
 import json
+import os
 import secrets
 import sys
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-BASE = "http://127.0.0.1:7860"
+DEFAULT_BASE = "http://127.0.0.1:7860"
+BASE = os.environ.get("IMAGORA_E2E_BASE", DEFAULT_BASE)
 ROOT = Path(__file__).resolve().parents[2]
-LOCAL = ROOT / "providers.local.json"
+# 应用根：服务端取「自己的工作目录，或 IMAGORA_APP_ROOT」（core/config.py:31）。
+# 默认仓库根 = 「在仓库根起服务」这条最常走的路；隔离实例请带 --app-root / 环境变量。
+APP_ROOT = Path(os.environ.get("IMAGORA_APP_ROOT") or ROOT)
+LOCAL = APP_ROOT / "providers.local.json"
+SHOTS = APP_ROOT / "_ui-audit"
 # 每次跑用不同的名字：服务端把来源缓存在内存里（进程启动时读一次 + 新建时 reload），
 # 上一次跑留下的条目在本进程内仍然「已注册」，复用同一个名字会被前端判成重名而禁用按钮。
 TEST_NAME = f"e2e-{secrets.token_hex(3)}"
 
 passed = 0
 failed = 0
+results: list[tuple[str, bool]] = []
+# --only 过滤词：空 = 全量。由 main() 按命令行覆盖（与 verify_canvas.py 同一套语义）。
+ONLY = ""
 
 
 def check(label: str, ok: bool, extra: str = "") -> None:
     global passed, failed
+    if ONLY and ONLY.lower() not in label.lower():
+        return
     if ok:
         passed += 1
         print(f"  PASS  {label}")
     else:
         failed += 1
         print(f"  FAIL  {label} {extra}")
+    results.append((label, ok))
 
 
 def main() -> int:
+    global BASE, ONLY, LOCAL, SHOTS
+    parser = argparse.ArgumentParser(description="第三方来源（新增 / 删除）端到端验证")
+    parser.add_argument(
+        "--base",
+        default=BASE,
+        help=f"服务地址，默认 {DEFAULT_BASE}（也可用 IMAGORA_E2E_BASE 环境变量）",
+    )
+    parser.add_argument(
+        "--app-root",
+        default=str(APP_ROOT),
+        help=f"服务进程的应用根目录，默认 {ROOT}（也可用 IMAGORA_APP_ROOT 环境变量）",
+    )
+    parser.add_argument(
+        "--only",
+        default="",
+        help="只判定名称包含该关键字的断言（默认不过滤 = 全量）",
+    )
+    args = parser.parse_args()
+    BASE = args.base.rstrip("/")
+    ONLY = args.only.strip()
+    LOCAL = Path(args.app_root) / "providers.local.json"
+    SHOTS = Path(args.app_root) / "_ui-audit"
+    SHOTS.mkdir(parents=True, exist_ok=True)
     # CI Windows runner 默认 stdout 为 cp1252，无法编码中文（PASS/FAIL 断言名）→ 强制 UTF-8
     # 与 verify_canvas.py 同一处理；漏了这行会在 CI 里第一条 print 就 UnicodeEncodeError。
     sys.stdout.reconfigure(encoding="utf-8")
@@ -104,7 +147,7 @@ def main() -> int:
         page.wait_for_timeout(120)
         check("填齐后按钮可用", not create_btn.is_disabled())
 
-        page.screenshot(path=str(ROOT / "_ui-audit" / "provider-01-filled.png"))
+        page.screenshot(path=str(SHOTS / "provider-01-filled.png"))
         create_btn.click()
         page.wait_for_selector(
             '[data-testid="provider-modal"]', state="detached", timeout=15000
@@ -172,7 +215,7 @@ def main() -> int:
         page.get_by_role("button", name="获取可用模型").click()
         page.wait_for_selector("text=/连接不上该地址|HTTP /", timeout=30000)
         check("探测失败有可读原因", True)
-        page.screenshot(path=str(ROOT / "_ui-audit" / "provider-02-probe-fail.png"))
+        page.screenshot(path=str(SHOTS / "provider-02-probe-fail.png"))
 
         # 第 6 步刻意打了一个必定失败的请求，浏览器必然在控制台记一条
         # 「Failed to load resource: ... 400」。那是被测行为本身，不是缺陷 —— 排除掉它再看。
@@ -200,7 +243,7 @@ def main() -> int:
         delete_btn = page.get_by_role("button", name="删除这个来源")
         check("本机来源出现删除按钮", delete_btn.count() == 1)
         check("删除按钮可用（非当前生效来源）", not delete_btn.is_disabled())
-        page.screenshot(path=str(ROOT / "_ui-audit" / "provider-03-deletable.png"))
+        page.screenshot(path=str(SHOTS / "provider-03-deletable.png"))
 
         delete_btn.click()
         page.wait_for_timeout(200)
@@ -274,9 +317,12 @@ def main() -> int:
                     other_btn.count() == 1 and not other_btn.is_disabled(),
                 )
 
-        page.screenshot(path=str(ROOT / "_ui-audit" / "provider-04-in-use.png"))
+        page.screenshot(path=str(SHOTS / "provider-04-in-use.png"))
         browser.close()
 
+    if ONLY and not results:
+        print(f"\n--only {ONLY!r} 没有匹配任何断言（TOTAL 0），按失败处理")
+        return 1
     print(f"\nTOTAL: {passed + failed}  PASS: {passed}  FAIL: {failed}")
     return 0 if failed == 0 else 1
 
