@@ -47,7 +47,7 @@ Imagora 是本地单机工具，运行时分三层，方向单一：
 | `core/` | 后端核心逻辑（见 2.2），全部无 HTTP 依赖的纯业务模块；**双件**：规则层 core/AGENTS.md + 文件索引 core/README.md |
 | `frontend/` | React SPA（见 2.3）；**双件**：frontend/AGENTS.md（规则）+ frontend/README.md（索引） |
 | `scripts/` | 独立运维脚本：`migrate.py`（存储一步到最新，默认只报告、`--apply` 才落盘备份校验）；**双件**：scripts/AGENTS.md + scripts/README.md |
-| `tests/` | 后端 pytest（454 用例）+ 前端 vitest（730 用例），全部不调上游；**双件**：tests/AGENTS.md + tests/README.md（逐文件覆盖） |
+| `tests/` | 后端 pytest（467 用例）+ 前端 vitest（930 用例），全部不调上游；**双件**：tests/AGENTS.md + tests/README.md（逐文件覆盖） |
 | `docs/` | 设计圣经 `ARCHITECTURE.md`（本文档）+ `prompt-import-format.md` / `ecom-prompt-import-format.md`（格式规范）；**双件**：docs/AGENTS.md + docs/README.md |
 | `assets/` | **文档配图**（只服务 markdown 渲染，不是应用资源）：`screenshots/` 放 README「界面一览」的界面截图；**双件**：assets/AGENTS.md + assets/README.md |
 | `_ui-audit/` | 开发期 UI 审计图（本机产物，git 忽略）：由 [scripts/capture.py](../scripts/capture.py) 生成，与门面配图 `assets/screenshots/` 不是一回事 |
@@ -354,7 +354,7 @@ React Flow v12（`@xyflow/react`）受控模式：`nodes` / `edges` 状态由 `C
 | POST | `/api/upload-ref` | multipart：images | { refs[ id, path, url, name, size, ext, mime ] }（落盘 `output/.refs/`） |
 | POST | `/api/delete-ref` | { path } | { ok }（尽力删除，文件不存在也算 ok） |
 | POST | `/api/output-dir` | { path } | { ok }（记住输出路径，重启沿用） |
-| POST | `/api/generate` | multipart：prompt/size/quality/output_dir/win/allow_over_budget + images 或 ref_paths（**不接收任何凭据**：配置在文件里，服务端自己读） | { taskId, status }（提交即返回；**预算闸门**：超出 `singleRunLimit`/`dailyLimit` 且 `allow_over_budget≠true` 时 409 + `detail{reason, estimate, spentToday, settings}`） |
+| POST | `/api/generate` | multipart：prompt/size/quality/output_dir/win/allow_over_budget + images 或 ref_paths + `mask`（**data URL 字符串**，非文件字段；透明像素 = 要重绘区域，不透明 = 保持原样，有 mask 时强制走 edits 接口且必须有底图）（**不接收任何凭据**：配置在文件里，服务端自己读） | { taskId, status }（提交即返回；**预算闸门**：超出 `singleRunLimit`/`dailyLimit` 且 `allow_over_budget≠true` 时 409 + `detail{reason, estimate, spentToday, settings}`） |
 | POST | `/api/generate/batch` | { items[{prompt,size,quality,refPaths[]}], outputDir, win, allowOverBudget } | { submitted[{taskId,prompt,size,cost}], skipped[{index,reason}], estimate, budget }（CLI 批量用：一次提交多条，单条非法只跳过该条；全部被跳过或超预算未确认则不提交任何任务） |
 | GET | `/api/tasks/{task_id}` | 无 | 快照（queued → running → done/failed，可 cancelled；终态保留 10 分钟，超时 404） |
 | POST | `/api/tasks/{task_id}/cancel` | 无 | { ok }（排队立即取消；运行中跑完当前张丢弃结果） |
@@ -518,8 +518,8 @@ React Flow v12（`@xyflow/react`）受控模式：`nodes` / `edges` 状态由 `C
 
 ### 10.1 单元测试
 
-- 后端 pytest：**454 用例**（Windows 含 5 个专属测试，CI 必须 `windows-latest`；默认 tmp 路径的 WinError 5 历史坑已随目录重建恢复，见 AGENTS「活跃坑」）
-- 前端 vitest：**730 用例**；`tsc --noEmit` + `vite build` 成功；`npm run lint` / `uv run ruff check .` 均零告警
+- 后端 pytest：**467 用例**（Windows 含 5 个专属测试，CI 必须 `windows-latest`；默认 tmp 路径的 WinError 5 历史坑已随目录重建恢复，见 AGENTS「活跃坑」）
+- 前端 vitest：**930 用例**；`tsc --noEmit` + `vite build` 成功；`npm run lint` / `uv run ruff check .` 均零告警
 - 文档完整性：`python scripts/check_docs.py`（相对链接可解析 + AGENTS/tests-README/ARCHITECTURE/frontend-README 的测试计数与源码一致；改任何文档后必跑，见 [scripts/README.md](../scripts/README.md)）
 - **逐文件用例 / 覆盖范围 / 变更影响路由（完整表）见 [tests/README.md](../tests/README.md) 文件索引**
 

@@ -22,6 +22,7 @@ import {
   ViewportPortal,
   type Connection,
   type Edge,
+  type EdgeMouseHandler,
   type IsValidConnection,
   type Node,
   type NodeChange,
@@ -41,7 +42,9 @@ import {
   workflowSave,
 } from "../api";
 import { createCanvasHistory } from "../canvasHistory";
+import { buildNodeMenu } from "../contextMenu";
 import { dataUrlToFile, derivedImageName, derivedImageSeries } from "../dataUrlFile";
+import { dimmedEdgeIds, edgeStyle, edgeVisualState } from "../edgeStyle";
 import { errMessage } from "../format";
 import {
   readMinimapVisible,
@@ -59,6 +62,7 @@ import {
   saveSnapEnabled,
 } from "../snapDrag";
 import type { SnapGuide } from "../snapGuide";
+import { stripPromptRefs } from "../promptRefs";
 import { useGenerationTask, type GenerationTaskView } from "../useGenerationTask";
 import { useCanvasRecovery } from "../useCanvasRecovery";
 import { useCanvasDrop } from "../useCanvasDrop";
@@ -78,6 +82,7 @@ import {
   canConnect,
   canvasEntriesToNodes,
   collectIncomingImages,
+  collectPromptRefImages,
   computeCounts,
   extractAnimClasses,
   isImageFile,
@@ -96,7 +101,9 @@ import { HistoryGallery } from "./HistoryGallery";
 import { ImageCropDialog } from "./ImageCropDialog";
 import { ImageSplitDialog } from "./ImageSplitDialog";
 import { ImageUpscaleDialog } from "./ImageUpscaleDialog";
+import { MaskBrushDialog } from "./MaskBrushDialog";
 import { ModalShell } from "./ModalShell";
+import { NodeContextMenu } from "./NodeContextMenu";
 import { PromptImportModal } from "./PromptImportModal";
 import { WorkflowLoadModal, WorkflowSaveModal, ZoomModal } from "./WorkflowModals";
 import { buildPromptNodes, type PromptCardSpec } from "../promptImportFormat";
@@ -149,7 +156,7 @@ const HELP_ROWS: [string, string][] = [
   ["画布", "右键框选 · Ctrl+点击加选 · 滚轮缩放 · 空白拖拽平移 · 左下角适应视图全览"],
   ["节点", "悬停显右侧操作栏 · 选中后右上角可运行/整理/连线/设路径/删除 · 双击图片放大预览 · 拖右下角拉伸"],
   ["连线", "图片→提示词/图片组 · 图片组→提示词 · 提示词→图片；提示词仅一条入边，多图经图片组聚合"],
-  ["快捷键", "Ctrl+A 全选 · Ctrl+Z/Y 撤销恢复 · Delete 删除选中 · Ctrl+S 保存 · 双击连线删除"],
+  ["快捷键", "Ctrl+A 全选 · Ctrl+Z/Y 撤销恢复 · Delete 删除选中 · Ctrl+S 保存 · 双击连线或选中后 Delete/Backspace 删除连线"],
 ];
 
 /** 工具栏统一样式按钮；dragStart 存在时按钮可拖出（拖到画布松开即新建，点击仍走 onClick） */
@@ -330,10 +337,28 @@ export function CanvasPage({
   const [selectedPromptCount, setSelectedPromptCount] = useState(0);
   const [pickingSelectedOutputDir, setPickingSelectedOutputDir] = useState(false);
   const selectedIdsRef = useRef<Set<string>>(new Set());
+  /** 连线交互：当前悬停的连线 id（加粗换色，鼠标离开即复位；null=没有连线被指着） */
+  const [hoveredEdgeId, setHoveredEdgeId] = useState<string | null>(null);
+  /** 当前选中的连线 id：选中态加粗，Delete/Backspace 删的就是它。
+   *  来源是 onSelectionChange 汇报的选中边（而不是自己点一次记一次），
+   *  这样点空白处、Ctrl+A、撤销恢复、程序化取消选中都能自动同步，不会留下"看着选中其实没选"。 */
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+  /** selectedEdgeId 的 ref 镜像：keydown 监听器只在挂载时注册一次，读 state 会拿到旧闭包值 */
+  const selectedEdgeIdRef = useRef<string | null>(null);
+  /** 选中节点 id 列表（内容相同则复用旧数组）：供 dimmedEdgeIds 算"与选中节点无关"的连线 */
+  const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
   /** 右键拖拽框选：拖拽起点（flow 坐标，null=未拖拽）。
    *   React Flow 默认 Shift+左键框选已通过 selectionKeyCode={null} 禁用，改为右键直接拖拽多选；
-   *   Ctrl(Windows)/Cmd(Mac)+点击加选走 React Flow 原生 multiSelectionKeyCode（见组件 props）。 */
-  const boxSelectRef = useRef<{ startFlow: { x: number; y: number } } | null>(null);
+   *   Ctrl(Windows)/Cmd(Mac)+点击加选走 React Flow 原生 multiSelectionKeyCode（见组件 props）。
+   *   `nodeId` 是按下时落点下方的节点（无则 null）：几乎没移动就松开 = 右键单击 → 弹节点菜单，
+   *   真拖动过 = 框选。两个手势共用右键，靠移动距离区分（Windows 上 contextmenu 在松开后才触发，
+   *   靠它分派来不及）。`clientX/Y` 记住视口落点，供菜单定位。 */
+  const boxSelectRef = useRef<{
+    startFlow: { x: number; y: number };
+    nodeId: string | null;
+    clientX: number;
+    clientY: number;
+  } | null>(null);
   const [boxRect, setBoxRect] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
   const historyRef = useRef(createCanvasHistory());
   const [, setHistoryVersion] = useState(0);
@@ -361,6 +386,15 @@ export function CanvasPage({
   const [cropTarget, setCropTarget] = useState<ImageOpTarget | null>(null);
   const [upscaleTarget, setUpscaleTarget] = useState<ImageOpTarget | null>(null);
   const [splitTarget, setSplitTarget] = useState<ImageOpTarget | null>(null);
+  /** 蒙版笔刷对话框的加工对象（null 关闭）。与裁剪/放大/切分同构：
+   *  打开时只是「选图」，确认时才把 mask data URL 写回图片节点（见 applyMask）。 */
+  const [maskTarget, setMaskTarget] = useState<ImageOpTarget | null>(null);
+  /** 节点右键菜单：落点（视口坐标）+ 目标节点。null 关闭。
+   *
+   *  与「右键拖拽框选」共用右键，但两者互斥：框选在 mousedown 时启动，
+   *  几乎不移动就松开（rect < 2px）视为右键单击 → 弹菜单；真拖动过就只框选不弹菜单。
+   *  这里只存状态，互斥判定在 onMouseUp 里做（见右键框选 effect）。 */
+  const [nodeMenu, setNodeMenu] = useState<{ x: number; y: number; nodeId: string } | null>(null);
   /** 保存/加载工作流弹窗 */
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [showLoadModal, setShowLoadModal] = useState(false);
@@ -613,16 +647,78 @@ export function CanvasPage({
     [],
   );
   const onNodeMouseLeave: NodeMouseHandler = useCallback(() => setHighlightId(null), []);
-  const onSelectionChange = useCallback(({ nodes: selected }: { nodes: Node[] }) => {
+  const onSelectionChange = useCallback(({ nodes: selected, edges: selectedEdges }: { nodes: Node[]; edges: Edge[] }) => {
     selectedIdsRef.current = new Set(selected.map((n) => n.id));
     setSelectedCount(selected.length);
     setSelectedPromptCount(selected.filter((node) => node.type === "prompt").length);
     const first = selected[0];
     setHighlightId(selected.length === 1 && first?.type === "prompt" ? first?.id ?? null : null);
+    // 选中连线：来源是 React Flow 汇报的选中边（点空白、Ctrl+A、撤销、程序化取消选中都会同步）。
+    // 框选/多选理论上可能选中多条，这里只认第一条（删除仍以单条为单位）。
+    const firstEdge = selectedEdges[0];
+    const edgeId = firstEdge?.id ?? null;
+    selectedEdgeIdRef.current = edgeId;
+    setSelectedEdgeId(edgeId);
+    // 选中节点 id：内容相同则复用旧数组，避免每次选中事件都触发一次连线降权重算。
+    const ids = selected.map((n) => n.id);
+    setSelectedNodeIds((prev) => (prev.length === ids.length && prev.every((id, i) => id === ids[i]) ? prev : ids));
   }, []);
   useEffect(() => {
     applyHighlight(highlightId, edges);
   }, [highlightId, edges, applyHighlight]);
+
+  /* ---------------- 连线交互：hover 加粗 / 选中加粗 / 与选中节点无关的连线降权 ----------------
+   * 四态（idle/hovered/selected/dimmed）由 edgeStyle.ts 纯函数决定，这里只把结果写回 edge。
+   * 与 applyHighlight 同一条纪律：setEdges 必须条件更新（字段无变化返回原引用），
+   * 否则 effect 依赖 edges 变化 -> 无条件新数组 -> 无限更新循环（React #185）。
+   * 分工：本 effect 只写 style / animated，className 仍归 applyHighlight，两者互不覆盖。
+   * animated 与 LOD 取与：低倍缩放时不流动，沿用 defaultEdgeOptions 的既有规则。 */
+  useEffect(() => {
+    const dimmed = new Set(dimmedEdgeIds(edges, selectedNodeIds));
+    setEdges((eds) => {
+      let changed = false;
+      const next = eds.map((e) => {
+        const visual = edgeStyle(
+          edgeVisualState({
+            hovered: e.id === hoveredEdgeId,
+            selected: e.id === selectedEdgeId,
+            hasSelection: dimmed.has(e.id),
+          }),
+        );
+        const animated = visual.animated && !lod;
+        const prevStyle = e.style;
+        const styleSame =
+          prevStyle !== undefined &&
+          prevStyle.stroke === visual.stroke &&
+          prevStyle.strokeWidth === visual.strokeWidth &&
+          prevStyle.opacity === visual.opacity;
+        if (styleSame && e.animated === animated) return e;
+        changed = true;
+        return {
+          ...e,
+          style: { stroke: visual.stroke, strokeWidth: visual.strokeWidth, opacity: visual.opacity },
+          animated,
+        };
+      });
+      return changed ? next : eds;
+    });
+  }, [edges, hoveredEdgeId, selectedEdgeId, selectedNodeIds, lod, setEdges]);
+
+  const onEdgeMouseEnter: EdgeMouseHandler = useCallback((_event, edge) => setHoveredEdgeId(edge.id), []);
+  const onEdgeMouseLeave: EdgeMouseHandler = useCallback(() => setHoveredEdgeId(null), []);
+
+  /** 删除当前选中的单条连线（Delete/Backspace 走这里，与双击删除同一条路径：先记录历史再改状态） */
+  const handleDeleteSelectedEdge = useCallback(() => {
+    const id = selectedEdgeIdRef.current;
+    if (id === null) return;
+    if (!edgesRef.current.some((item) => item.id === id)) return;
+    recordHistory();
+    setEdges((current) => current.filter((item) => item.id !== id));
+    selectedEdgeIdRef.current = null;
+    setSelectedEdgeId(null);
+    setHoveredEdgeId((prev) => (prev === id ? null : prev));
+    pushLog("已删除连线");
+  }, [pushLog, recordHistory, setEdges]);
 
   /* ---------------- 工具栏：上传 / 导入目录 / 保存 / 加载 ---------------- */
   /** 上传本地图片到画布（视口中心定位；自动过滤非图片，与拖拽/经典表单同一 isImageFile 判定） */
@@ -883,6 +979,62 @@ export function CanvasPage({
       setSplitTarget(target);
     },
     [pushLog, readOpTarget],
+  );
+
+  /* ---------------- 蒙版局部重绘（涂出要重绘的区域，随该图作为参考图提交） ---------------- */
+  /** 打开蒙版笔刷：与其他图片加工一样先取加工对象（缺 url 不弹窗，红框已说明原因） */
+  const handleMaskImage = useCallback(
+    (nodeId: string) => {
+      const target = readOpTarget(nodeId);
+      if (!target) {
+        pushLog("蒙版失败：图片文件缺失");
+        return;
+      }
+      setMaskTarget(target);
+    },
+    [pushLog, readOpTarget],
+  );
+
+  /** 确认蒙版：把 data URL 写回图片节点（**不新建节点、不替换图片**）。
+   *
+   *  为什么挂在图片节点上而不是提示词节点上：蒙版描述的是「这张图的哪块要改」，
+   *  换提示词重画同一个区域是常态，蒙版该跟着图走；一张图只保留一份蒙版，
+   *  再次涂改就是覆盖（笔刷对话框的清除按钮负责撤销）。
+   *  为什么写进 data 而不是立即上传：蒙版只在「这张图作为参考图被提交」时才有意义，
+   *  先落盘会产生一堆没人用的孤儿文件；data URL 随节点快照进任务即可（后端
+   *  `GenerationTask.mask_data_url` 就是按这个口径设计的）。 */
+  const applyMask = useCallback(
+    (target: ImageOpTarget, maskDataUrl: string) => {
+      recordHistory();
+      setNodes((nds) =>
+        nds.map((node) =>
+          node.id === target.nodeId && node.type === "image"
+            ? { ...node, data: { ...node.data, maskDataUrl } }
+            : node,
+        ),
+      );
+      pushLog(`已设置蒙版：${target.name}（该图作为参考图时按蒙版局部重绘）`);
+    },
+    [pushLog, recordHistory, setNodes],
+  );
+
+  /** 清除某张图上的蒙版（右键菜单 / 角标按钮） */
+  const clearMask = useCallback(
+    (nodeId: string) => {
+      const node = nodesRef.current.find((n) => n.id === nodeId);
+      if (node?.type !== "image" || !node.data.maskDataUrl) return;
+      recordHistory();
+      setNodes((nds) =>
+        nds.map((n) => {
+          if (n.id !== nodeId || n.type !== "image") return n;
+          const nextData = { ...n.data };
+          delete nextData.maskDataUrl;
+          return { ...n, data: nextData };
+        }),
+      );
+      pushLog(`已清除蒙版：${node.data.name}`);
+    },
+    [pushLog, recordHistory, setNodes],
   );
 
   /** 默认质量：优先 high（用户要求） */
@@ -1237,7 +1389,25 @@ export function CanvasPage({
       // 运行快照：锁定入边参考图集合，运行期间画布编辑不影响本次；
       // 缺图守卫：参考图文件缺失（加载的工作流里 registry 条目丢失）时不静默跳过——
       // 明确报错中止，避免不带参考图悄悄生成出错误结果。
-      const refImages = collectIncomingImages(nodesRef.current, edgesRef.current, nodeId);
+      //
+      // 参考图口径（两段式）：候选池永远是「入边可达」的图片（图片组递归展开），
+      // 提示词里写了 `@文件名` 时只传被引用的那几张，没写则保持旧行为全传。
+      const resolved = collectPromptRefImages(nodesRef.current, edgesRef.current, nodeId, data.prompt);
+      if (resolved.mode === "invalid") {
+        // 引用对不上必须中止，不能退回「全传」也不能「少传」：
+        // 用户以为只用了 @cat.png，实际多传了 8 张（或那张根本没传），
+        // 图生成出来了、钱花了，却没人能看出参考图用错了。
+        nodeTaskRef.current.delete(nodeId);
+        pushLog(
+          `节点 ${nodeId}：引用的图片不存在或未连到本节点 —— ${resolved.unknown.join("、")}。` +
+            `可引用的图片：${collectIncomingImages(nodesRef.current, edgesRef.current, nodeId)
+              .map((n) => (n.type === "image" ? n.data.name : ""))
+              .filter(Boolean)
+              .join("、") || "（无）"}`,
+        );
+        return;
+      }
+      const refImages = resolved.images;
       const missingRefs = refImages.filter((n) => n.type === "image" && !n.data.absPath).length;
       if (missingRefs > 0) {
         nodeTaskRef.current.delete(nodeId);
@@ -1247,17 +1417,43 @@ export function CanvasPage({
       const snapshot = refImages
         .map((n) => (n.type === "image" ? n.data.absPath : undefined))
         .filter((p): p is string => Boolean(p));
+      // 蒙版：只能带一张。上游 images/edits 只接受一个 mask，多张带蒙版的参考图
+      // 必须明确报错而不是随便挑一张 —— 挑错就是拿 A 图的蒙版去改 B 图。
+      const masked = refImages.filter((n) => n.type === "image" && n.data.maskDataUrl);
+      if (masked.length > 1) {
+        nodeTaskRef.current.delete(nodeId);
+        pushLog(
+          `节点 ${nodeId}：参考图里有 ${masked.length} 张设置了蒙版，一次只能带一张蒙版。` +
+            `请只保留一张（或清除多余的蒙版）后再运行`,
+        );
+        return;
+      }
+      const maskDataUrl = masked.length === 1 && masked[0]?.type === "image" ? masked[0].data.maskDataUrl : undefined;
+      if (maskDataUrl && snapshot.length === 0) {
+        // 有蒙版必须有底图：后端 generate_image 会在发请求前抛「mask 需要至少一张底图」，
+        // 这里提前拦住，省一次必然失败的往返。
+        nodeTaskRef.current.delete(nodeId);
+        pushLog(`节点 ${nodeId}：蒙版需要至少一张参考图，请先把图片连到本节点`);
+        return;
+      }
       setNodes((nds) => updatePromptNode(nds, nodeId, { status: "queued", startedAtMs: undefined, message: undefined }));
-      pushLog(`节点 ${nodeId} 已提交，参考图：[${snapshot.length} 张]`);
+      pushLog(
+        `节点 ${nodeId} 已提交，参考图：[${snapshot.length} 张]${
+          resolved.mode === "explicit" ? `（按 @ 引用筛选）` : ""
+        }${maskDataUrl ? " · 含蒙版局部重绘" : ""}`,
+      );
       try {
         const taskId = await submitGenerationTask({
-          prompt: data.prompt,
+          // 发给上游的提示词必须剥掉 @ 标记：`@{my cat.png}` → `@my cat.png`、`@@` → `@`。
+          // 花括号在部分模型里是权重语法，原样发过去会污染提示词。
+          prompt: stripPromptRefs(data.prompt),
           refPaths: snapshot,
           files: [],
           size: data.size,
           quality: data.quality,
           outputDir: data.outputDir,
           win: 0,
+          ...(maskDataUrl ? { maskDataUrl } : {}),
         });
         nodeTaskRef.current.set(nodeId, taskId);
         taskNodeRef.current.set(taskId, nodeId);
@@ -1482,14 +1678,22 @@ export function CanvasPage({
         void handleSave();
         return;
       }
+      // 删除优先级：有选中节点就删节点（既有行为，仍只认 Delete），否则删选中的单条连线。
+      // 连线额外认 Backspace：连线没有退场动画，Backspace 与 Delete 等价，符合"选一条线按退格删"的直觉。
+      // 两者互斥——点连线时 React Flow 会先取消所有节点选中，所以不会出现"删节点顺带删连线"。
       if (event.key === "Delete" && selectedIdsRef.current.size > 0) {
         event.preventDefault();
         handleDeleteSelected();
+        return;
+      }
+      if ((event.key === "Delete" || event.key === "Backspace") && selectedEdgeIdRef.current !== null) {
+        event.preventDefault();
+        handleDeleteSelectedEdge();
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [handleDeleteSelected, handleRestore, handleSave, handleUndo, pushLog, setNodes]);
+  }, [handleDeleteSelected, handleDeleteSelectedEdge, handleRestore, handleSave, handleUndo, pushLog, setNodes]);
 
   /* ---------------- 右键拖拽框选（替代 React Flow 默认 Shift+左键框选） ----------------
    * React Flow 默认 selectionKeyCode='Shift' 已禁用（selectionKeyCode={null}）；
@@ -1513,7 +1717,12 @@ export function CanvasPage({
       const target = event.target instanceof Element ? event.target : null;
       if (target?.closest("input, textarea, [contenteditable]")) return;
       const startFlow = rf.screenToFlowPosition({ x: event.clientX, y: event.clientY });
-      boxSelectRef.current = { startFlow };
+      // 记下落点下方的节点（React Flow 把节点 id 写在 .react-flow__node 的 data-id 上）。
+      // 右键单击节点 → 弹菜单；右键拖拽 → 框选。两者靠「松开时移动距离」区分，
+      // 因为 Windows 上 contextmenu 事件在右键**松开后**才触发，靠它分派来不及。
+      const nodeEl = target?.closest(".react-flow__node");
+      const nodeId = nodeEl instanceof HTMLElement ? nodeEl.dataset.id ?? null : null;
+      boxSelectRef.current = { startFlow, nodeId, clientX: event.clientX, clientY: event.clientY };
       setBoxRect({ x: startFlow.x, y: startFlow.y, width: 0, height: 0 });
       // 屏蔽右键按下的原生行为（文本选中/拖拽虚影），只保留框选
       event.preventDefault();
@@ -1545,8 +1754,19 @@ export function CanvasPage({
         height: Math.abs(curFlow.y - drag.startFlow.y),
       };
       setBoxRect(null);
-      // 几乎没有拖动（视为右键单击）：不改动当前选中
-      if (rect.width < 2 && rect.height < 2) return;
+      // 几乎没有拖动 = 右键单击：
+      //  - 落在节点上 → 弹该节点的右键菜单（不改动当前选中）；
+      //  - 落在空白 → 只关掉已有菜单（与点击空白一致，不动选中）。
+      if (rect.width < 2 && rect.height < 2) {
+        if (drag.nodeId) {
+          setNodeMenu({ x: drag.clientX, y: drag.clientY, nodeId: drag.nodeId });
+        } else {
+          setNodeMenu(null);
+        }
+        return;
+      }
+      // 真拖动过 = 框选：顺手关掉菜单，避免框选时菜单浮在上面挡视线
+      setNodeMenu(null);
       setNodes((nds) => {
         let changed = false;
         const next = nds.map((n) => {
@@ -1595,6 +1815,77 @@ export function CanvasPage({
     };
   }, [setNodes]);
 
+  /* ---------------- 节点右键菜单：内容与位置由 contextMenu.ts 纯函数算，这里只做分派 ---------------- */
+  /** 菜单内容：按目标节点类型 + 当前选中数 + 图片是否已就绪生成。
+   *  每次渲染现算（纯函数、开销极小），不缓存 —— 缓存会让「图片上传完成后菜单仍显示禁用」这类问题
+   *  只有关掉重开才能刷新。 */
+  const menuNode = nodeMenu ? nodes.find((node) => node.id === nodeMenu.nodeId) : undefined;
+  const menuItems = menuNode
+    ? buildNodeMenu(menuNode.type ?? "image", {
+        hasUrl: menuNode.type === "image" ? Boolean(menuNode.data.url) : false,
+        selectedCount,
+      })
+    : [];
+
+  /** 菜单动作分派：按 action id（不是 label —— label 是给人看的，随时会改文案）。 */
+  const handleMenuPick = useCallback(
+    (actionId: string) => {
+      const target = nodeMenu;
+      setNodeMenu(null);
+      if (!target) return;
+      const nodeId = target.nodeId;
+      switch (actionId) {
+        case "delete-selection":
+          handleDeleteSelected();
+          break;
+        case "preview":
+          handleZoom(nodeId);
+          break;
+        case "crop":
+          handleCropImage(nodeId);
+          break;
+        case "upscale":
+          handleUpscaleImage(nodeId);
+          break;
+        case "split":
+          handleSplitImage(nodeId);
+          break;
+        case "replace":
+          handleReplaceImage(nodeId);
+          break;
+        case "run":
+          handleRun(nodeId);
+          break;
+        case "copy-prompt": {
+          const node = nodesRef.current.find((n) => n.id === nodeId);
+          if (node?.type !== "prompt") break;
+          void navigator.clipboard
+            .writeText(node.data.prompt)
+            .then(() => pushLog("已复制提示词"))
+            .catch(() => pushLog("复制失败：浏览器拒绝了剪贴板访问"));
+          break;
+        }
+        case "delete":
+          handleDeleteNode(nodeId);
+          break;
+        default:
+          break;
+      }
+    },
+    [
+      nodeMenu,
+      handleDeleteSelected,
+      handleZoom,
+      handleCropImage,
+      handleUpscaleImage,
+      handleSplitImage,
+      handleReplaceImage,
+      handleRun,
+      handleDeleteNode,
+      pushLog,
+    ],
+  );
+
   /* ---------------- 渲染 ---------------- */
   const nodeTypes = useMemo(
     () => ({
@@ -1608,6 +1899,8 @@ export function CanvasPage({
           onCrop={handleCropImage}
           onUpscale={handleUpscaleImage}
           onSplit={handleSplitImage}
+          onMask={handleMaskImage}
+          onClearMask={clearMask}
         />
       ),
       group: (props: object) => (
@@ -1640,6 +1933,8 @@ export function CanvasPage({
       handleCropImage,
       handleUpscaleImage,
       handleSplitImage,
+      handleMaskImage,
+      clearMask,
       sizeOptions,
       qualityOptions,
       qualityEffective,
@@ -1658,7 +1953,8 @@ export function CanvasPage({
     zoomImage !== null ||
     cropTarget !== null ||
     upscaleTarget !== null ||
-    splitTarget !== null;
+    splitTarget !== null ||
+    maskTarget !== null;
   const { dropIntent, dropChip, dragHandlers, startToolbarDrag, hideDropChip } = useCanvasDrop({
     canvasRef,
     rfInstanceRef,
@@ -1793,6 +2089,12 @@ export function CanvasPage({
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
           onEdgeDoubleClick={(_event, edge) => handleEdgeDoubleClick(edge)}
+          // 连线 hover 反馈：@xyflow/react 12 的 onEdgeMouseEnter / onEdgeMouseLeave（命中区是
+          // 覆盖在可见路径上的 20px 透明 interaction path，所以线很细也好指）
+          onEdgeMouseEnter={onEdgeMouseEnter}
+          onEdgeMouseLeave={onEdgeMouseLeave}
+          // 点空白处清掉连线悬停态（否则指针移出画布后 last-hovered 线一直亮着）
+          onPaneClick={() => setHoveredEdgeId(null)}
           isValidConnection={isValidConnection}
           nodeTypes={nodeTypes}
           onNodeMouseEnter={onNodeMouseEnter}
@@ -2013,6 +2315,29 @@ export function CanvasPage({
           name={splitTarget.name}
           onClose={() => setSplitTarget(null)}
           onConfirm={(dataUrls) => commitSplitImages(splitTarget, dataUrls)}
+        />
+      )}
+      {/* 蒙版笔刷：确认后只把 data URL 写回图片节点，不立即上传（见 applyMask 注释） */}
+      {maskTarget && (
+        <MaskBrushDialog
+          src={maskTarget.url}
+          name={maskTarget.name}
+          onClose={() => setMaskTarget(null)}
+          onConfirm={(maskDataUrl) => {
+            applyMask(maskTarget, maskDataUrl);
+            setMaskTarget(null);
+          }}
+        />
+      )}
+      {/* 节点右键菜单：坐标是视口坐标（组件内部 createPortal + position:fixed）。
+          挂在这里而不是 React Flow 内部，避免被画布的 transform/overflow 裁切。 */}
+      {nodeMenu && menuItems.length > 0 && (
+        <NodeContextMenu
+          x={nodeMenu.x}
+          y={nodeMenu.y}
+          items={menuItems}
+          onPick={handleMenuPick}
+          onClose={() => setNodeMenu(null)}
         />
       )}
     </div>

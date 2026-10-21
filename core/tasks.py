@@ -55,6 +55,11 @@ class GenerationTask:
     win: int = 0
     ref_bases: list[str] = field(default_factory=list)
     temp_bases: list[str] = field(default_factory=list)
+    # 蒙版局部重绘的 data URL（`data:image/png;base64,...`）。
+    # 刻意存 data URL 而不是落盘路径：任务可能排队很久，临时文件会被系统/其他
+    # 清理逻辑删掉，等到真正执行时路径已失效；data URL 放内存里随任务对象回收，
+    # 生命周期与任务完全对齐，不需要额外清理。执行时才由 core/api.py 解成临时文件。
+    mask_data_url: str = ""
     # 稳定提交 id（提交时生成、进程无关，供落盘提交图快照与账本追溯）
     submission_id: str = ""
     # 参考图在提交阶段已注册进 .assets 的 id（server 用；persist 按 id 解析，不重复注册）

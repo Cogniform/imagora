@@ -8,9 +8,11 @@
 """
 
 import base64
+import binascii
 import contextlib
 import itertools
 import os
+import tempfile
 import time
 from pathlib import Path
 
@@ -191,6 +193,42 @@ def _extract_image_item(payload: dict) -> dict:
     raise RuntimeError(f"接口响应没有图片数据：{str(payload)[:300]}")
 
 
+def data_url_to_temp_png(data_url, field="mask"):
+    """把 `data:image/png;base64,...` 解成临时 PNG 文件，返回路径（调用方负责删除）。
+
+    为什么必须落临时文件：上游 multipart 只认**二进制文件**，把 data URL 文本直接
+    塞进 files 的字段内容里，服务端会按「不是图片」回 400（已实测）。
+    解析失败一律抛 RuntimeError（带字段名，便于定位是哪个字段格式不对），不静默忽略。
+    """
+    text = (data_url or "").strip()
+    header, sep, payload = text.partition(",")
+    if not sep or not header.startswith("data:") or ";base64" not in header:
+        raise RuntimeError(
+            f"{field} 数据格式非法：不是 base64 data URL（应形如 data:image/png;base64,...）"
+        )
+    # canvas 的 toDataURL 不带换行，但经 JSON / 表单中转可能被折行，先去掉所有空白
+    payload = "".join(payload.split())
+    try:
+        raw = base64.b64decode(payload, validate=True)
+    except (binascii.Error, ValueError) as e:
+        raise RuntimeError(f"{field} 数据格式非法：base64 解码失败（{e}）") from e
+    if not raw:
+        raise RuntimeError(f"{field} 数据格式非法：解码后内容为空")
+    # delete=False：文件名要交给 requests 当 multipart 内容，退出 with 只关文件不删；
+    # 删除由调用方的 finally 负责（见 generate_image）。写失败则在这里就地清掉。
+    temp_path = ""
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as handle:
+            temp_path = handle.name
+            handle.write(raw)
+    except OSError as e:
+        if temp_path:
+            with contextlib.suppress(OSError):
+                os.unlink(temp_path)
+        raise RuntimeError(f"{field} 临时文件写入失败：{e}") from e
+    return temp_path
+
+
 def generate_image(
     prompt,
     image_path=None,
@@ -207,12 +245,21 @@ def generate_image(
     edits_path=None,
     watermark=False,
     seed=None,
+    mask_path=None,
+    mask_data_url=None,
 ):
-    """文生图 / 图生图。
+    """文生图 / 图生图 / 蒙版局部重绘。
 
     - 传 image_path（单张）或 images（多张参考图）：走 edits 接口
     - 都不传：走 generations 接口（文生图）
+    - 传 mask_path / mask_data_url：强制走 edits 接口（mask 在 generations 上没有
+      意义），且必须同时有底图 —— OpenAI images/edits 契约里 mask 必须配 image，
+      缺底图时抛 RuntimeError 而不是静默退化成文生图。
     成功保存图片到 output_path（默认自动生成）并打印；失败抛异常。
+
+    **mask 语义约定**（OpenAI images/edits 口径）：**透明像素 = 要重绘的区域，
+    不透明像素 = 保持原样**。本项目前端 `MaskBrushDialog` 产出的 canvas 蒙版
+    就是这个格式（画笔涂过的地方 alpha=0），直接以 PNG 传上游即可，无需反转。
 
     Args:
         prompt: 提示词（英文优先，减少歧义）
@@ -226,9 +273,15 @@ def generate_image(
         output_path: 保存路径（None 时自动生成）
         watermark: 是否带 AI 生成水印（火山 Seedream 支持，默认 False 关闭）
         seed: 随机种子（火山 Seedream 支持，同 seed 可复现；None 则不传）
+        mask_path: 蒙版 PNG 路径（与 mask_data_url 二选一，**本参数优先**）
+        mask_data_url: 蒙版 data URL（`data:image/png;base64,...`）。会先解成临时
+            文件再以 multipart 上传，函数返回前删除；**不能直接当 multipart 内容
+            发出去**，上游只认二进制文件，收到 data URL 文本会 400。
 
     默认值刻意写成 None 而不是 `size=DEFAULT_SIZE`：Python 的函数默认值在 **def
     执行时**求值一次，写成常量等于把导入时的配置固化进签名，热加载后仍然用旧值。
+    同理 mask 相关参数一律不写 `config.XXX` 作默认值（见 core/config.py 的
+    reload_config 注释）。
     """
     # 模型 ID 里的连字符有半角(U+002D)与全角(U+2011)之分，肉眼完全一样 ——
     # 中转站同一条产品线上两种都在用，用户手打或沿用历史记录时必踩。
@@ -256,22 +309,57 @@ def generate_image(
     output_path = build_default_output_path(output_path, output_format)
 
     image_paths = images if images else ([image_path] if image_path else [])
-    if image_paths:
-        # 图生图：一张或多张参考图，一次请求提交（ExitStack 保证任一打开失败时已开的也关闭）
-        url = f"{base_url}{edits_path or api_paths['edits']}"
-        with contextlib.ExitStack() as stack:
-            opened = [stack.enter_context(open(p, "rb")) for p in image_paths]
-            files = [
-                ("image", (os.path.basename(p), f, "application/octet-stream"))
-                for p, f in zip(image_paths, opened)
-            ]
-            response = requests.post(
-                url, headers=headers, files=files, data=payload, timeout=300
-            )
-    else:
-        # 文生图
-        url = f"{base_url}{generations_path or api_paths['generations']}"
-        response = requests.post(url, headers=headers, json=payload, timeout=300)
+    # 传了 mask 就必须走 edits：generations 接口没有 mask 语义。
+    # 但 OpenAI images/edits 契约里 mask 必须配 image，没底图时给明确错误，
+    # 不退化成文生图、也不静默丢掉 mask（静默丢参数是最难排查的一类 bug）。
+    has_mask = bool(mask_path) or bool(mask_data_url)
+    if has_mask and not image_paths:
+        raise RuntimeError("mask 需要至少一张底图（image_path / images）")
+
+    # data URL 只在需要时才落临时文件；函数返回前（含异常路径）必定删除
+    mask_temp_path = None
+    try:
+        if mask_path:
+            mask_file = mask_path
+        elif mask_data_url:
+            mask_temp_path = data_url_to_temp_png(mask_data_url)
+            mask_file = mask_temp_path
+        else:
+            mask_file = None
+
+        if image_paths or mask_file:
+            # 图生图 / 局部重绘：底图与蒙版同一次 multipart 提交
+            # （ExitStack 保证任一打开失败时已开的也关闭）
+            url = f"{base_url}{edits_path or api_paths['edits']}"
+            with contextlib.ExitStack() as stack:
+                opened = [stack.enter_context(open(p, "rb")) for p in image_paths]
+                files = [
+                    ("image", (os.path.basename(p), f, "application/octet-stream"))
+                    for p, f in zip(image_paths, opened)
+                ]
+                if mask_file:
+                    mf = stack.enter_context(open(mask_file, "rb"))
+                    files.append(
+                        (
+                            "mask",
+                            (
+                                os.path.basename(mask_file),
+                                mf,
+                                "application/octet-stream",
+                            ),
+                        )
+                    )
+                response = requests.post(
+                    url, headers=headers, files=files, data=payload, timeout=300
+                )
+        else:
+            # 文生图
+            url = f"{base_url}{generations_path or api_paths['generations']}"
+            response = requests.post(url, headers=headers, json=payload, timeout=300)
+    finally:
+        if mask_temp_path:
+            with contextlib.suppress(OSError):
+                os.unlink(mask_temp_path)
 
     if response.status_code != 200:
         raise RuntimeError(

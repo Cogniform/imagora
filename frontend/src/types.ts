@@ -246,6 +246,10 @@ export interface GenerateParams {
   outputDir: string;
   /** 窗口编号（多开页面溯源到日志），无窗口传 0 */
   win: number;
+  /** 蒙版局部重绘：与原图同尺寸的 PNG data URL。
+   *  语义按 OpenAI images/edits 口径 —— **透明像素 = 要重绘的区域**。
+   *  有蒙版时后端强制走图生图（edits）分支，且必须至少有一张底图。 */
+  maskDataUrl?: string;
   /** 超预算已确认（预算闸门：服务端超限未确认时 409，前端确认后带此标记重提） */
   allowOverBudget?: boolean;
 }
@@ -277,6 +281,11 @@ export interface CanvasImageNodeData {
   /** 工作流加载时文件缺失（红框提示） */
   missing?: boolean;
   absPath?: string;
+  /** 蒙版（局部重绘）：与原图同尺寸的 PNG data URL，**透明像素 = 要重绘的区域**。
+   *  挂在图片节点上而不是提示词节点上：蒙版描述的是「这张图的哪块要改」，
+   *  换提示词重画同一个区域是常态，蒙版该跟着图走。提交时由 `runNodeInternal`
+   *  随参考图一起快照进任务，之后改画布不影响已提交的任务。 */
+  maskDataUrl?: string;
   [key: string]: unknown;
 }
 

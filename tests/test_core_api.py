@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """core/api.py 纯函数单元测试
 
-覆盖: resolve_size_with_ratio、build_default_output_path、write_file_with_retry。
-纯函数测试（写文件走伪 open），不调用网络 / 不消耗 API 额度。
+覆盖: resolve_size_with_ratio、build_default_output_path、write_file_with_retry、
+generate_image 的 mask（蒙版局部重绘）参数链路。
+纯函数测试（写文件走伪 open / 网络走 monkeypatch），不调用网络 / 不消耗 API 额度。
 """
 
+import base64
 import re
 from pathlib import Path
 from typing import Self
@@ -223,3 +225,184 @@ def test_write_retry_attempts_floor(monkeypatch):
     with pytest.raises(PermissionError):
         write_file_with_retry("out.png", b"raw-png", attempts=0)
     assert calls["n"] == 1
+
+
+# ---------- generate_image 的 mask（蒙版局部重绘） ----------
+
+# 1x1 PNG 的字节；测试只关心「原样传给上游」，不解析像素
+_PNG_BYTES = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk"
+    "+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+)
+
+
+def _png_data_url(raw: bytes = _PNG_BYTES) -> str:
+    return "data:image/png;base64," + base64.b64encode(raw).decode("ascii")
+
+
+class _FakeResponse:
+    """伪 HTTP 响应：b64_json 直接给图，避免测试真的去下载 URL"""
+
+    status_code = 200
+    text = ""
+
+    def json(self):
+        return {"data": [{"b64_json": base64.b64encode(_PNG_BYTES).decode("ascii")}]}
+
+
+class _PostRecorder:
+    """记录 requests.post 的调用（url / files / data / json）"""
+
+    def __init__(self):
+        self.calls: list[dict] = []
+
+    def __call__(self, url, headers=None, files=None, data=None, json=None, **kwargs):
+        entry = {
+            "url": url,
+            "files": files or [],
+            "data": data or {},
+            "json": json,
+        }
+        # files 里是打开的文件对象，必须在 requests 返回后立即读出内容 ——
+        # generate_image 的 ExitStack 会在请求返回时关掉它们
+        entry["file_fields"] = [
+            (name, filename, content_type, handle.read())
+            for name, (filename, handle, content_type) in (files or [])
+        ]
+        self.calls.append(entry)
+        return _FakeResponse()
+
+    @property
+    def last(self) -> dict:
+        assert self.calls, "requests.post 未被调用"
+        return self.calls[-1]
+
+    def field_names(self, index=-1) -> list[str]:
+        return [f[0] for f in self.calls[index]["file_fields"]]
+
+
+@pytest.fixture
+def post_recorder(monkeypatch):
+    """替换 core.api 里的 requests.post；同时挡掉真实 API Key 依赖
+
+    显式钉住 edits / generations 路径：conftest 的 isolate_config_globals 会把配置
+    隔离到临时 profile，某些 profile（如 volc）的 edits 路径与 generations 相同，
+    那样「是否走了 edits 接口」就断言不出来。
+    """
+    recorder = _PostRecorder()
+    monkeypatch.setattr(core_api.requests, "post", recorder)
+    monkeypatch.setattr(core_api, "get_api_key", lambda: "sk-test-placeholder")
+    monkeypatch.setitem(core_api.config.API_PATHS, "edits", "/images/edits")
+    monkeypatch.setitem(core_api.config.API_PATHS, "generations", "/images/generations")
+    return recorder
+
+
+def test_mask_data_url_uploaded_as_mask_field(post_recorder, tmp_path):
+    """mask_data_url -> 解析成临时 PNG，作为 multipart 的 "mask" 字段与 "image" 并列"""
+    base = tmp_path / "base.png"
+    base.write_bytes(_PNG_BYTES)
+    out = tmp_path / "out.png"
+
+    core_api.generate_image(
+        prompt="repaint the sky",
+        images=[str(base)],
+        output_path=str(out),
+        mask_data_url=_png_data_url(),
+    )
+
+    call = post_recorder.last
+    assert call["url"].endswith("/images/edits"), call["url"]
+    assert post_recorder.field_names() == ["image", "mask"], post_recorder.field_names()
+    mask_field = next(f for f in call["file_fields"] if f[0] == "mask")
+    assert mask_field[1].endswith(".png"), mask_field[1]
+    assert mask_field[2] == "application/octet-stream"
+    assert mask_field[3] == _PNG_BYTES, (
+        "mask 内容必须是解码后的 PNG 字节，不能是 data URL 文本"
+    )
+    assert out.read_bytes() == _PNG_BYTES
+
+
+def test_mask_data_url_temp_file_removed_after_return(
+    post_recorder, tmp_path, monkeypatch
+):
+    """data URL 落下的临时文件在函数返回后必须被删掉（不留垃圾）"""
+    base = tmp_path / "base.png"
+    base.write_bytes(_PNG_BYTES)
+    recorded: list[str] = []
+    real_named = core_api.tempfile.NamedTemporaryFile
+
+    def fake_named_tempfile(**kwargs):
+        tmp = real_named(**kwargs)
+        recorded.append(tmp.name)
+        return tmp
+
+    monkeypatch.setattr(core_api.tempfile, "NamedTemporaryFile", fake_named_tempfile)
+
+    core_api.generate_image(
+        prompt="p",
+        images=[str(base)],
+        output_path=str(tmp_path / "out.png"),
+        mask_data_url=_png_data_url(),
+    )
+
+    assert recorded, "mask_data_url 应落一个临时文件再上传"
+    for name in recorded:
+        assert not Path(name).exists(), f"mask 临时文件未被清理: {name}"
+    # 上传时用的正是那个临时文件（basename 一致）
+    uploaded = next(f[1] for f in post_recorder.last["file_fields"] if f[0] == "mask")
+    assert uploaded == Path(recorded[0]).name
+
+
+def test_mask_requires_base_image(post_recorder, tmp_path):
+    """mask 无底图 -> RuntimeError，且不发出任何请求"""
+    with pytest.raises(RuntimeError, match="mask 需要至少一张底图"):
+        core_api.generate_image(
+            prompt="p",
+            output_path=str(tmp_path / "out.png"),
+            mask_data_url=_png_data_url(),
+        )
+    assert not post_recorder.calls, "报错前不应发出请求"
+
+
+def test_mask_path_wins_over_data_url(post_recorder, tmp_path):
+    """mask_path 与 mask_data_url 同传 -> 用 mask_path（不解析 data URL）"""
+    base = tmp_path / "base.png"
+    base.write_bytes(_PNG_BYTES)
+    mask_file = tmp_path / "explicit-mask.png"
+    mask_file.write_bytes(b"explicit-mask-bytes")
+
+    core_api.generate_image(
+        prompt="p",
+        images=[str(base)],
+        output_path=str(tmp_path / "out.png"),
+        mask_path=str(mask_file),
+        mask_data_url="data:image/png;base64,this-is-not-valid-base64!!!",
+    )
+
+    mask_field = next(f for f in post_recorder.last["file_fields"] if f[0] == "mask")
+    assert mask_field[1] == "explicit-mask.png"
+    assert mask_field[3] == b"explicit-mask-bytes"
+
+
+def test_mask_invalid_data_url_raises(post_recorder, tmp_path):
+    """非法 data URL -> RuntimeError("mask 数据格式非法：...")，不发请求"""
+    base = tmp_path / "base.png"
+    base.write_bytes(_PNG_BYTES)
+    with pytest.raises(RuntimeError, match="mask 数据格式非法"):
+        core_api.generate_image(
+            prompt="p",
+            images=[str(base)],
+            output_path=str(tmp_path / "out.png"),
+            mask_data_url="not-a-data-url",
+        )
+    assert not post_recorder.calls
+
+
+def test_mask_ignored_when_not_given(post_recorder, tmp_path):
+    """不传 mask -> 保持原行为（无 mask 字段）"""
+    base = tmp_path / "base.png"
+    base.write_bytes(_PNG_BYTES)
+    core_api.generate_image(
+        prompt="p", images=[str(base)], output_path=str(tmp_path / "out.png")
+    )
+    assert post_recorder.field_names() == ["image"]

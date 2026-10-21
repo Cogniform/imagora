@@ -8,7 +8,12 @@
 图片节点裁剪与放大（入口按钮 → 对话框 → 确认后派生新节点，原图保留）、
 图片切分（3×2 预设 → 一次产出 6 张派生节点）、
 拖拽吸附（拖拽中出现对齐线、松手清空、关掉开关后不再出现）、
-聚焦所选节点（选中后缩放变化且不放大到失真）。
+聚焦所选节点（选中后缩放变化且不放大到失真）、
+蒙版局部重绘（入口 → 涂一笔 → 确认 → 节点出现蒙版角标 → 点角标清除）、
+提示词 @ 引用（引用不存在的图在运行前就被拦下，不偷偷退回全收集）、
+节点右键菜单（右键单击节点 → 菜单 → 预览大图）、
+连线三态（默认 1.5px → hover 加粗 → 单击选中 → Delete 删除）、
+尺寸下拉自由输入（清单外的 1280x720 也能用）。
 
 前置：本地服务已启动（uv run python -m main ui --port 7860），且已安装：
   pip install playwright && playwright install chromium
@@ -912,6 +917,227 @@ def main():
                 zoom_after_focus <= 1.001,
                 f"zoom={zoom_after_focus:.3f}",
             )
+
+        # 19. 蒙版局部重绘：入口 → 涂一笔 → 确认 → 图片节点出现「蒙版」角标 → 点击清除
+        #     用 240×160 那张图：蒙版对话框的 stage 按图片实际尺寸等比，
+        #     1×1 的图上画布只有 1px，笔迹落点全是同一个像素，断言失去意义。
+        mask_src = (
+            page.locator(".react-flow__node-image")
+            .filter(has=page.locator('img[alt="imagora_e2e_240x160.png"]'))
+            .last
+        )
+        check(
+            "蒙版入口按钮存在",
+            mask_src.get_by_role("button", name="蒙版重绘").count() == 1,
+        )
+        click_hover_action(mask_src, "蒙版重绘")
+        page.wait_for_timeout(900)
+        check(
+            "蒙版对话框打开",
+            page.locator('[data-testid="mask-brush-dialog"]').count() == 1,
+        )
+        mask_canvas = page.locator('[data-testid="mask-canvas"]')
+        check("蒙版画布已渲染", mask_canvas.count() == 1)
+        # 空蒙版时确认按钮必须禁用：空蒙版 = 「整图都要重绘」，发上去既慢又白花钱
+        check(
+            "空蒙版时确认按钮禁用",
+            page.locator('[data-testid="mask-confirm"]').is_disabled(),
+        )
+        cbox = mask_canvas.bounding_box()
+        if cbox is None:
+            check("蒙版画布有可绘制区域", False)
+        else:
+            # 真实指针拖一笔：pointerdown → 多次 pointermove（内部按 radiusPx/4 插值补点）→ pointerup
+            mx = cbox["x"] + cbox["width"] * 0.35
+            my = cbox["y"] + cbox["height"] * 0.5
+            page.mouse.move(mx, my)
+            page.mouse.down()
+            page.mouse.move(
+                mx + cbox["width"] * 0.3, my + cbox["height"] * 0.1, steps=6
+            )
+            page.mouse.up()
+            page.wait_for_timeout(400)
+            check(
+                "涂一笔后确认按钮可用",
+                page.locator('[data-testid="mask-confirm"]').is_enabled(),
+            )
+            page.locator('[data-testid="mask-confirm"]').click()
+            page.wait_for_timeout(1500)
+        check(
+            "确认后蒙版对话框关闭",
+            page.locator('[data-testid="mask-brush-dialog"]').count() == 0,
+        )
+        mask_badge = page.locator('[aria-label="清除蒙版"]')
+        check(
+            "图片节点出现蒙版角标",
+            mask_badge.count() == 1,
+            f"badge={mask_badge.count()}",
+        )
+        if mask_badge.count() == 1:
+            mask_badge.first.dispatch_event("click")
+            page.wait_for_timeout(500)
+            check(
+                "点角标可清除蒙版",
+                page.locator('[aria-label="清除蒙版"]').count() == 0,
+            )
+
+        # 20. 提示词 @ 引用：引用一张不存在的图 → 运行前就被拦下（不发请求、不花钱）
+        #     这条守卫的意义正是「宁可报错也不偷偷退回全收集」：退回全收集等于拿别的图
+        #     去改，用户看不出来，只有账单能看出来。
+        prompt_node = page.locator(".react-flow__node-prompt").first
+        prompt_box = prompt_node.bounding_box()
+        if prompt_box is None:
+            check("找到提示词节点", False)
+        else:
+            page.locator(".react-flow__node-prompt textarea").first.fill(
+                "@nonexistent.png a red apple"
+            )
+            page.wait_for_timeout(300)
+            prompt_node.get_by_role("button", name="运行").click()
+            page.wait_for_timeout(900)
+            run_logs = " | ".join(page.locator(".log-toast").all_inner_texts())
+            check(
+                "@ 引用不存在时运行被拦下",
+                "引用的图片不存在" in run_logs,
+                f"logs={run_logs[-160:]}",
+            )
+
+        # 21. 节点右键菜单：右键单击图片节点 → 菜单出现 → 点「预览大图」打开预览
+        #     右键与框选共用右键按键，靠「松开时移动距离 < 2px」区分（Windows 上
+        #     contextmenu 在松开后才触发，靠它分派来不及）。
+        page.mouse.click(
+            box["x"] + box["width"] * 0.15, box["y"] + box["height"] * 0.15
+        )
+        page.wait_for_timeout(300)
+        menu_src = page.locator(".react-flow__node-image").first
+        mbox = menu_src.bounding_box()
+        if mbox is None:
+            check("找到可右键的图片节点", False)
+        else:
+            page.mouse.click(
+                mbox["x"] + mbox["width"] / 2,
+                mbox["y"] + mbox["height"] / 2,
+                button="right",
+            )
+            page.wait_for_timeout(600)
+            menu = page.locator('[data-testid="node-context-menu"]')
+            check("右键单击节点弹出菜单", menu.count() == 1)
+            check(
+                "菜单含图片操作项",
+                page.locator('[data-testid="node-menu-crop"]').count() == 1,
+            )
+            if menu.count() == 1:
+                page.locator('[data-testid="node-menu-preview"]').click()
+                page.wait_for_timeout(800)
+                check(
+                    "菜单「预览大图」打开预览",
+                    page.locator("img[data-zoom-image]").count() == 1,
+                )
+                check(
+                    "点菜单项后菜单关闭",
+                    page.locator('[data-testid="node-context-menu"]').count() == 0,
+                )
+                if page.locator("img[data-zoom-image]").count() == 1:
+                    vp = page.viewport_size
+                    page.mouse.click(
+                        round(vp["width"] * 0.02), round(vp["height"] * 0.08)
+                    )
+                    page.wait_for_timeout(400)
+
+        # 22. 连线三态：默认 1.5px → hover 加粗 → 单击选中 → Delete 删除
+        #     线宽/透明度由 edgeStyle.ts 以**内联样式**写到 <path> 上，
+        #     所以判据读 computedStyle 而不是查 CSS 类名。
+        # exact=True：有选中节点时工具栏还会多出一颗「自动连线 (N)」（只补选区），
+        # 非精确匹配会同时命中两颗按钮，Playwright strict 模式当场报错。
+        page.get_by_role("button", name="自动连线", exact=True).click()
+        page.wait_for_timeout(700)
+        edge_total = page.locator(".react-flow__edge").count()
+        check("自动连线后画布出现连线", edge_total >= 1, f"edges={edge_total}")
+        if edge_total >= 1:
+
+            def edge_probe():
+                """第一条连线的中点屏幕坐标 + 当前线宽/透明度。
+
+                中点用 getPointAtLength 算：连线是贝塞尔曲线，两个端点的中点
+                不在曲线上，鼠标移过去命不中（交互路径只有 20px 宽）。"""
+                return page.evaluate("""() => {
+                  const edge = document.querySelector(".react-flow__edge");
+                  if (!edge) return null;
+                  const path = edge.querySelector(".react-flow__edge-path");
+                  if (!path) return null;
+                  const len = path.getTotalLength();
+                  const mid = path.getPointAtLength(len / 2).matrixTransform(path.getScreenCTM());
+                  const cs = getComputedStyle(path);
+                  return {
+                    x: mid.x, y: mid.y,
+                    strokeWidth: parseFloat(cs.strokeWidth),
+                    opacity: parseFloat(cs.opacity),
+                  };
+                }""")
+
+            idle = edge_probe()
+            check(
+                "连线默认态线宽 1.5px",
+                idle is not None and abs(idle["strokeWidth"] - 1.5) < 0.01,
+                f"idle={idle}",
+            )
+            if idle is not None:
+                page.mouse.move(idle["x"], idle["y"])
+                page.wait_for_timeout(500)
+                hovered = edge_probe()
+                check(
+                    "hover 连线后线宽变粗",
+                    hovered is not None
+                    and hovered["strokeWidth"] > idle["strokeWidth"] + 0.1,
+                    f"{idle['strokeWidth']}->{hovered['strokeWidth'] if hovered else None}",
+                )
+                # 移开再单击：验证的是「点击选中」而不是「鼠标还停在上面」
+                page.mouse.move(12, 12)
+                page.wait_for_timeout(400)
+                page.mouse.click(idle["x"], idle["y"])
+                page.wait_for_timeout(600)
+                picked = edge_probe()
+                check(
+                    "单击连线后保持加粗（选中态）",
+                    picked is not None
+                    and picked["strokeWidth"] > idle["strokeWidth"] + 0.1,
+                    f"picked={picked}",
+                )
+                page.keyboard.press("Delete")
+                page.wait_for_timeout(700)
+                after_delete = page.locator(".react-flow__edge").count()
+                check(
+                    "Delete 删除选中的连线",
+                    after_delete == edge_total - 1,
+                    f"{edge_total}->{after_delete}",
+                )
+
+        # 23. 尺寸下拉自由输入：清单外的尺寸也能用（上游常认 1280x720 这类非标尺寸）
+        size_trigger = page.locator(".react-flow__node-prompt .select-trigger").first
+        check("提示词卡片有尺寸下拉", size_trigger.count() == 1)
+        if size_trigger.count() == 1:
+            # 用 dispatch_event 而不是 click：连线的命中层是一条 20px 宽的透明
+            # `.react-flow__edge-interaction` 路径，而连线按设计恒在节点之上
+            # （ARCHITECTURE 5.4 连线分层），交叉处的节点控件点不到。这是既有取舍，
+            # 不是本次改动引入的；同一处理方式见 click_hover_action 的说明。
+            size_trigger.dispatch_event("click")
+            page.wait_for_timeout(400)
+            size_search = page.locator(".select-list input").first
+            check("尺寸下拉展开后有搜索框", size_search.count() == 1)
+            if size_search.count() == 1:
+                size_search.fill("1280x720")
+                page.wait_for_timeout(400)
+                custom_row = page.locator('[data-testid="select-custom-option"]')
+                check("清单外尺寸给出「使用」行", custom_row.count() == 1)
+                if custom_row.count() == 1:
+                    custom_row.dispatch_event("click")
+                    page.wait_for_timeout(600)
+                    trigger_text = size_trigger.inner_text()
+                    check(
+                        "选中后触发器显示自定义尺寸",
+                        "1280x720" in trigger_text,
+                        f"text={trigger_text}",
+                    )
 
         browser.close()
 

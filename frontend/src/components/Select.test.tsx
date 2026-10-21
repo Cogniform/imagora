@@ -3,6 +3,7 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { mergeCustomOption } from "../customValue";
 import { Select } from "./Select";
 
 const options = [
@@ -219,5 +220,173 @@ describe("Select", () => {
     fireEvent.click(screen.getByRole("button", { name: /选项 A/ }));
     expect(screen.queryAllByTestId("opt-icon")).toHaveLength(0);
     expect(screen.getAllByRole("option").map((el) => el.textContent)).toEqual(["选项 A", "选项 B", "选项 C"]);
+  });
+});
+
+describe("Select 自由输入（allowCustom）", () => {
+  afterEach(cleanup);
+
+  const sizes = [
+    { value: "1024x1024", label: "1024x1024" },
+    { value: "1792x1024", label: "1792x1024" },
+  ];
+
+  it("输入清单外的值按 Enter：回调收到归一化值，列表关闭", () => {
+    const onCreateCustom = vi.fn();
+    const onChange = vi.fn();
+    render(
+      <Select options={sizes} value="1024x1024" onChange={onChange} searchable allowCustom onCreateCustom={onCreateCustom} />,
+    );
+    const trigger = screen.getByRole("button", { name: /1024x1024/ });
+    fireEvent.click(trigger);
+    const search = screen.getByLabelText("筛选选项");
+    // 首尾空白被归一化掉：提交的是 1280x720，不是用户原样打的空格串
+    fireEvent.change(search, { target: { value: "  1280x720  " } });
+    fireEvent.keyDown(search, { key: "Enter" });
+
+    expect(onCreateCustom).toHaveBeenCalledWith("1280x720");
+    // 自由输入不走 onChange：新值由调用方落库后通过 value 回来
+    expect(onChange).not.toHaveBeenCalled();
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("列表末尾出现「使用 “…”」按钮，点它等同回车创建", () => {
+    const onCreateCustom = vi.fn();
+    render(
+      <Select options={sizes} value="1024x1024" onChange={vi.fn()} searchable allowCustom onCreateCustom={onCreateCustom} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /1024x1024/ }));
+    const search = screen.getByLabelText("筛选选项");
+    fireEvent.change(search, { target: { value: "1280x720" } });
+
+    const custom = screen.getByTestId("select-custom-option");
+    expect(custom.textContent).toBe("使用 “1280x720”");
+    // 它是「动作」不是「选项」：不能被读屏当成可选项，也不占 option 编号
+    expect(custom.getAttribute("role")).toBe("button");
+    expect(screen.queryAllByRole("option")).toHaveLength(0);
+
+    fireEvent.click(custom);
+    expect(onCreateCustom).toHaveBeenCalledWith("1280x720");
+    expect(screen.queryByRole("listbox")).toBeNull();
+  });
+
+  it("自定义行不改变 option 数量，也不参与 aria-activedescendant 编号", () => {
+    render(
+      <Select options={sizes} value="1024x1024" onChange={vi.fn()} searchable allowCustom onCreateCustom={vi.fn()} />,
+    );
+    const trigger = screen.getByRole("button", { name: /1024x1024/ });
+    fireEvent.click(trigger);
+    const search = screen.getByLabelText("筛选选项");
+    // `1024` 是两条尺寸的子序列 → 两行可见，外加一行自定义动作
+    fireEvent.change(search, { target: { value: "1024" } });
+    expect(screen.getAllByRole("option")).toHaveLength(2);
+    expect(screen.getByTestId("select-custom-option")).toBeTruthy();
+
+    // 上下键只在真实 option 之间移动，活动项 id 必须真的存在
+    fireEvent.keyDown(search, { key: "ArrowDown" });
+    const activeId = trigger.getAttribute("aria-activedescendant");
+    expect(activeId).not.toBeNull();
+    expect(document.getElementById(activeId ?? "")?.getAttribute("role")).toBe("option");
+  });
+
+  it("输入精确命中已有项时走正常选中，不创建新值也不出自定义行", () => {
+    const onCreateCustom = vi.fn();
+    const onChange = vi.fn();
+    render(
+      <Select options={sizes} value="1024x1024" onChange={onChange} searchable allowCustom onCreateCustom={onCreateCustom} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /1024x1024/ }));
+    const search = screen.getByLabelText("筛选选项");
+    fireEvent.change(search, { target: { value: "1792x1024" } });
+    expect(screen.queryByTestId("select-custom-option")).toBeNull();
+
+    fireEvent.keyDown(search, { key: "Enter" });
+    expect(onChange).toHaveBeenCalledWith("1792x1024");
+    expect(onCreateCustom).not.toHaveBeenCalled();
+  });
+
+  it("label 精确命中同样算已有项（不是只看 value）", () => {
+    const labeled = [{ value: "gpt-image-2.5", label: "GPT 图像 2.5" }];
+    const onCreateCustom = vi.fn();
+    render(
+      <Select options={labeled} value="" onChange={vi.fn()} searchable allowCustom onCreateCustom={onCreateCustom} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /请选择/ }));
+    const search = screen.getByLabelText("筛选选项");
+    fireEvent.change(search, { target: { value: "GPT 图像 2.5" } });
+    expect(screen.queryByTestId("select-custom-option")).toBeNull();
+  });
+
+  it("空白输入不出现自定义行，Enter 也不会创建空值", () => {
+    const onCreateCustom = vi.fn();
+    render(
+      <Select options={sizes} value="1024x1024" onChange={vi.fn()} searchable allowCustom onCreateCustom={onCreateCustom} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /1024x1024/ }));
+    const search = screen.getByLabelText("筛选选项");
+    fireEvent.change(search, { target: { value: "   " } });
+    expect(screen.queryByTestId("select-custom-option")).toBeNull();
+    fireEvent.keyDown(search, { key: "Enter" });
+    expect(onCreateCustom).not.toHaveBeenCalled();
+  });
+
+  it("超长输入：不出现自定义行，Enter 既不创建也不悄悄选中别的项", () => {
+    // 65 字符超上限。此时用户意图明确是「用我打的这串」，退化成选中某个模糊命中
+    // 的行等于改掉他要的值 —— 宁可什么都不做。
+    const onCreateCustom = vi.fn();
+    const onChange = vi.fn();
+    render(
+      <Select options={sizes} value="1024x1024" onChange={onChange} searchable allowCustom onCreateCustom={onCreateCustom} />,
+    );
+    const trigger = screen.getByRole("button", { name: /1024x1024/ });
+    fireEvent.click(trigger);
+    const search = screen.getByLabelText("筛选选项");
+    fireEvent.change(search, { target: { value: "1".repeat(65) } });
+    expect(screen.queryByTestId("select-custom-option")).toBeNull();
+
+    fireEvent.keyDown(search, { key: "Enter" });
+    expect(onCreateCustom).not.toHaveBeenCalled();
+    expect(onChange).not.toHaveBeenCalled();
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("没开 searchable 时 allowCustom 不生效（没有输入入口，开关是死开关）", () => {
+    const onCreateCustom = vi.fn();
+    render(<Select options={sizes} value="1024x1024" onChange={vi.fn()} allowCustom onCreateCustom={onCreateCustom} />);
+    const trigger = screen.getByRole("button", { name: /1024x1024/ });
+    fireEvent.click(trigger);
+    expect(screen.queryByLabelText("筛选选项")).toBeNull();
+    expect(screen.queryByTestId("select-custom-option")).toBeNull();
+    fireEvent.keyDown(trigger, { key: "Enter" });
+    expect(onCreateCustom).not.toHaveBeenCalled();
+  });
+
+  it("清单为空也能展开手填（新供应商还没配模型时的唯一出路）", () => {
+    const onCreateCustom = vi.fn();
+    render(<Select options={[]} value="" onChange={vi.fn()} searchable allowCustom onCreateCustom={onCreateCustom} />);
+    const trigger = screen.getByRole("button", { name: /请选择/ });
+    fireEvent.click(trigger);
+    const search = screen.getByLabelText("筛选选项");
+    fireEvent.change(search, { target: { value: "brand-new-model" } });
+    fireEvent.keyDown(search, { key: "Enter" });
+    expect(onCreateCustom).toHaveBeenCalledWith("brand-new-model");
+  });
+
+  it("清单为空但没开 allowCustom 时仍保持旧行为（不展开空浮层）", () => {
+    render(<Select options={[]} value="" onChange={vi.fn()} searchable />);
+    const trigger = screen.getByRole("button", { name: /请选择/ });
+    fireEvent.click(trigger);
+    expect(screen.queryByRole("listbox")).toBeNull();
+  });
+
+  it("合并后的自定义值能显示在触发器上（不再退化成「请选择」）", () => {
+    // mergeCustomOption 是调用方的接线方式：值不在清单里时把它补成一条选项，
+    // 否则触发器找不到 current 就显示「请选择」—— 用户选过东西却像没选。
+    render(<Select options={mergeCustomOption(sizes, "1280x720")} value="1280x720" onChange={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "1280x720" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "1280x720" }));
+    // 补进来的那条归在「自定义」组里，组标题照常渲染
+    expect(screen.getByText("自定义")).toBeTruthy();
+    expect(screen.getAllByRole("option")).toHaveLength(sizes.length + 1);
   });
 });

@@ -1,3 +1,4 @@
+import { resolvePromptRefs, type PromptRefCandidate } from "./promptRefs";
 import type {
   AssetEntry,
   CanvasPromptNodeData,
@@ -425,6 +426,32 @@ export function collectIncomingImages(
     }
   }
   return images;
+}
+
+/** 按提示词里的 `@` 引用过滤参考图；无引用时退回沿入边全收集（保持旧行为）。
+ *  候选池 = 入边可达的图片 —— 引用一张没连线的图等于绕过画布连线直接传图，不允许。
+ *  `mode === "invalid"` 时也返回能对上的那些 + `unknown`，是否中止由调用方决定（纯函数不抛）。 */
+export function collectPromptRefImages(
+  nodes: WorkflowNode[],
+  edges: WorkflowEdge[],
+  promptNodeId: string,
+  promptText: string,
+): { images: WorkflowNode[]; unknown: string[]; mode: "all" | "explicit" | "invalid" } {
+  const incoming = collectIncomingImages(nodes, edges, promptNodeId);
+  const candidates: PromptRefCandidate[] = incoming.map((node) => ({
+    id: node.id,
+    name: node.type === "image" ? node.data.name : "",
+  }));
+  const resolution = resolvePromptRefs(promptText, candidates);
+  if (resolution.mode === "all") return { images: incoming, unknown: [], mode: "all" };
+  // explicit / invalid：都按引用出现顺序挑图，invalid 的 unknown 交给调用方报错
+  const byId = new Map(incoming.map((node) => [node.id, node]));
+  const images: WorkflowNode[] = [];
+  for (const id of resolution.ids) {
+    const node = byId.get(id);
+    if (node) images.push(node);
+  }
+  return { images, unknown: resolution.unknown, mode: resolution.mode };
 }
 
 /** 提示词节点的入边图片绝对路径快照（纯函数：运行前锁定参考图集合，画布后续编辑不影响本次运行）。

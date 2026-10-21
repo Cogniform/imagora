@@ -1,8 +1,9 @@
 import { memo, useEffect, useState, type ReactNode } from "react";
 import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
-import { Crop, Eye, Maximize2, RefreshCw, Scissors, Trash2 } from "lucide-react";
+import { Brush, Crop, Eye, Maximize2, RefreshCw, Scissors, Trash2 } from "lucide-react";
 import type { CanvasGroupNodeData, CanvasImageNodeData, CanvasPromptNodeData } from "../types";
 import { ratioFromSizeLabel } from "../aspectIcon";
+import { mergeCustomOption } from "../customValue";
 import { generatingLabel } from "../format";
 import { AspectIcon } from "./AspectIcon";
 import { FolderPicker } from "./FolderPicker";
@@ -114,6 +115,10 @@ interface ImageNodeExtraProps {
   onUpscale: (nodeId: string) => void;
   /** 切分（按网格切成多张新图，旧图保留） */
   onSplit: (nodeId: string) => void;
+  /** 蒙版（涂出重绘区域，产出新图，旧图保留） */
+  onMask: (nodeId: string) => void;
+  /** 清除这张图上的蒙版（蒙版会一直跟着图走，必须给一个显眼的撤销入口） */
+  onClearMask: (nodeId: string) => void;
 }
 
 export function ImageNode({
@@ -127,12 +132,31 @@ export function ImageNode({
   onCrop,
   onUpscale,
   onSplit,
+  onMask,
+  onClearMask,
 }: NodeProps<ImageFlowNode> & ImageNodeExtraProps & { lod?: boolean | undefined }) {
   // lod / normal 两分支共用的三段片段（原为两份逐字相同的内联 JSX）
   const missingBadge = data.missing ? (
     <span className="chip chip--sm chip--danger absolute right-1 top-1 z-20">
       文件缺失
     </span>
+  ) : null;
+  // 蒙版角标：蒙版会一直跟着这张图走，后续每次「以它为参考图」都按蒙版重绘。
+  // 没有可见提示的话用户会忘掉自己设过，生成结果不对还找不到原因 —— 所以角标
+  // 本身就是一个按钮，点一下清除。放在左上角（右上角已被「文件缺失」占用）。
+  const maskBadge = data.maskDataUrl ? (
+    <button
+      type="button"
+      className="chip chip--sm chip--brand nodrag absolute left-1 top-1 z-20"
+      title="这张图已设蒙版（局部重绘）。点击清除"
+      aria-label="清除蒙版"
+      onClick={(event) => {
+        event.stopPropagation();
+        onClearMask(id);
+      }}
+    >
+      蒙版
+    </button>
   ) : null;
   // 固定展示框避免图片加载后撑高节点，object-contain 保留完整画面。
   const thumb = (
@@ -172,6 +196,7 @@ export function ImageNode({
       >
         <NodeHandles />
         {missingBadge}
+        {maskBadge}
         {thumb}
         {meta}
       </div>
@@ -186,6 +211,7 @@ export function ImageNode({
       {/* 顶部接收提示词产出；底部作为参考图输出。 */}
       <NodeHandles />
       {missingBadge}
+      {maskBadge}
       {/* 图片专用操作区：悬停时在右侧显示，不遮挡图片。 */}
       <NodeActions testId="image-action-rail">
         <ActionButton label="预览大图" onClick={() => onZoom(id)}>
@@ -199,6 +225,9 @@ export function ImageNode({
         </ActionButton>
         <ActionButton label="切分图片" onClick={() => onSplit(id)}>
           <Scissors aria-hidden="true" size={14} />
+        </ActionButton>
+        <ActionButton label="蒙版重绘" onClick={() => onMask(id)}>
+          <Brush aria-hidden="true" size={14} />
         </ActionButton>
         <ActionButton label="替换图片" onClick={() => onReplace(id)}>
           <RefreshCw aria-hidden="true" size={14} />
@@ -479,9 +508,14 @@ export const PromptNode = memo(function PromptNode({
         <div className="min-w-0">
           <label className="field-label text-[10px]">尺寸</label>
           <Select
-            options={sizeOptions}
+            options={mergeCustomOption(sizeOptions, data.size)}
             value={data.size}
             onChange={(v) => onUpdate(id, { size: v })}
+            // 自由输入：清单只有固定几档，而上游常认清单外的尺寸（1280x720 之类）。
+            // 不校验格式 —— 前端猜格式就会拦掉合法值，错值让上游去报错更好（见 customValue.ts 文件头）。
+            searchable
+            allowCustom
+            onCreateCustom={(v) => onUpdate(id, { size: v })}
             renderOption={sizeOptionIcon}
             className="mt-0.5"
           />

@@ -1209,19 +1209,28 @@ def run_generation(task: GenerationTask) -> None:
         # 参考图二选一：ref_bases 为提交阶段已校验/落盘的路径（优先）；
         # temp_bases 为 multipart 兜底（UploadFile 不可跨线程，提交线程先落临时文件）。
         bases = task.ref_bases or task.temp_bases
-        img2img = bool(bases)
+        # 蒙版重绘强制走图生图分支（edits 接口）：generations 上没有 mask 语义。
+        # bases 为空时不在这里跳过 —— 只传 mask_data_url 下去，让 core/api.py 抛
+        # 「mask 需要至少一张底图」，错误信息集中在一处，不静默丢参数。
+        img2img = bool(bases) or bool(task.mask_data_url)
         prefix = "img2img" if img2img else "txt2img"
         dest = os.path.join(out_dir, f"{prefix}_{stamp}_{next(_SEQ):03d}.png")
-        messages.append(f"图生图 · 参考图 {len(bases)} 张" if img2img else "文生图")
+        if task.mask_data_url:
+            messages.append(
+                f"蒙版重绘 · 参考图 {len(bases)} 张" if bases else "蒙版重绘 · 无参考图"
+            )
+        else:
+            messages.append(f"图生图 · 参考图 {len(bases)} 张" if img2img else "文生图")
         if img2img:
             generate_image(
                 prompt=task.prompt,
-                images=bases,
+                images=bases or None,
                 size=task.size,
                 quality=task.quality,
                 model=config.DEFAULT_MODEL,
                 output_format="png",
                 output_path=dest,
+                mask_data_url=task.mask_data_url,
             )
         else:
             generate_image(
@@ -1344,6 +1353,7 @@ def generate(
     ref_paths: str = Form(""),
     win: int = Form(0),
     allow_over_budget: bool = Form(False),
+    mask: str = Form(""),
 ):
     """提交生成任务（文生图 / 图生图），立即返回 taskId 与初始状态。
 
@@ -1355,12 +1365,22 @@ def generate(
     接口不接收任何凭据参数：配置只有一份，在 .env / config.json 里，由服务端自己读。
     此前前端会带 api_key / api_base_url 覆盖，那是「浏览器也存一份配置」时代的产物，
     已随配置归一移除（见 docs/config-write-api-design.md）。
+
+    mask：蒙版局部重绘的 data URL（`data:image/png;base64,...`），空串表示不重绘。
+    刻意用 str 而不是 UploadFile —— 蒙版是前端 canvas 里临时画出来的，浏览器直接
+    toDataURL() 拿字符串最省事，也避开 multipart 里两个二进制字段的兼容问题。
+    蒙版**不落 .assets**：它是临时绘制物，落盘会污染资产目录且要额外的清理逻辑；
+    data URL 直接随任务对象进内存（见 core/tasks.py 的 mask_data_url 注释）。
+    语义：**透明像素 = 要重绘的区域，不透明像素 = 保持原样**（OpenAI images/edits 口径）。
     """
     # 空值回退到当前生效的默认尺寸/质量。不能写成 `size: str = Form(DEFAULT_SIZE)` ——
     # Form 默认值在 import 时求值，配置热加载后就永远拿旧值了（见 core/config.py 的
     # reload_config 说明）。
     size = size.strip() or config.DEFAULT_SIZE
     quality = quality.strip() or config.DEFAULT_QUALITY
+    # mask 同理：缺省时必须归一成空串。直接调用本函数（测试 / 内部调用）时 FastAPI
+    # 不会注入 Form 默认值，形参拿到的就是 Form 对象本身，.strip() 会 AttributeError。
+    mask = mask.strip() if isinstance(mask, str) else ""
 
     ref_bases: list[str] = []
     if ref_paths:
@@ -1402,6 +1422,7 @@ def generate(
         win=win,
         ref_bases=ref_bases,
         temp_bases=temp_bases,
+        mask_data_url=mask,
         submission_id=submission_id,
         input_asset_ids=input_asset_ids,
     )
