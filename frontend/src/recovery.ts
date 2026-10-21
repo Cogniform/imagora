@@ -18,7 +18,13 @@ export function buildRecoverySnapshot(
       if (cleaned === undefined) delete base.className;
       else base.className = cleaned;
       if (base.type !== "prompt") return base;
-      const { startedAtMs: _startedAtMs, resultCount: _resultCount, message: _message, ...data } = base.data;
+      const {
+        startedAtMs: _startedAtMs,
+        resultCount: _resultCount,
+        message: _message,
+        cancelRequested: _cancelRequested,
+        ...data
+      } = base.data;
       return {
         ...base,
         data: { ...data, quality: data.quality ?? "high", status: "idle" },

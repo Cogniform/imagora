@@ -57,6 +57,8 @@ If no key is configured, the top of the page says so right away — you won't fi
 Lay prompt cards and images out on one canvas; **a connection is a reference relationship** — connect an image to a prompt and that image becomes its reference.
 Several images can be grouped first, and groups can be merged again, saving you from drawing every connection one by one.
 There are three ways to run: a single card's own "Run", "Run all", or "Run selected" for a few selected cards.
+Taking it back is just as easy: every card carries its own "Cancel", and "Cancel all" on the toolbar stops a whole batch at once.
+Queued tasks are simply never sent; the one already generating cannot be un-sent, so it finishes the current image and then voids it — the file still lands in the output folder and is still billed, it just never comes back to the canvas. The UI says so instead of pretending it stopped.
 A generated result automatically becomes a new image node right below that prompt, ready to be wired onward — no dragging images around.
 Any single result from the classic form can also be imported into the current canvas with one click and refined further.
 

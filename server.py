@@ -1533,7 +1533,7 @@ def task_status(task_id: str):
 
 @app.post("/api/tasks/{task_id}/cancel")
 def cancel_task(task_id: str):
-    """请求取消任务：排队中不再执行；生成中无法中断上游请求，跑完后丢弃结果。"""
+    """请求取消任务：排队中的不再执行；生成中无法中断上游请求，跑完当前那张才作废（产物仍落盘并计费）。"""
     return {"ok": task_manager.cancel(task_id)}
 
 
