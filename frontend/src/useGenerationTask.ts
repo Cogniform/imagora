@@ -68,6 +68,8 @@ export function useGenerationTask(): UseGenerationTaskResult {
   const listenersRef = useRef(new Set<(taskId: string, view: GenerationTaskView) => void>());
   /** 本窗口会话内已确认过超预算（「全部运行」多条提交只问一次） */
   const overBudgetConfirmedRef = useRef(false);
+  /** 已在本窗口点过取消、尚未走到终态的任务：本机意图要压过「取消前那一刻」的旧快照 */
+  const requestedCancelRef = useRef(new Set<string>());
   const [, setVersion] = useState(0);
 
   const emit = useCallback((taskId: string, view: GenerationTaskView) => {
@@ -120,18 +122,29 @@ export function useGenerationTask(): UseGenerationTaskResult {
           const snap = await fetchTask(taskId);
           if (pollTimersRef.current.get(taskId) !== timer) return;
           const prev = tasksRef.current.get(taskId);
-          const view: GenerationTaskView = { ...snap, elapsed: prev?.elapsed ?? 0 };
+          const terminal = TERMINAL_STATUSES.includes(snap.status);
+          if (terminal) requestedCancelRef.current.delete(taskId);
+          const view: GenerationTaskView = {
+            ...snap,
+            elapsed: prev?.elapsed ?? 0,
+            // 点过取消但服务端还没认下时，在途/此轮轮询拿到的仍是取消前的旧状态：
+            // 本机意图优先，否则「取消中…」会被旧快照冲回可点，用户能重复点。
+            // 终态只认服务端那一份（终态即「意图已结清」，不再叠加，避免挂着取消痕迹）。
+            cancelRequested:
+              snap.cancelRequested === true || (!terminal && requestedCancelRef.current.has(taskId)),
+          };
           tasksRef.current.set(taskId, view);
           if (snap.status === "running" && typeof snap.startedAt === "number") {
             view.elapsed = Math.max(0, Math.floor((Date.now() - snap.startedAt) / 1000));
             ensureElapsedTimer(taskId, snap.startedAt);
           }
-          if (TERMINAL_STATUSES.includes(snap.status)) {
+          if (terminal) {
             stopPoll(taskId);
           }
           emit(taskId, view);
         } catch {
           if (pollTimersRef.current.get(taskId) !== timer) return;
+          requestedCancelRef.current.delete(taskId);
           stopPoll(taskId);
           // 任务不存在 / 已过期（TTL）或网络错误：标记失败，避免界面悬挂
           const view: GenerationTaskView = {
@@ -163,11 +176,23 @@ export function useGenerationTask(): UseGenerationTaskResult {
     [emit, poll],
   );
 
-  const cancel = useCallback(async (taskId: string) => {
-    await cancelTask(taskId).catch(() => {
-      /* 尽力而为：服务端 404 等场景不阻断界面 */
-    });
-  }, []);
+  const cancel = useCallback(
+    async (taskId: string) => {
+      const current = tasksRef.current.get(taskId);
+      if (current && !TERMINAL_STATUSES.includes(current.status)) {
+        // 先落本机意图再发请求：卡片立刻进「取消中…」，且此后任何快照都盖上这层意图
+        //（清除只发生在终态或查询失败，所以不会永久禁用）
+        requestedCancelRef.current.add(taskId);
+        const next: GenerationTaskView = { ...current, cancelRequested: true };
+        tasksRef.current.set(taskId, next);
+        emit(taskId, next);
+      }
+      await cancelTask(taskId).catch(() => {
+        /* 尽力而为：服务端 404 等场景不阻断界面 */
+      });
+    },
+    [emit],
+  );
 
   const get = useCallback((taskId: string) => tasksRef.current.get(taskId), []);
 

@@ -339,6 +339,8 @@ interface PromptNodeExtraProps {
   onUpdate: (nodeId: string, patch: Partial<CanvasPromptNodeData>) => void;
   /** 运行该节点（独立任务，入边快照参考图） */
   onRun: (nodeId: string) => void;
+  /** 请求取消该节点的任务（排队中立即取消，运行中在当前这张完成后停下并丢弃结果） */
+  onCancel: (nodeId: string) => void;
   /** 删除该节点（连同其连线） */
   onDelete: (nodeId: string) => void;
   /** 尺寸/质量选项（由画布 config 派生传入） */
@@ -447,6 +449,7 @@ export const PromptNode = memo(function PromptNode({
   lod,
   onUpdate,
   onRun,
+  onCancel,
   onDelete,
   sizeOptions,
   qualityOptions,
@@ -554,6 +557,20 @@ export const PromptNode = memo(function PromptNode({
         >
           {running ? <ElapsedText startedAtMs={data.startedAtMs} /> : queued ? "排队中..." : "运行"}
         </button>
+        {/* 取消入口：只在真的有任务在跑时出现（就绪/完成的卡片上没有可取消的东西）。
+            后端语义是「排队中的不再发上游；运行中跑完当前这张才作废（图仍落盘并计费）」，所以点完不是立刻复位：
+            cancelRequested 期间显示「取消中…」并禁用，避免重复点。 */}
+        {busy && (
+          <button
+            type="button"
+            onClick={() => onCancel(id)}
+            disabled={data.cancelRequested === true}
+            title="取消这个任务：排队中的不会再发出去；生成中的会等当前这张生成完后作废（图仍落盘并计费，只是不派回画布）"
+            className="btn-ghost btn-sm shrink-0"
+          >
+            {data.cancelRequested === true ? "取消中…" : "取消"}
+          </button>
+        )}
       </div>
     </div>
   );

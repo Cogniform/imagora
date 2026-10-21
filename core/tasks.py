@@ -11,7 +11,8 @@
 - 任务表纯内存：服务重启后任务状态丢失；前端刷新页面会丢失轮询句柄，
   但已提交任务仍会在后台完成（生成结果照常落盘，只是不再回流到界面）；
 - 取消为「逻辑取消」：排队中（未开始）的任务取消后不执行；已 running 的任务
-  无法中断上游 API（requests 同步阻塞），会跑完当前请求再丢弃结果、释放执行槽。
+  无法中断上游 API（requests 同步阻塞），会跑完当前请求再作废释放执行槽——
+  产物仍落盘、仍计费，只是不派回画布。
 """
 
 import os
@@ -135,7 +136,7 @@ class TaskManager:
             }
 
     def cancel(self, task_id: str) -> bool:
-        """标记取消：排队中任务不执行；running 任务跑完后丢弃结果。返回是否可取消。"""
+        """标记取消：排队中任务不执行（取件前直接出队）；running 任务跑完后作废（产物仍落盘计费）。返回是否可取消。"""
         with self._lock:
             task = self._tasks.get(task_id)
             if task is None or task.terminal:
