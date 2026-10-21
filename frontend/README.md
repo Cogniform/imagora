@@ -52,9 +52,13 @@ $env:IMAGORA_APP_ROOT = $h
 & "$repo\.venv\Scripts\python.exe" -m main ui --no-browser --port 7861
 # 3) 另开终端把 E2E 指过去
 & "$repo\.venv\Scripts\python.exe" "$repo\frontend\e2e\verify_canvas.py" --base http://127.0.0.1:7861
+# 来源/配置弹窗那条要额外带 --app-root：它断言的是隔离目录里的 providers.local.json
+& "$repo\.venv\Scripts\python.exe" "$repo\frontend\e2e\verify_provider.py" --base http://127.0.0.1:7861 --app-root $h
 ```
 
-只复验几条：`--only 拖拽`（按断言名子串过滤；一条都没匹配时退出码 1，避免假绿）。`--base` 也可以由 `IMAGORA_E2E_BASE` 环境变量提供，命令行优先。
+只复验几条：`--only 拖拽`（按断言名子串过滤；一条都没匹配时退出码 1，避免假绿）。`--base` 也可以由 `IMAGORA_E2E_BASE` 环境变量提供，命令行优先。两个脚本都吃这两个开关。
+
+`verify_provider.py` 还多一个 `--app-root`（也可用 `IMAGORA_APP_ROOT`，与起服务时那个变量同名）：它要读**服务写下的**那份 `providers.local.json`，默认按仓库根找；打隔离实例时漏了它就会去断言仓库里那份真实来源文件——第 4 步假红、第 7 步假绿。
 
 ## 该目录特有坑
 
@@ -369,7 +373,7 @@ $env:IMAGORA_APP_ROOT = $h
 - [`main.tsx`](src/main.tsx) — 入口（挂载 + accent 主题注入）
 - [`index.css`](src/index.css) — **唯一样式层**（Tailwind v4）：`:root` 设计 token + `@layer components` 组件类 + 动效层；导出的 token 与公共类清单见本文「样式体系」节，组件只引用类名、不写死尺寸与颜色
 - [`verify_canvas.py`](e2e/verify_canvas.py) — 画布交互 E2E（105 断言，Playwright headless）
-- [`verify_provider.py`](e2e/verify_provider.py) — 「添加第三方供应商」E2E（38 断言）：真实点顶栏插头 → 填表 → 真实落盘 `providers.local.json` → 断言文件内容（8 档尺寸单价全 0 / 7 个比例 / 模型目录 / **不含密钥** / 地址带 `/v1` 时路径不重复）→ 新来源出现在配置弹窗下拉。探测那步打一个不存在的域名（预期 400，不花外部配额）；Provider ID 用随机值，跑完不留残留
+- [`verify_provider.py`](e2e/verify_provider.py) — 「添加第三方供应商」E2E（38 断言）：真实点顶栏插头 → 填表 → 真实落盘 `providers.local.json` → 断言文件内容（8 档尺寸单价全 0 / 7 个比例 / 模型目录 / **不含密钥** / 地址带 `/v1` 时路径不重复）→ 新来源出现在配置弹窗下拉。探测那步打一个不存在的域名（预期 400，不花外部配额）；Provider ID 用随机值，跑完不留残留。开关：`--base` / `--app-root`（要跟服务进程的应用根一致）/ `--only`
 
 ## 上下游依赖
 

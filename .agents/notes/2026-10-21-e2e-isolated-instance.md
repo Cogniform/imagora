@@ -15,7 +15,12 @@
 - `--base URL` / `IMAGORA_E2E_BASE`：命令行优先，缺省仍是不变的 `http://127.0.0.1:7860`
 - `--only 关键字`：在 `check()` 层按断言名子串过滤判定与计数；**一条都没匹配时退出码 1**，避免「过滤词打错 → 0 条断言 → 绿色」的假绿
 
-配套跑法（细节见 `frontend/README.md`「E2E」节）：仓库外建一个数据目录 `$h`，把 `config.json` / `providers.local.json` / `.env` 拷进去，`cd $h` 后带 `$env:IMAGORA_APP_ROOT=$h` 起 `-m main ui --port 7861`，再把 E2E `--base` 指过去。`output/`、图片库、配置全部落在这个临时目录，删目录即彻底清理。
+`verify_provider.py`（供应商增删）同样支持这两条，但**多一条必需项**：
+
+- `--app-root 路径` / `IMAGORA_E2E_APP_ROOT`：它断言的是「本机来源文件里有没有这条来源」，而 `providers.local.json` 的位置由服务进程的 `IMAGORA_APP_ROOT` 决定（`core/config.py` 的 `LOCAL_PROVIDERS_FILE`）。不传这个参数时它读 `ROOT/providers.local.json`（仓库里那份），于是**打隔离实例、断言仓库文件**——既验不到隔离实例，又会因为「创建成功后仓库文件里没有」而红。截图目录同理，跟着 `--app-root` 走，别把 `_ui-audit/` 落在仓库里。
+- 从 `/api/config` 反查服务端的 app root 是行不通的：`/api/config` 的返回里没有这个字段（只有 profile / baseUrl / 尺寸 / 模型这些），所以只能由调用方显式传。
+
+配套跑法（细节见 `frontend/README.md`「E2E」节）：仓库外建一个数据目录 `$h`，把 `config.json` / `providers.local.json` / `.env` 拷进去，`cd $h` 后带 `$env:IMAGORA_APP_ROOT=$h` 起 `-m main ui --port 7861`，再把 E2E `--base`（供应商脚本另加 `--app-root $h`）指过去。`output/`、图片库、配置全部落在这个临时目录，删目录即彻底清理。
 
 ## 替代方案
 
@@ -24,10 +29,11 @@
 - **每个用例跑完删自己产生的文件**：否决。清理逻辑本身要维护一张「本轮产出了什么」的账，漏一个就留垃圾；且删文件会改资产库状态，让后续断言依赖执行顺序。
 - **给 E2E 起一个假后端（mock API）**：否决。这层 E2E 的价值就在「真实浏览器 + 真实后端 + 真实文件」，mock 掉之后和组件测试重复，还多一套要同步的假契约。
 - **用 `git worktree` + 独立 clone 跑**：否决。前端产物 `dist/` 与后端代码可以共用，重的是数据目录；为一次回归复制一份仓库不划算。
+- **只给 `verify_canvas.py` 加参数，供应商脚本继续打真实实例**：否决。`verify_provider.py` 会真的写入/删除一条本机来源，打真实实例就是改开发者自己的供应商列表（实测会把待删来源留在 `providers.local.json` 里）；它的断言还直接读那个文件，等于一半验隔离实例、一半验仓库。
 
 ## 影响
 
-- 本地全量 E2E 从「不敢随便跑」变成随时可跑：实测在隔离实例上全量 **103/103 PASS**（改动前后各一轮，作为 A/B/C 与节点 memo 的回归基线）。
+- 本地全量 E2E 从「不敢随便跑」变成随时可跑：实测在隔离实例上全量 **103/103 PASS**（改动前后各一轮，作为 A/B/C 与节点 memo 的回归基线）；供应商脚本在隔离实例上 **38/38 PASS**，跑完仓库里 `providers.local.json` 的 SHA256 与跑前一致（`REPO_UNCHANGED=True`，即真的没碰仓库那份）。
 - 可以并行多轮（不同端口 + 不同 `$h`），不再互相踩资产库。
 - `--only` 让单点复验从 ~6 分钟降到十几秒，但**它不能替代全量**：过滤跑绿只说明命中的那几条没坏。
-- 代价：多两条命令行参数与一份 README 说明；`verify_canvas.py` 的 `BASE` 从模块常量变成 `main()` 里赋值的全局，任何在 `main()` 之前就调 `BASE` 的代码都会拿到默认值——目前没有这种调用点。
+- 代价：多两条命令行参数与一份 README 说明；`verify_canvas.py` 的 `BASE` 从模块常量变成 `main()` 里赋值的全局，任何在 `main()` 之前就调 `BASE` 的代码都会拿到默认值——目前没有这种调用点。供应商脚本多一条 `--app-root`，**忘了传不会报错，只会静默去验仓库那份文件**——这是这套参数里最容易踩的一脚，README 与脚本 `--help` 都写明了。
