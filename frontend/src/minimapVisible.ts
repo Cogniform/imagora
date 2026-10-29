@@ -1,20 +1,18 @@
 /**
- * 画布小地图开关 + 缩放滑杆的纯逻辑。
+ * 画布小地图开关 + 缩放读数归一化的纯逻辑。
  *
- * 两个都是**纯偏好项**：没有图、没有服务端状态，一个布尔 / 一个数字落 localStorage。
+ * 两者都是**纯偏好/纯显示**：没有图、没有服务端状态。
+ * 小地图一个布尔落 localStorage；缩放读数是视口的派生显示，不落盘
+ * （2026-10-29 移除了缩放滑杆：滚轮与「放大/缩小」按钮已够用，滑杆只是多一条要维护的双向同步）。
  * 读写风格与 canvasBounds.ts / accent.ts / wallpaperStore.ts 一致 ——
  * 非法 / 空白一律当未设置，try/catch 静默降级（隐私模式下 localStorage 不可用时不影响本次会话）。
  *
- * 为什么默认关：小地图占画布右下角一块固定面积（160×110），
- * 对「只有几张卡片」的轻量用法是纯负担；只有卡片铺开后才值得开。
- * 默认值是 false，用户显式打开才落盘。
+ * 为什么小地图默认关：占画布一角固定面积，对「只有几张卡片」的轻量用法是纯负担；
+ * 只有卡片铺开后才值得开，用户显式打开才落盘。
  */
 
 /** 小地图开关的存储键（仅本机浏览器） */
 export const MINIMAP_STORAGE_KEY = "imagora.canvas-minimap.v1";
-
-/** 缩放滑杆的存储键（仅本机浏览器；记的是「上次滑杆位置」，不是视口缩放） */
-export const ZOOM_SLIDER_STORAGE_KEY = "imagora.canvas-zoom-slider.v1";
 
 /** 读小地图开关；未设置 / 空白 / 非法一律回落默认值 false（= 不显示小地图） */
 export function readMinimapVisible(): boolean {
@@ -37,73 +35,42 @@ export function saveMinimapVisible(visible: boolean): void {
 }
 
 /**
- * 缩放滑杆的行程（百分比，整数）。
+ * 画布缩放的可显示行程（百分比，整数）。
  *
  * 下限 5 与 ReactFlow 的 minZoom={0.05} 对齐；上限 200 与 maxZoom={2} 对齐。
- * 上下限刻意不放进函数参数 —— 它们必须和 CanvasPage 里的 ReactFlow props 同步，
- * 做成参数会让两处数字漂移（滑杆拖到底但视口还在缩，是最难查的一类 bug）。
+ * 刻意不做成函数参数 —— 它们必须和 CanvasPage 里的 ReactFlow props 同步，
+ * 参数化会让两处数字各自漂移（读数写着 400% 而视口早就到底了，是最难查的一类 bug）。
  */
-export const ZOOM_SLIDER_MIN_PERCENT = 5;
-export const ZOOM_SLIDER_MAX_PERCENT = 200;
+export const CANVAS_ZOOM_MIN_PERCENT = 5;
+export const CANVAS_ZOOM_MAX_PERCENT = 200;
 
 /**
- * 缩放倍数 → 滑杆位置（百分比整数）。
+ * 缩放倍数 → 显示用百分比（整数，夹进行程）。
  *
- * 用**直接百分比**（p = 100z）而不是对数刻度：
- * 滑杆行程 5%~200% 与缩放区间 0.05~2 的跨度**都正好是 40 倍**，
- * 端点对齐后对数映射在数学上精确退化为 p = 100z（ln p = ln 100 + ln z 里系数恰为 1），
- * 写一套 log 运算只是把同一根直线算两遍，还多出浮点误差。
- * 直接百分比另有两个好处：滑杆读数就是用户看到的缩放百分比（不必再解释），
- * 且 100% 天然落在行程 48.7% 处，接近居中。
+ * 读数是**纯派生显示**：视口变了就重算，没有用户输入，因此不需要反向换算，
+ * 也不需要持久化（滑杆时代那套 `sliderPercentToZoom` / `read/saveZoomSliderPercent`
+ * 随滑杆一起删掉了）。
  *
- * 非法输入（NaN / Infinity / ≤0）一律夹到下限，不抛错 —— 滑杆是受控组件，
- * 抛错会让整个画布白屏，代价远大于显示一个不精确的位置。
+ * 非法输入（NaN / Infinity / ≤0）一律夹到下限，不抛错 —— 视口在首帧可能是 0，
+ * 抛错会让整个画布白屏，代价远大于显示一个不精确的数字。
  */
-export function zoomToSliderPercent(zoom: number): number {
-  if (Number.isNaN(zoom) || zoom <= 0) return ZOOM_SLIDER_MIN_PERCENT;
-  return clampSliderPercent(zoom * 100);
+export function zoomToPercent(zoom: number): number {
+  if (Number.isNaN(zoom) || zoom <= 0) return CANVAS_ZOOM_MIN_PERCENT;
+  return clampZoomPercent(zoom * 100);
 }
 
 /**
- * 滑杆位置（百分比）→ 缩放倍数。
+ * 把任意数字夹进行程并取整。
  *
- * 与 zoomToSliderPercent 互为反函数（往返误差 < 1e-9，单测有断言）。
- * 非法输入一律夹到下限再换算，理由同上。
- */
-export function sliderPercentToZoom(percent: number): number {
-  return clampSliderPercent(percent) / 100;
-}
-
-/**
- * 把任意数字夹进滑杆行程并取整。
- *
- * NaN 走下限（滑杆是受控组件，位置必须是个数）；±Infinity 按方向夹到端点 ——
+ * NaN 走下限（读数必须是个数）；±Infinity 按方向夹到端点 ——
  * 视口算出 Infinity 通常是「节点还没测量」，夹到端点比夹到下限更接近用户预期。
  */
-export function clampSliderPercent(percent: number): number {
-  if (Number.isNaN(percent)) return ZOOM_SLIDER_MIN_PERCENT;
-  if (percent === Number.POSITIVE_INFINITY) return ZOOM_SLIDER_MAX_PERCENT;
-  if (percent === Number.NEGATIVE_INFINITY) return ZOOM_SLIDER_MIN_PERCENT;
-  return Math.min(ZOOM_SLIDER_MAX_PERCENT, Math.max(ZOOM_SLIDER_MIN_PERCENT, Math.round(percent)));
-}
-
-/** 读上次的滑杆位置；未设置 / 空白 / 非法一律回落 100（= 原始大小） */
-export function readZoomSliderPercent(): number {
-  try {
-    const raw = localStorage.getItem(ZOOM_SLIDER_STORAGE_KEY);
-    if (raw === null || raw.trim() === "") return 100;
-    const parsed = Number.parseInt(raw.trim(), 10);
-    return clampSliderPercent(Number.isNaN(parsed) ? 100 : parsed);
-  } catch {
-    return 100;
-  }
-}
-
-/** 写滑杆位置；存储不可用时静默不持久化 */
-export function saveZoomSliderPercent(percent: number): void {
-  try {
-    localStorage.setItem(ZOOM_SLIDER_STORAGE_KEY, String(clampSliderPercent(percent)));
-  } catch {
-    /* 隐私模式等场景下 localStorage 不可用：不持久化，不影响本次会话 */
-  }
+export function clampZoomPercent(percent: number): number {
+  if (Number.isNaN(percent)) return CANVAS_ZOOM_MIN_PERCENT;
+  if (percent === Number.POSITIVE_INFINITY) return CANVAS_ZOOM_MAX_PERCENT;
+  if (percent === Number.NEGATIVE_INFINITY) return CANVAS_ZOOM_MIN_PERCENT;
+  return Math.min(
+    CANVAS_ZOOM_MAX_PERCENT,
+    Math.max(CANVAS_ZOOM_MIN_PERCENT, Math.round(percent)),
+  );
 }

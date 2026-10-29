@@ -1,126 +1,95 @@
 // @vitest-environment jsdom
-import { describe, expect, it, beforeEach } from "vitest";
+
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  CANVAS_ZOOM_MAX_PERCENT,
+  CANVAS_ZOOM_MIN_PERCENT,
   MINIMAP_STORAGE_KEY,
-  ZOOM_SLIDER_STORAGE_KEY,
-  ZOOM_SLIDER_MAX_PERCENT,
-  ZOOM_SLIDER_MIN_PERCENT,
-  clampSliderPercent,
+  clampZoomPercent,
   readMinimapVisible,
-  readZoomSliderPercent,
   saveMinimapVisible,
-  saveZoomSliderPercent,
-  sliderPercentToZoom,
-  zoomToSliderPercent,
+  zoomToPercent,
 } from "./minimapVisible";
 
-beforeEach(() => {
-  localStorage.clear();
-});
+describe("小地图显隐偏好", () => {
+  beforeEach(() => localStorage.clear());
+  afterEach(() => {
+    localStorage.clear();
+    vi.restoreAllMocks();
+  });
 
-describe("小地图开关", () => {
-  it("未设置时默认关闭", () => {
+  it("未设置时默认关闭（卡片少时小地图是纯负担）", () => {
     expect(readMinimapVisible()).toBe(false);
   });
 
-  it("写入 true 后读回 true，写入 false 后读回 false", () => {
+  it("写入后读回", () => {
     saveMinimapVisible(true);
     expect(readMinimapVisible()).toBe(true);
     saveMinimapVisible(false);
     expect(readMinimapVisible()).toBe(false);
   });
 
-  it("空白字符串与脏值当作未设置（默认关闭），不抛错", () => {
-    localStorage.setItem(MINIMAP_STORAGE_KEY, "   ");
+  it("空白当未设置（关）；只有明确写 0/false 才关，其余非空值视为开", () => {
+    localStorage.setItem(MINIMAP_STORAGE_KEY, "  ");
     expect(readMinimapVisible()).toBe(false);
+    // 判据是「非 0 / 非 false 即开」——旧版本写进 localStorage 的值不该被误判成关
+    localStorage.setItem(MINIMAP_STORAGE_KEY, "1");
+    expect(readMinimapVisible()).toBe(true);
     localStorage.setItem(MINIMAP_STORAGE_KEY, "0");
     expect(readMinimapVisible()).toBe(false);
     localStorage.setItem(MINIMAP_STORAGE_KEY, "false");
     expect(readMinimapVisible()).toBe(false);
-    localStorage.setItem(MINIMAP_STORAGE_KEY, "1");
-    expect(readMinimapVisible()).toBe(true);
   });
 
-  it("存储键是独立的，不会和缩放滑杆串味", () => {
-    saveMinimapVisible(true);
-    expect(localStorage.getItem(ZOOM_SLIDER_STORAGE_KEY)).toBeNull();
-    expect(localStorage.getItem(MINIMAP_STORAGE_KEY)).toBe("1");
-  });
-});
-
-describe("缩放滑杆行程", () => {
-  it("行程上下限与 ReactFlow 的 minZoom/maxZoom 对齐", () => {
-    expect(ZOOM_SLIDER_MIN_PERCENT).toBe(5);
-    expect(ZOOM_SLIDER_MAX_PERCENT).toBe(200);
-  });
-
-  it("clampSliderPercent 夹到行程内并取整", () => {
-    expect(clampSliderPercent(1)).toBe(5);
-    expect(clampSliderPercent(500)).toBe(200);
-    expect(clampSliderPercent(87.6)).toBe(88);
-  });
-
-  it("clampSliderPercent 对 NaN / Infinity 走下限，不抛错", () => {
-    expect(clampSliderPercent(Number.NaN)).toBe(5);
-    expect(clampSliderPercent(Number.POSITIVE_INFINITY)).toBe(200);
-    expect(clampSliderPercent(Number.NEGATIVE_INFINITY)).toBe(5);
+  it("localStorage 不可用时静默降级（读回落默认、写不抛错）", () => {
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    expect(readMinimapVisible()).toBe(false);
+    expect(() => saveMinimapVisible(true)).not.toThrow();
   });
 });
 
-describe("缩放倍数与滑杆位置互转（直接百分比）", () => {
-  it("100% 对应缩放 1", () => {
-    expect(zoomToSliderPercent(1)).toBe(100);
-    expect(sliderPercentToZoom(100)).toBe(1);
+/**
+ * 缩放读数的归一化。**滑杆已移除**（2026-10-29）：滚轮与「放大/缩小」按钮足够，
+ * 滑杆只换来一条要维护的双向同步。这里只剩「视口倍率 → 显示百分比」这一条派生方向，
+ * 所以反向换算（sliderPercentToZoom）与持久化（read/saveZoomSliderPercent）一并删掉了 ——
+ * 它们连同滑杆一起失去了调用方。
+ */
+describe("缩放读数归一化", () => {
+  it("行程与 ReactFlow 的 minZoom/maxZoom 对齐", () => {
+    expect(CANVAS_ZOOM_MIN_PERCENT).toBe(5);
+    expect(CANVAS_ZOOM_MAX_PERCENT).toBe(200);
   });
 
-  it("行程两端分别对应 minZoom 与 maxZoom", () => {
-    expect(zoomToSliderPercent(0.05)).toBe(ZOOM_SLIDER_MIN_PERCENT);
-    expect(zoomToSliderPercent(2)).toBe(ZOOM_SLIDER_MAX_PERCENT);
+  it("clampZoomPercent 夹进行程并取整", () => {
+    expect(clampZoomPercent(1)).toBe(5);
+    expect(clampZoomPercent(500)).toBe(200);
+    expect(clampZoomPercent(87.6)).toBe(88);
   });
 
-  it("往返误差小于 1e-9（互为反函数）", () => {
-    for (const zoom of [0.05, 0.1, 0.25, 0.5, 1, 1.5, 2]) {
-      const roundTrip = sliderPercentToZoom(zoomToSliderPercent(zoom));
-      expect(Math.abs(roundTrip - zoom)).toBeLessThan(1e-9);
-    }
+  it("clampZoomPercent 对 NaN / ±Infinity 走端点，不抛错", () => {
+    expect(clampZoomPercent(Number.NaN)).toBe(5);
+    expect(clampZoomPercent(Number.POSITIVE_INFINITY)).toBe(200);
+    expect(clampZoomPercent(Number.NEGATIVE_INFINITY)).toBe(5);
   });
 
-  it("滑杆读数就是缩放百分比（不必二次换算）", () => {
-    expect(zoomToSliderPercent(0.37)).toBe(37);
-    expect(zoomToSliderPercent(1.25)).toBe(125);
+  it("zoomToPercent：倍率 → 百分比（100% 落在行程内，两端对齐）", () => {
+    expect(zoomToPercent(1)).toBe(100);
+    expect(zoomToPercent(1.5)).toBe(150);
+    expect(zoomToPercent(0.37)).toBe(37);
+    expect(zoomToPercent(1.25)).toBe(125);
+    expect(zoomToPercent(0.05)).toBe(CANVAS_ZOOM_MIN_PERCENT);
+    expect(zoomToPercent(2)).toBe(CANVAS_ZOOM_MAX_PERCENT);
   });
 
-  it("非法缩放（NaN / 0 / 负数）一律走下限，不抛错", () => {
-    expect(zoomToSliderPercent(Number.NaN)).toBe(ZOOM_SLIDER_MIN_PERCENT);
-    expect(zoomToSliderPercent(0)).toBe(ZOOM_SLIDER_MIN_PERCENT);
-    expect(zoomToSliderPercent(-1)).toBe(ZOOM_SLIDER_MIN_PERCENT);
-  });
-
-  it("sliderPercentToZoom 对越界输入先夹再换算", () => {
-    expect(sliderPercentToZoom(1)).toBeCloseTo(0.05, 10);
-    expect(sliderPercentToZoom(999)).toBeCloseTo(2, 10);
-  });
-});
-
-describe("滑杆位置持久化", () => {
-  it("未设置时默认 100", () => {
-    expect(readZoomSliderPercent()).toBe(100);
-  });
-
-  it("写入后读回，越界值被夹进行程", () => {
-    saveZoomSliderPercent(150);
-    expect(readZoomSliderPercent()).toBe(150);
-    saveZoomSliderPercent(1);
-    expect(readZoomSliderPercent()).toBe(ZOOM_SLIDER_MIN_PERCENT);
-    saveZoomSliderPercent(9999);
-    expect(readZoomSliderPercent()).toBe(ZOOM_SLIDER_MAX_PERCENT);
-  });
-
-  it("脏值当作未设置（回落 100），不抛错", () => {
-    localStorage.setItem(ZOOM_SLIDER_STORAGE_KEY, "  ");
-    expect(readZoomSliderPercent()).toBe(100);
-    localStorage.setItem(ZOOM_SLIDER_STORAGE_KEY, "abc");
-    expect(readZoomSliderPercent()).toBe(100);
+  it("zoomToPercent 对非法输入不抛错（首帧视口可能是 0）", () => {
+    expect(zoomToPercent(Number.NaN)).toBe(CANVAS_ZOOM_MIN_PERCENT);
+    expect(zoomToPercent(0)).toBe(CANVAS_ZOOM_MIN_PERCENT);
+    expect(zoomToPercent(-1)).toBe(CANVAS_ZOOM_MIN_PERCENT);
   });
 });

@@ -43,6 +43,8 @@ const h = vi.hoisted(() => {
     dropArgs: [] as any[],
     mounts: { image: 0, prompt: 0, group: 0 },
     zoomTo: vi.fn(),
+    zoomIn: vi.fn(async () => true),
+    zoomOut: vi.fn(async () => true),
     fitView: vi.fn(async () => true),
     setViewport: vi.fn(async () => undefined),
     taskSubmit: vi.fn(async () => "task-1"),
@@ -415,6 +417,8 @@ vi.mock("@xyflow/react", () => {
     const instance = {
       getViewport: () => ({ x: 0, y: 0, zoom: 1 }),
       zoomTo: h.zoomTo,
+      zoomIn: h.zoomIn,
+      zoomOut: h.zoomOut,
       setViewport: h.setViewport,
       fitView: h.fitView,
       screenToFlowPosition: (point: { x: number; y: number }) => point,
@@ -655,6 +659,8 @@ beforeEach(() => {
   h.tasks = [];
 
   h.zoomTo.mockReset();
+  h.zoomIn.mockClear();
+  h.zoomOut.mockClear();
   h.fitView.mockReset().mockResolvedValue(true);
   h.setViewport.mockReset().mockResolvedValue(undefined);
   h.taskSubmit.mockReset().mockResolvedValue("task-1");
@@ -883,6 +889,7 @@ describe("节点增删", () => {
     expect(promptNodeIds()).toHaveLength(1);
     expect(screen.getByText("已新建提示词卡片")).toBeTruthy();
   });
+
 
   it("新建图片组：出现一个图片组节点并记录日志", () => {
     renderPage();
@@ -1426,20 +1433,34 @@ describe("取消入口（issue #33）", () => {
 });
 
 describe("画布偏好", () => {
-  it("缩放滑杆百分比与视口缩放互转", () => {
+  /**
+   * 缩放读数：**只有显示、没有滑杆**（2026-10-29 移除）。
+   * 视口变化经 `onMove` 回灌读数，读数不再反向驱动视口，也不落盘 ——
+   * 滚轮与「放大 / 缩小 / 适应」才是改缩放的入口。
+   */
+  it("缩放读数跟随视口变化，且不可拖动", () => {
     renderPage();
-    const slider = screen.getByRole("slider", { name: "画布缩放" });
-    expect((slider as HTMLInputElement).value).toBe("100");
-
-    fireEvent.change(slider, { target: { value: "150" } });
-    expect(h.zoomTo).toHaveBeenCalledWith(1.5, { duration: 0 });
-    expect(slider.getAttribute("aria-valuetext")).toBe("150%");
-
-    fireEvent.pointerUp(slider);
-    expect(window.localStorage.getItem("imagora.canvas-zoom-slider.v1")).toBe("150");
+    // 滑杆已删除：画布上不应再有任何 slider 控件
+    expect(screen.queryByRole("slider")).toBeNull();
+    const readout = () => document.querySelector(".dock-row__value")?.textContent;
+    expect(readout()).toBe("100%");
 
     moveViewport(0.5);
-    expect((slider as HTMLInputElement).value).toBe("50");
+    expect(readout()).toBe("50%");
+
+    moveViewport(1.67);
+    expect(readout()).toBe("167%");
+
+    // 不落盘：读数只是视口的派生显示
+    expect(window.localStorage.getItem("imagora.canvas-zoom-slider.v1")).toBeNull();
+  });
+
+  it("「放大 / 缩小」按钮改视口（滑杆移除后的既有入口之一）", () => {
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "放大画布" }));
+    expect(h.zoomIn).toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "缩小画布" }));
+    expect(h.zoomOut).toHaveBeenCalled();
   });
 
   it("小地图显隐偏好读写并挂载/卸载 MiniMap", () => {

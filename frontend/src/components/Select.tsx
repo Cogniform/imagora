@@ -189,14 +189,22 @@ export function Select({
     const r = trigger.getBoundingClientRect();
     const gap = 4;
     const margin = 8;
+    // 宽度必须用 **布局尺寸**（offsetWidth），不能用 r.width：
+    // 画布节点处在 React Flow 的 scale 变换里，getBoundingClientRect().width 是缩放后的
+    // **可视**宽度；而列表是 portal 到 body 的 fixed 浮层，不继承那个 transform。
+    // 取可视宽度就会「画布缩到 30% → 列表只有触发器的 30% 宽 → 每行截成 1536…」，
+    // 同一个尺寸下拉在 30% 与 100% 下长得完全不一样（曾被报成「缩小画布后下拉挤成一团」）。
+    const width = trigger.offsetWidth || r.width;
+    // 水平方向夹进视口：触发器贴着右边缘时，列表不该被切掉右半边
+    const left = Math.max(margin, Math.min(r.left, window.innerWidth - width - margin));
     const below = window.innerHeight - r.bottom - gap - margin;
     const above = r.top - gap - margin;
     const flip = below < 160 && above > below;
     const maxHeight = Math.max(120, Math.min(240, flip ? above : below));
     setRect({
-      left: r.left,
+      left,
       top: flip ? Math.max(margin, r.top - gap - maxHeight) : r.bottom + gap,
-      width: r.width,
+      width,
       maxHeight,
     });
   };

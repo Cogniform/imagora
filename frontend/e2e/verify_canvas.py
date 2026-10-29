@@ -4,7 +4,7 @@
 文件拖拽添加（落点示意跟随光标与数量、落点精确、多图批次排开、非图片过滤）、
 工具栏按钮拖出新建（提示词卡片 / 图片组，示意文案与全局跟随、松开即建）、
 真实鼠标拖拽（原生 HTML5 DnD 管线）、拖到画布外松开=取消（示意切「松开取消」，拖回画布仍新建）、
-缩放滑杆与视口双向同步、小地图开关（默认关 → 开 → 关，选择落 localStorage）、
+缩放读数与视口双向同步（滑杆已移除，视口只由按钮/滚轮驱动）、小地图开关（默认关 → 开 → 关，选择落 localStorage）、
 图片节点裁剪与放大（入口按钮 → 对话框 → 确认后派生新节点，原图保留）、
 图片切分（3×2 预设 → 一次产出 6 张派生节点）、
 拖拽吸附（拖拽中出现对齐线、松手清空、关掉开关后不再出现）、
@@ -105,21 +105,49 @@ def node_pos(page, type_):
     )
 
 
+def dock_click(page, name):
+    """点左下角控制坞里的一行（按钮文字 = 图标旁的中文标签）。"""
+    page.get_by_role("button", name=name).click()
+    page.wait_for_timeout(220)
+
+
+def fit_all(page):
+    """「适应」= fitView：把所有节点缩到一屏可见。
+
+    数节点前必须先做这一步：画布开着 onlyRenderVisibleElements，`.react-flow__node`
+    只包含**视口内**的节点，任何「画布上有几个」的断言都得先让整块画布进屏。"""
+    dock_click(page, "适应视图")
+
+
+def zoom_to(page, target, max_clicks=40):
+    """用控制坞的「放大 / 缩小」把视口缩放到目标倍率。
+
+    缩放滑杆已于 2026-10-29 移除（滚轮与这两个按钮已够用，滑杆只多一条要维护的
+    双向同步）。因此这里不能再「填一个值」直达目标，只能按 1.2 步进逼近 —— 它只是
+    **准备测试状态**的辅助，不是被测对象，允许循环点击。
+    """
+    for _ in range(max_clicks):
+        snap = vp_snap(page)
+        if snap is None:
+            return None
+        current = snap["zoom"]
+        if abs(current - target) <= max(0.02, target * 0.03):
+            return current
+        dock_click(page, "缩小画布" if current > target else "放大画布")
+    snap = vp_snap(page)
+    return snap["zoom"] if snap else None
+
+
+# 「整块画布都在屏上」那一档：直接 fitView，不猜具体百分比
+ZOOM_ALL_VISIBLE = None
+
+
 def set_zoom(page, percent):
-    """用左下角缩放滑杆把视口设成指定百分比（绝对值，控件范围 5–200）。
-
-    为什么要有它：画布开着 onlyRenderVisibleElements，`.react-flow__node` 只包含
-    **视口内**的节点。任何「数了画布上有几个节点」的断言，都先得把缩放拉到能一屏
-    装下的档位，否则数出来的是「当前视口内有几个」而不是「画布上有几个」。"""
-    slider = page.get_by_role("slider", name="画布缩放")
-    slider.fill(str(percent))
-    slider.dispatch_event("pointerup")
-    page.wait_for_timeout(500)
-
-
-# 滑杆下限 5%（ZOOM_SLIDER_MIN_PERCENT）：1400×900 的 pane 一屏能装下 2 万多 flow px，
-# 哪怕几十个节点也全在视口内 —— 「整块画布都在屏上」的那一档。
-ZOOM_ALL_VISIBLE = 5
+    """把视口缩放落到指定百分比；`ZOOM_ALL_VISIBLE` 等于 fitView。"""
+    if percent is ZOOM_ALL_VISIBLE:
+        fit_all(page)
+        return
+    zoom_to(page, percent / 100)
 
 
 def pane_blank_point(page):
@@ -203,9 +231,9 @@ def frame_node(page, locator, zoom=100, probe_offset=None):
     onlyRenderVisibleElements，节点不在视口里就**根本不进 DOM**；而任何真按鼠标的
     用例（拖节点、点节点内的按钮）还要求节点在屏幕上真的可按到。切分/放大这类
     「产物落地会带视野过去」的路径会顺手把视野挪走，所以碰具体节点之前先自己摆正。
-    缩放围绕视口中心，因此在 5% 档把节点摆到中心后，回到 100% 它仍在中心。"""
+    缩放围绕视口中心，因此先在 fitView 档把节点摆到中心，再落到 100%，它仍在中心。"""
     if locator.count() == 0:
-        set_zoom(page, ZOOM_ALL_VISIBLE)
+        fit_all(page)
     center_node(page, locator)
     if zoom != ZOOM_ALL_VISIBLE:
         set_zoom(page, zoom)
@@ -731,26 +759,24 @@ def main():
             f"groups={node_positions('group')}",
         )
 
-        # 12. 缩放滑杆：读数与视口 zoom 双向一致（滑杆 = 百分比，视口 = 倍率）
-        slider = page.get_by_role("slider", name="画布缩放")
-        check("缩放滑杆存在", slider.count() == 1)
-        slider.fill("150")
-        # fill 只改值不产生 pointerup，而「拖动中不回灌读数」的闸门是靠 pointerup/keyup 松开的
-        # ——不补这一下，后面滚轮缩放就不会反映到滑杆上，属测试漏动作而非产品缺陷
-        slider.dispatch_event("pointerup")
-        page.wait_for_timeout(300)
+        # 12. 缩放读数：只显示、与视口双向一致（滑杆已移除，改由按钮/滚轮驱动视口）
+        readout = page.locator(".dock-row__value")
+        check("缩放读数存在（不可拖的纯显示）", readout.count() == 1)
+        zoom_before = (vp_snap(page) or {}).get("zoom") or 1
+        dock_click(page, "放大画布")
         snap = vp_snap(page)
         zoom_now = snap["zoom"] if snap else -1
         check(
-            "滑杆拨到 150% 视口跟着放大",
-            snap is not None and abs(zoom_now - 1.5) < 0.02,
-            f"zoom={zoom_now:.4f}",
+            "点「放大」视口跟着放大",
+            snap is not None and zoom_now > zoom_before + 0.01,
+            f"zoom {zoom_before:.3f}->{zoom_now:.3f}",
         )
         check(
-            "滑杆读数与视口同步",
-            page.get_by_text("150%", exact=True).count() >= 1,
+            "读数与视口缩放一致",
+            abs(float(readout.inner_text().rstrip("%")) - zoom_now * 100) <= 1.5,
+            f"readout={readout.inner_text()} zoom={zoom_now:.4f}",
         )
-        # 视口反向驱动滑杆：滚轮缩放后读数应跟着变（不是单向下发）
+        # 视口反向驱动读数：滚轮缩放后读数应跟着变（不是单向下发）
         page.mouse.move(
             rf_box["x"] + rf_box["width"] / 2, rf_box["y"] + rf_box["height"] / 2
         )
@@ -758,14 +784,14 @@ def main():
         page.wait_for_timeout(400)
         zoom_after_wheel = (vp_snap(page) or {}).get("zoom")
         check(
-            "滚轮缩放后滑杆读数跟着更新",
+            "滚轮缩放后读数跟着更新",
             zoom_after_wheel is not None
-            and abs(float(slider.input_value()) - zoom_after_wheel * 100) <= 1.5,
-            f"slider={slider.input_value()} zoom={zoom_after_wheel}",
+            and abs(float(readout.inner_text().rstrip("%")) - zoom_after_wheel * 100)
+            <= 1.5,
+            f"readout={readout.inner_text()} zoom={zoom_after_wheel}",
         )
-        slider.fill("100")
-        slider.dispatch_event("pointerup")
-        page.wait_for_timeout(300)
+        set_zoom(page, 100)
+        page.wait_for_timeout(200)
 
         # 13. 小地图：默认关闭 → 开关打开出现 → 再点关闭（且选择写入 localStorage）
         check("小地图默认不显示", page.locator(".react-flow__minimap").count() == 0)
@@ -1058,14 +1084,12 @@ def main():
             # 先把画布缩小到 30%：聚焦的缩放上限是 1（不放大小图到失真），
             # 当前视口若本来就是 100%，聚焦后 zoom 不变 —— 那是正确行为，不是缺陷。
             # 缩小后再聚焦，才能看出「它确实按节点尺寸重算了视口」。
-            slider = page.get_by_role("slider", name="画布缩放")
-            slider.fill("30")
-            slider.dispatch_event("pointerup")
-            page.wait_for_timeout(500)
+            zoom_to(page, 0.3)
+            page.wait_for_timeout(300)
             zoom_before_focus = vp_snap(page)["zoom"]
             check(
                 "先缩小到 30% 作为聚焦前状态",
-                abs(zoom_before_focus - 0.3) < 0.02,
+                zoom_before_focus < 0.45,
                 f"zoom={zoom_before_focus:.3f}",
             )
             page.get_by_role("button", name="聚焦所选节点").click()
