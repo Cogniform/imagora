@@ -130,19 +130,35 @@ def _params_key(record: dict) -> tuple:
 
 
 def dedupe_generation_history(items: list[dict]) -> list[dict]:
-    """呈现前聚合：同一生成参数（时间不算）的记录只保留最新一条。
+    """呈现前聚合：同一生成参数的**失败**记录只保留最新一条，**成功记录一条都不合并**。
 
-    解决「同一提示词卡片失败多次历史刷屏」：多次失败 → 一条（最新那次）；之后同参数成功 →
-    最新一条即成功记录，失败记录自然被取代（"失败记录变成成功"）；任一参数不一致则不合并。
+    聚合只为一个目的——「同一提示词卡片失败多次历史刷屏」：多次失败 → 一条（最新那次）。
+    但**成功记录是真实产出**：同卡片同提示词同参考图连点两次会真的出两张图（画布上也是两个
+    结果），账本里也因此是两行、两个 output。早先的实现把所有同参数行（含成功）一并折叠，
+    于是「两张图都在、历史里只有一张」——历史与产出对不上（且被折叠掉的那张连「导入画布」
+    的白名单都进不去）。规范：
+
+      - `status == "ok"` 的行**永远保留**（每次成功都是一次独立产出）；
+      - 同组的失败行最多留**最新一条**，且仅当它比该组最新成功更晚（否则已被成功取代）；
+      - 任一参数（mode/prompt/size/quality/refs/inputAssetIds）不一致则不合并。
+
     输入须为最新在前（read_generation_history 的既有顺序），输出保持同样序。
     """
-    seen: set[tuple] = set()
+    seen_ok: set[tuple] = set()
+    kept_error: set[tuple] = set()
     out: list[dict] = []
     for record in items:
         key = _params_key(record)
-        if key in seen:
+        if str(record.get("status", "")) == "ok":
+            # 成功：全留。记下「这组已成功过」，后面的失败行据此被取代。
+            seen_ok.add(key)
+            out.append(record)
             continue
-        seen.add(key)
+        # 失败：本组已出现过成功（更新的那条在前）→ 视为已被取代，丢弃；
+        # 本组已经保留过一条失败 → 再丢（失败刷屏只留最新一条）。
+        if key in seen_ok or key in kept_error:
+            continue
+        kept_error.add(key)
         out.append(record)
     return out
 

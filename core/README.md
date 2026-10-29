@@ -88,11 +88,11 @@ FastAPI 路由（`server.py`）与 CLI（`main.py`）共用的业务层。**不�
 - 注意：`persist_submission_assets` 两端共用，改前查 server 与 main 两处调用；`input_asset_ids` 非空时按 id 解析参考图、不重复注册，为空时按 ref_paths 现场注册兜底；**改存储格式必须先 Handoff 确认**
 
 ### [history.py](history.py)
-- 职责：生成历史 JSONL 读取（容错坏行、筛选、**同参数聚合**）+ 账本迁移（backfill）
-- 关键导出：`read_generation_history()` / `read_generation_history_paged()`（分页 {items,total}，offset 为聚合后偏移，供滚动加载）、`read_raw_history()`（**原始行**口径：不去重、不截断 500 行，供成本统计/计费）、`dedupe_generation_history()`（同参数只留最新一条，时间不算参数，失败不刷屏）、`resolve_output_path()`、`backfill_output_asset_ids()`
+- 职责：生成历史 JSONL 读取（容错坏行、筛选、**聚合只压失败不压成功**）+ 账本迁移（backfill）
+- 关键导出：`read_generation_history()` / `read_generation_history_paged()`（分页 {items,total}，offset 为聚合后偏移，供滚动加载）、`read_raw_history()`（**原始行**口径：不去重、不截断 500 行，供成本统计/计费）、`dedupe_generation_history()`（成功行全留；同参数失败行只留最新一条并让位给更新的成功行）、`resolve_output_path()`、`backfill_output_asset_ids()`
 - 被谁依赖：`server.py`（/api/history、/api/history/import，白名单同源判定——注册表副本 + 账本 output 原路径双收，见 ARCHITECTURE 9.9；/api/history/stats 走 `read_raw_history`）、`core/cost.py`（统计读原始行）
 - 改后必测：`tests/test_core_history.py` + `tests/test_server_helpers.py`
-- 注意：展示与导入同源（ARCHITECTURE 9.9）——改路径解析逻辑必须两端一致；**搜索对换行鲁棒**：query 与账本字段两侧都做空白折叠（账本 prompt 存 CRLF，用户粘进单行搜索框换行被浏览器归一/移除，折叠后才不整串错位）；**列表口径 vs 计费口径**：展示用聚合+500 行上限，统计/预算必须用 `read_raw_history`（聚合会少算费用）
+- 注意：展示与导入同源（ARCHITECTURE 9.9）——改路径解析逻辑必须两端一致；**搜索对换行鲁棒**：query 与账本字段两侧都做空白折叠（账本 prompt 存 CRLF，用户粘进单行搜索框换行被浏览器归一/移除，折叠后才不整串错位）；**列表口径 vs 计费口径**：展示用聚合+500 行上限，统计/预算必须用 `read_raw_history`（聚合会少算费用）；**聚合只该压失败**：成功记录是一次真实产出（同卡片同参数连跑两次就是两张图），连成功一起折会导致「画布两张、历史一条」，且被折掉的那张连导入白名单都进不去（ARCHITECTURE 9.9 第 2 条）
 
 ### [cost.py](cost.py)
 - 职责：成本统计与预算保护——账本原始行聚合（总量/成功率/费用/耗时/按天/按尺寸/按模式）+ 本机预算设置读写 + 超预算判定
