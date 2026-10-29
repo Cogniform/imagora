@@ -1,56 +1,32 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 
 /**
- * 图片「单击 vs 双击」行为区分（Gallery 结果图 / HistoryGallery 生产历史共用）：
- * 单击：延时 250ms 在新窗口打开原图；250ms 内再来一击（双击的第二击）则取消本次打开。
- * 双击：取消未决的单击开原图，改为打开 ZoomModal 放大预览（与画布节点双击放大同一组件）。
- * 预防：双击连开两个新标签——第二击到达时先取消未决的单击延时。
+ * 图片预览的开关状态（Gallery 结果图 / HistoryGallery 生产历史 / 上传区缩略图共用）。
+ *
+ * 交互契约（2026-10-29 起）：**单击不打开任何新页面**，双击才开放大预览；
+ * 复制（图片本体 / 文件路径）与「新标签打开」都在预览弹窗里作为显式按钮提供。
+ *
+ * 早先的实现是「单击延时 250ms 开原图、双击取消那次开窗再放大」。那套时序有两个问题：
+ * ① 单击意味着「跳走」——在结果墙/历史列表里点一下图就把浏览器切到新标签，
+ *    用户只是想看看这张图，却丢了当前上下文；
+ * ② 靠 250ms 延时区分单击与双击，慢一点的双击会先开窗再放大，连闪两个标签。
+ * 现在单击什么都不做，双击直达预览，不再需要任何延时或未决定时器
+ * （`CLICK_OPEN_DELAY_MS` 与它对应的清理逻辑一起删掉了）。
  */
 
 export interface ZoomTarget {
   url: string;
   name: string;
+  /** 图片在本机的绝对路径（预览里「复制路径」用）；未知时不传，那个按钮就不出现 */
+  path?: string | undefined;
 }
-
-/** 单击/双击区分延时：双击的第二击到达前，单击的「开原图」保持未决可取消 */
-export const CLICK_OPEN_DELAY_MS = 250;
 
 export function useImageZoom() {
   const [zoom, setZoom] = useState<ZoomTarget | null>(null);
-  /** 单击延时开原图定时器；双击第二击到达时取消（避免双击连开两个新标签） */
-  const pendingOpenRef = useRef<number | null>(null);
 
-  useEffect(
-    () => () => {
-      if (pendingOpenRef.current) window.clearTimeout(pendingOpenRef.current);
-    },
-    [],
-  );
-
-  /** 单击：延时开原图；延时内再来一击说明是双击，取消本次打开（交给 handleDoubleClick） */
-  const handleClick = useCallback((event: { preventDefault(): void }, item: ZoomTarget) => {
-    event.preventDefault();
-    if (pendingOpenRef.current) {
-      window.clearTimeout(pendingOpenRef.current);
-      pendingOpenRef.current = null;
-      return;
-    }
-    pendingOpenRef.current = window.setTimeout(() => {
-      pendingOpenRef.current = null;
-      window.open(item.url, "_blank", "noopener");
-    }, CLICK_OPEN_DELAY_MS);
-  }, []);
-
-  /** 双击：取消未决的单击开原图，改为放大预览 */
-  const handleDoubleClick = useCallback((item: ZoomTarget) => {
-    if (pendingOpenRef.current) {
-      window.clearTimeout(pendingOpenRef.current);
-      pendingOpenRef.current = null;
-    }
-    setZoom(item);
-  }, []);
-
+  /** 双击缩略图：打开放大预览 */
+  const openZoom = useCallback((item: ZoomTarget) => setZoom(item), []);
   const closeZoom = useCallback(() => setZoom(null), []);
 
-  return { zoom, handleClick, handleDoubleClick, closeZoom };
+  return { zoom, openZoom, closeZoom };
 }

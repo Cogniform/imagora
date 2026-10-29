@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent } from "react";
 import { createPortal } from "react-dom";
 
-import { clampPreviewPan, clampZoom } from "../previewZoom";
+import { copyImageToClipboard, copyTextToClipboard } from "../imageCopy";
+import { actualZoomPercent, clampPreviewPan, clampZoom, zoomForActualPixels } from "../previewZoom";
 import { ModalShell } from "./ModalShell";
 
 /** 工作流条目（保存/加载弹窗共用） */
@@ -117,9 +118,14 @@ export function WorkflowLoadModal({
 }
 
 /* ---------------- 放大预览：滚轮缩放 + 拖拽平移 + 适应窗口 ----------------
- * 状态收敛为一个 view 对象（zoom + pan），所有更新走同一 clampView 出口，
- * 缩放锚定指针位置（transform-origin 为图片中心时的精确补偿），放大后拖拽平移，
- * 双击复位 1:1，Esc / 点击遮罩关闭。缩放与夹紧的数学在 previewZoom.ts（纯函数，有单测）。
+ * 状态收敛为一个 view 对象（zoom + pan），缩放锚定指针位置（transform-origin 为图片中心
+ * 时的精确补偿），放大后拖拽平移，双击回到「适应窗口」，Esc / 点击遮罩关闭。
+ * 缩放与夹紧的数学在 previewZoom.ts（纯函数，有单测）。
+ *
+ * **zoom 的含义**：叠加在「已按窗口缩好的布局盒」之上的倍率，不等于「相对原图」的比例。
+ * 百分比读数与「实际大小」都要经 `layoutScale` 换算（见 previewZoom.ts 的换算三件套），
+ * 否则一张被缩到 68% 的图会显示 100%，而「1:1」也只是回到刚打开时的大小。
+ *
  * 图片直接以 imageUrl 显示（前端统一传注册表派生的 url，画布节点与经典表单共用本组件）。
  * 全屏布局：图片区占满整个窗口（contain 不裁切），控制条/文件名/提示悬浮叠加在底部，
  * 不占图片空间（对照旧版 90vw×calc(100vh-9rem) 容器内布局）。 */
@@ -135,18 +141,28 @@ interface PreviewView {
 export function ZoomModal({
   imageUrl,
   name,
+  copyPath,
   onClose,
 }: {
   /** 可直接显示的完整图片 URL：画布与经典表单统一传注册表派生的 url（组件不再关心路径拼接） */
   imageUrl: string;
   name: string;
+  /** 本机绝对路径：给了才显示「复制路径」（外链 / blob: 占位图没有可复制路径） */
+  copyPath?: string | undefined;
   onClose: () => void;
 }) {
   const [view, setView] = useState<PreviewView>({ zoom: 1, pan: { x: 0, y: 0 } });
   /** 拖拽平移进行中（指针捕获期间持续更新；驱动光标样式与过渡开关） */
   const [dragging, setDragging] = useState(false);
-  /** 图片自然尺寸（onLoad 后获得，供「适应窗口」计算） */
+  /** 复制反馈：null = 没在反馈；"copied" / "failed" + 一句原因 */
+  const [copyState, setCopyState] = useState<{ kind: "copied" | "failed"; text: string } | null>(
+    null,
+  );
+  const copyTimerRef = useRef<number | null>(null);
+  /** 图片自然尺寸（onLoad 后获得，供「适应窗口」与真实百分比计算） */
   const naturalRef = useRef<{ width: number; height: number } | null>(null);
+  /** 同一份自然尺寸的**状态**副本：百分比读数要跟着它重渲染（ref 变了不会触发渲染） */
+  const [natural, setNatural] = useState<{ width: number; height: number } | null>(null);
   /** 图片布局盒（fit 到容器后的实际尺寸，缩放基准） */
   const imageBoxRef = useRef<{ width: number; height: number }>({ width: 0, height: 0 });
   /** 拖拽状态：起点、起始平移、是否已发生位移、按下位置是否在图片本体上 */
@@ -179,6 +195,36 @@ export function ZoomModal({
   }, []);
 
   const reset = useCallback(() => setView({ zoom: 1, pan: { x: 0, y: 0 } }), []);
+
+  /** 测量图片布局盒：onLoad 与窗口尺寸变化后都要重测，否则「实际大小」按旧盒子算。
+   *  自然尺寸同步写进 state —— 百分比读数由它派生，只放 ref 里界面不会更新。 */
+  const measureImage = useCallback(() => {
+    const img = imageRef.current;
+    if (!img) return;
+    imageBoxRef.current = { width: img.clientWidth, height: img.clientHeight };
+    const next = { width: img.naturalWidth, height: img.naturalHeight };
+    naturalRef.current = next;
+    setNatural((prev) =>
+      prev && prev.width === next.width && prev.height === next.height ? prev : next,
+    );
+  }, []);
+
+  // 窗口尺寸变化会改变布局盒（图片是 max-width/max-height 约束的），跟着重测
+  useEffect(() => {
+    const onResize = () => measureImage();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [measureImage]);
+
+  /** 「实际大小（1:1）」：1 图像像素 = 1 屏幕像素。
+   *
+   *  **不能写成 zoom=1**：zoom 是叠在「已适应窗口的布局盒」上的倍率，一张 1024×1536 的图
+   *  在窗口里可能先被缩到 68%，此时 zoom=1 只回到 68%——那正是「1:1 按钮等于适应窗口」
+   *  的老毛病。真实 1:1 的倍率 = 1 / 布局缩放比（见 previewZoom.ts:zoomForActualPixels）。 */
+  const actualSize = useCallback(() => {
+    const zoom = zoomForActualPixels(naturalRef.current, imageBoxRef.current);
+    setView((prev) => clampPan({ zoom, pan: prev.pan }));
+  }, [clampPan]);
 
   /** 适应窗口：按图片自然尺寸缩放到当前视口（全屏布局，控制条悬浮不占位，留 2% 呼吸） */
   const fitToWindow = useCallback(() => {
@@ -225,6 +271,40 @@ export function ZoomModal({
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onClose]);
+
+  /** 复制反馈 1.2s 后自动消失；卸载时清定时器（否则关掉弹窗还在 setState） */
+  useEffect(
+    () => () => {
+      if (copyTimerRef.current) window.clearTimeout(copyTimerRef.current);
+    },
+    [],
+  );
+
+  const showCopyState = (kind: "copied" | "failed", text: string) => {
+    setCopyState({ kind, text });
+    if (copyTimerRef.current) window.clearTimeout(copyTimerRef.current);
+    copyTimerRef.current = window.setTimeout(() => setCopyState(null), 1200);
+  };
+
+  /** 复制图片本体：走 canvas 转 PNG 后写剪贴板（失败给出可读原因，不静默） */
+  const handleCopyImage = async () => {
+    try {
+      await copyImageToClipboard(imageUrl);
+      showCopyState("copied", "已复制图片");
+    } catch (err) {
+      showCopyState("failed", err instanceof Error ? err.message : "复制失败");
+    }
+  };
+
+  /** 复制文件路径（本机绝对路径；没有可复制路径时按钮本就不渲染） */
+  const handleCopyPath = async () => {
+    try {
+      await copyTextToClipboard(copyPath ?? "");
+      showCopyState("copied", "已复制路径");
+    } catch (err) {
+      showCopyState("failed", err instanceof Error ? err.message : "复制失败");
+    }
+  };
 
   const onPointerDown = (event: PointerEvent) => {
     // 未放大：不拦截，冒泡给 overlay 判定（点空白关闭 / 点图片本体不关）
@@ -313,6 +393,7 @@ export function ZoomModal({
             const img = e.currentTarget;
             naturalRef.current = { width: img.naturalWidth, height: img.naturalHeight };
             imageBoxRef.current = { width: img.clientWidth, height: img.clientHeight };
+            measureImage();
           }}
           className="select-none object-contain"
           style={{
@@ -338,15 +419,70 @@ export function ZoomModal({
           <button type="button" className="px-1.5 hover:text-brand" onClick={() => setView((prev) => clampPan({ ...prev, zoom: clampZoom(prev.zoom / ZOOM_STEP) }))} aria-label="缩小">
             －
           </button>
-          <span className="w-12 text-center tabular-nums">{Math.round(view.zoom * 100)}%</span>
+          {/* 读数按**原始像素**算（view.zoom × 布局缩放比），不是 view.zoom 本身：
+              图片先被 max-width/height 缩进窗口，直接乘 100 会对着 68% 的画面写 100%。 */}
+          <span
+            className="w-12 text-center tabular-nums"
+            title={`${natural ? `${natural.width}×${natural.height} · ` : ""}相对原图的实际显示比例`}
+          >
+            {actualZoomPercent(view.zoom, natural, imageBoxRef.current)}%
+          </span>
           <button type="button" className="rounded bg-white/10 px-2 py-0.5 hover:bg-white/20" onClick={fitToWindow}>
             适应窗口
           </button>
-          <button type="button" className="rounded bg-white/10 px-2 py-0.5 hover:bg-white/20" onClick={reset}>
-            1:1
+          {/* 「实际大小」= 1 图像像素 = 1 屏幕像素。旧标签写 `1:1` 且实现是 zoom=1，
+              实际只是「回到刚打开时的大小」，与「适应窗口」完全重合 —— 已改为真 1:1。 */}
+          <button
+            type="button"
+            className="rounded bg-white/10 px-2 py-0.5 hover:bg-white/20"
+            onClick={actualSize}
+            title="实际大小：1 个图像像素 = 1 个屏幕像素（大图会超出窗口，可拖拽查看）"
+          >
+            实际大小
           </button>
         </div>
-        <div className="text-[10px] text-white/50">滚轮缩放 · 放大后拖拽平移 · 双击复位 · 点击空白处或 Esc 关闭</div>
+        {/* 复制 / 打开：图片单击不再跳到新页面（那是旧行为），能力集中到这里做成显式按钮。
+            反馈落在同一行的右侧（已复制 / 失败原因），不弹 toast，也不改按钮文字——改文字会让
+            控制条宽度跳动，鼠标下的按钮会在指针底下挪位置。 */}
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            className="rounded bg-white/10 px-2 py-0.5 hover:bg-white/20"
+            onClick={() => void handleCopyImage()}
+          >
+            复制图片
+          </button>
+          {copyPath && (
+            <button
+              type="button"
+              className="rounded bg-white/10 px-2 py-0.5 hover:bg-white/20"
+              title={copyPath}
+              onClick={() => void handleCopyPath()}
+            >
+              复制路径
+            </button>
+          )}
+          <a
+            href={imageUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="rounded bg-white/10 px-2 py-0.5 hover:bg-white/20"
+          >
+            新标签打开
+          </a>
+          {copyState && (
+            <span
+              role="status"
+              aria-live="polite"
+              className={`max-w-[40vw] truncate text-[10px] ${
+                copyState.kind === "copied" ? "text-emerald-300" : "text-amber-300"
+              }`}
+            >
+              {copyState.text}
+            </span>
+          )}
+        </div>
+        <div className="text-[10px] text-white/50">滚轮缩放 · 放大后拖拽平移 · 双击回到适应窗口 · 点击空白处或 Esc 关闭</div>
       </div>
     </div>,
     document.body,

@@ -50,7 +50,9 @@ describe("ResultPanel 状态面板", () => {
     const { rerender } = render(<ResultPanel status={null} elapsed={0} meta={META} results={[]} />);
     expect(screen.getByText("还没有结果")).toBeTruthy();
     rerender(<ResultPanel status="done" elapsed={0} meta={META} results={[ITEM]} />);
-    expect(screen.getByRole("link", { name: /已保存/ })).toBeTruthy();
+    // 图片不再是链接（单击不再跳新页面，双击才开预览），所以按 alt 找图并断言没有 link
+    expect(screen.getByAltText("已保存")).toBeTruthy();
+    expect(screen.queryByRole("link")).toBeNull();
   });
 
   it("状态切换：旧面板保留淡出层（交叉淡化），到时移除", () => {

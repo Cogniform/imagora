@@ -205,7 +205,14 @@ export function UploadZone({ refs, onChange }: UploadZoneProps) {
           </>
         )}
       </div>
-      {zoom && <ZoomModal imageUrl={zoom.url} name={zoom.name} onClose={() => setZoom(null)} />}
+      {zoom && (
+        <ZoomModal
+          imageUrl={zoom.url}
+          name={zoom.name}
+          {...(zoom.path ? { copyPath: zoom.path } : {})}
+          onClose={() => setZoom(null)}
+        />
+      )}
     </>
   );
 }
