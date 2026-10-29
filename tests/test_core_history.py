@@ -227,6 +227,53 @@ def test_dedupe_input_asset_ids_participate():
     assert ok_one["inputAssetIds"] == ["a"]
 
 
+def test_dedupe_keeps_every_successful_generation():
+    """成功记录不去重：同卡片同提示词同参考图连跑两次 → 两张图，历史就该有两行。
+
+    回归（用户实测）：重复生成两次画布上出现两张图，历史面板却只有一条 —— 因为旧实现把
+    同参数行（含成功）一并折叠成最新一条。产出与历史必须一一对应。
+    """
+    items = [
+        {
+            "time": "2026-10-29 23:22:14",
+            "prompt": "p",
+            "mode": "img2img",
+            "refs": 1,
+            "inputAssetIds": ["a"],
+            "status": "ok",
+            "output": "img2img_231943_009.png",
+            "outputAssetIds": ["dd9c"],
+        },
+        {
+            "time": "2026-10-29 23:18:01",
+            "prompt": "p",
+            "mode": "img2img",
+            "refs": 1,
+            "inputAssetIds": ["a"],
+            "status": "ok",
+            "output": "img2img_231548_008.png",
+            "outputAssetIds": ["d79e"],
+        },
+    ]
+    out = history.dedupe_generation_history(items)
+    assert [i["output"] for i in out] == [
+        "img2img_231943_009.png",
+        "img2img_231548_008.png",
+    ]
+
+
+def test_dedupe_keeps_older_successes_around_a_later_failure():
+    """成功之后的失败照实显示（最新一次没成），但更早的成功仍然各占一行。"""
+    items = [
+        {"time": "4", "prompt": "p", "status": "error"},
+        {"time": "3", "prompt": "p", "status": "ok", "output": "b.png"},
+        {"time": "2", "prompt": "p", "status": "error"},  # 更早的失败被最新那条失败吸收
+        {"time": "1", "prompt": "p", "status": "ok", "output": "a.png"},
+    ]
+    out = history.dedupe_generation_history(items)
+    assert [i["time"] for i in out] == ["4", "3", "1"]
+
+
 def test_dedupe_missing_fields_tolerated():
     """旧行缺字段不炸：缺失字段按空值参与判定，同参聚合、异参保留。"""
     items = [

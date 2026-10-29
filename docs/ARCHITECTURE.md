@@ -47,7 +47,7 @@ Imagora 是本地单机工具，运行时分三层，方向单一：
 | `core/` | 后端核心逻辑（见 2.2），全部无 HTTP 依赖的纯业务模块；**双件**：规则层 core/AGENTS.md + 文件索引 core/README.md |
 | `frontend/` | React SPA（见 2.3）；**双件**：frontend/AGENTS.md（规则）+ frontend/README.md（索引） |
 | `scripts/` | 独立运维脚本：`migrate.py`（存储一步到最新，默认只报告、`--apply` 才落盘备份校验）；**双件**：scripts/AGENTS.md + scripts/README.md |
-| `tests/` | 后端 pytest（473 用例）+ 前端 vitest（1057 用例），全部不调上游；**双件**：tests/AGENTS.md + tests/README.md（逐文件覆盖） |
+| `tests/` | 后端 pytest（475 用例）+ 前端 vitest（1057 用例），全部不调上游；**双件**：tests/AGENTS.md + tests/README.md（逐文件覆盖） |
 | `docs/` | 设计圣经 `ARCHITECTURE.md`（本文档）+ `prompt-import-format.md` / `ecom-prompt-import-format.md`（格式规范）；**双件**：docs/AGENTS.md + docs/README.md |
 | `assets/` | **文档配图**（只服务 markdown 渲染，不是应用资源）：`screenshots/` 放 README「界面一览」的界面截图；**双件**：assets/AGENTS.md + assets/README.md |
 | `_ui-audit/` | 开发期 UI 审计图（本机产物，git 忽略）：由 [scripts/capture.py](../scripts/capture.py) 生成，与门面配图 `assets/screenshots/` 不是一回事 |
@@ -370,7 +370,7 @@ React Flow v12（`@xyflow/react`）受控模式：`nodes` / `edges` 状态由 `C
 | GET | `/api/canvas/images` | 无 | { images[entry+absPath] } |
 | POST | `/api/canvas/image/delete` | { id } | { ok }（注册表移除 + 尽力删文件） |
 | GET | `/api/health/details` | 无 | { ok, checks, issues[] }（启动自检，不泄漏配置） |
-| GET | `/api/history` | ?limit=&offset=&query=&status= | { items, hasMore }（**分页**：default limit 60，offset 为聚合后偏移、按已加载条数推进，hasMore=false 表示取完；存在性以资产注册表为准：带 outputAssetIds 走 resolve_asset，旧行回退 output 路径；参考图 inputAssetIds 解析成 inputRefs[{id,path,url}]，img2img 且 refs>0 但解析为空置 inputRefMissing；同参数记录已聚合——mode/prompt/size/quality/refs/inputAssetIds 一致（时间不算）只留最新一条，失败多次不刷屏、成功后失败记录被取代） |
+| GET | `/api/history` | ?limit=&offset=&query=&status= | { items, hasMore }（**分页**：default limit 60，offset 为聚合后偏移、按已加载条数推进，hasMore=false 表示取完；存在性以资产注册表为准：带 outputAssetIds 走 resolve_asset，旧行回退 output 路径；参考图 inputAssetIds 解析成 inputRefs[{id,path,url}]，img2img 且 refs>0 但解析为空置 inputRefMissing；**聚合只压失败、不压成功**——mode/prompt/size/quality/refs/inputAssetIds 一致（时间不算）的失败行只留最新一条并让位给更新的成功行，**成功行一条都不合并**（同卡片同参数连跑两次 = 两张图 = 两行，产出与历史一一对应）） |
 | POST | `/api/history/import` | { path } | { imported, skipped }（白名单与展示同源且双收账本行两个合法派生路径：注册表副本路径（`resolve_history_asset_path` 优先，历史面板导入传它）+ 账本 output 原路径（画布回流传任务结果 URL 反解，须文件仍存在）；拒绝任意未记录路径；函数 import_history_asset） |
 | POST | `/api/canvas/workflow/save` | { name, nodes, edges } | { ok, path }（图片节点归一化：只存 registryId+元数据） |
 | GET | `/api/canvas/workflow/list` | 无 | { workflows[ name, modified ] }（按修改时间倒序） |
@@ -421,7 +421,7 @@ React Flow v12（`@xyflow/react`）受控模式：`nodes` / `edges` 状态由 `C
 - **一屏全览**：不用 ReactFlow 初始 `fitView` prop——空画布时它会被 React Flow 延迟到「第一个节点出现」才执行，导致新建/上传后视口突然放大跳动（已实测复现）。统一走 `fitCanvasToContent()`（自动整理/加载工作流/恢复存档后调用），`minZoom` 放宽到 0.05，fitView 显式允许缩到 0.02，节点再多也能全览。
 - **自定义光标**：画布空白区域用高对比十字准星 SVG data-URI 光标（细十字 + 白描边 + 中心白底品牌色加号，与拖拽落点示意同款图形，风格统一），平移切抓手；文件拖拽悬停时切系统 `copy` 光标；可拖出按钮（新建卡片/图片组）悬浮时给 grab 光标 + 品牌色呼吸光晕 + 拖拽图标（`.btn-draggable`）——拖入时可放感明确、可拖出暗示明显。
 - **预览弹窗（ZoomModal，画布/经典表单/生产历史共用）**：状态收敛为单一 `view{zoom,pan}`，缩放/夹紧数学在 `previewZoom.ts` 纯函数；**`zoom` 是叠在「已按窗口缩好的布局盒」上的倍率，不是相对原图的比例**——百分比读数与「实际大小」都要经 `layoutScale` 换算（`actualZoomPercent` / `zoomForActualPixels`），否则一张被缩到 68% 的图会显示 100%，「1:1」也只是回到刚打开时的大小（曾与「适应窗口」完全重合）；滚轮以指针为锚缩放，放大后拖拽平移（位移阈值区分点击与拖拽），双击复位，Esc/点击空白关闭。入口一致：画布图片节点双击或操作栏「预览大图」、经典表单参考图缩略图单击（UploadZone，不触发文件选择器）、结果图与生产历史图双击（Gallery / HistoryGallery）。**单击不再打开任何新页面**：早先是「单击延时 250ms 开原图、双击取消那次开窗」，代价是点一下就把浏览器切走（丢了当前上下文），且慢双击会连闪两个标签；现在单击无动作、双击直达预览，复制（图片本体 / 文件路径）与「新标签打开」都在弹窗控制条里做成显式按钮，`useImageZoom` 因此退化为纯开关、不再有任何延时或未决定时器。统一传注册表派生的完整 url，不传存储路径，组件内不再拼 `/api/image?path=`；可复制路径由 `imagePath.ts:imagePathFromUrl` 从 url 反解（外链 / blob / data URL 返回空串 → 该按钮不渲染）。全屏布局：`createPortal` 到 body（脱离含动画 transform 的祖先——如结果栏 `panel-card enter-up` fill both 后 transform 仍非 none，会把 fixed 后代捕获进自己的包含块），图片区占满窗口（contain 不裁切），控制条/文件名/提示悬浮叠加底部、不占图片空间。
-- **生成历史列表视图（HistoryGallery）**：两栏网格卡片——横排卡片：左侧 160px 结果图占满卡片高度（`self-stretch` + `min-h-36` 兜底卡片高度，object-contain 不裁切）| 右侧提示词随容器宽（2 行截断 `line-clamp-2` 超出省略）+ 元信息（时间·质量·尺寸）| 参考图（56px 小图、超出换行）| 全文字按钮横排、`mt-auto` 永远底部对齐（复制提示词/打开目录/导入当前画布）。提示词仅在 2 行真被截断时悬浮补全（`scrollHeight > clientHeight` 判定，短文案不弹多余浮层），浮层宽固定为屏幕 80%（`width: 80vw`）且**水平居中**（`left: 10vw`，左/右各留 10vw 永不出屏）、高随行数自动长；垂直跟随鼠标 y 并 clamp 进视口（下边防溢出靠挪位而非滚动条）、`pointer-events-none`。参考图按注册表解析（`inputRefs`），找不回时保留琥珀「参考图缺失」提示。**性能与聚合**：同参数记录由后端读取层聚合（7.1 /api/history，时间不算参数）——失败刷屏不进入渲染；**分页滚动加载**——首屏 60 条、滚动接近底部 600px 内自动追加（`onScroll` 判定）+ 追加后未占满视口自动续拉，按钮仅兜底，DOM 恒在单页数量级，图片加 `decoding="async"`；注册表在路由内一次加载（`resolve_asset` 预载 entries）供全列表解析，避免逐行读盘。分页 offset 是聚合后偏移，与搜索/状态筛选天然一致（筛选在聚合前）。
+- **生成历史列表视图（HistoryGallery）**：两栏网格卡片——横排卡片：左侧 160px 结果图占满卡片高度（`self-stretch` + `min-h-36` 兜底卡片高度，object-contain 不裁切）| 右侧提示词随容器宽（2 行截断 `line-clamp-2` 超出省略）+ 元信息（时间·质量·尺寸）| 参考图（56px 小图、超出换行）| 全文字按钮横排、`mt-auto` 永远底部对齐（复制提示词/打开目录/导入当前画布）。提示词仅在 2 行真被截断时悬浮补全（`scrollHeight > clientHeight` 判定，短文案不弹多余浮层），浮层宽固定为屏幕 80%（`width: 80vw`）且**水平居中**（`left: 10vw`，左/右各留 10vw 永不出屏）、高随行数自动长；垂直跟随鼠标 y 并 clamp 进视口（下边防溢出靠挪位而非滚动条）、`pointer-events-none`。参考图按注册表解析（`inputRefs`），找不回时保留琥珀「参考图缺失」提示。**性能与聚合**：同参数记录由后端读取层聚合（7.1 /api/history，时间不算参数）——**只压失败、不压成功**（失败刷屏被折成一条，但每次成功都是一张真实产出的图，必须各占一行；早先连成功一起折叠，出现「画布两张图、历史一条」）。**分页滚动加载**——首屏 60 条、滚动接近底部 600px 内自动追加（`onScroll` 判定）+ 追加后未占满视口自动续拉，按钮仅兜底，DOM 恒在单页数量级，图片加 `decoding="async"`；注册表在路由内一次加载（`resolve_asset` 预载 entries）供全列表解析，避免逐行读盘。分页 offset 是聚合后偏移，与搜索/状态筛选天然一致（筛选在聚合前）。
 - **选中操作栏**：选中 ≥1 个节点即出现「运行所选/自动整理/自动连线/设置输出路径/删除所选」，运行与设路径只作用于提示词卡片；自动连线只补选中节点之间的边（`workflow.ts:autoConnectSelection`，候选与新增边两端均限定在选中集合内），未选中节点不受影响；自动整理时未选中的参考图/组作为只读锚点参与对齐。
 - **画布左下角控制坞（`.dock-row`）**：每行 = 图标 + 中文标签（放大/缩小/适应/聚焦/吸附/地图/锁定/帮助），React Flow 自带的「+ − ⛶ 🔒」全部关掉改走同一套 —— 纯图标竖列里除加减号外全靠猜（小地图两个方块状态肉眼无差别），用户反馈「完全糊里糊涂」。开关态用主体色 + 加粗表达，不靠换图标形状。行宽钉死 64px：四位数百分比（`200%`）与两字标签都放得下，且没有哪一行会按内容把整列撑宽。锁定只关「会改布局/视口」的东西（拖节点/框选/平移），滚轮缩放与「适应/聚焦」保持可用。
 - **小地图放左上角**：右下角是日志轮播（最多 5 行、右对齐），放一起会压住刚出现的日志；右上角让给选中操作栏，左下角是控制坞。`Select` 下拉宽度取 `offsetWidth`（布局尺寸）而非 `getBoundingClientRect().width`：后者含祖先 `scale` 变换，画布缩到 30% 时浮层只有触发器可视宽度的 30%，每行被截成 `1536…`。
@@ -530,11 +530,13 @@ React Flow v12（`@xyflow/react`）受控模式：`nodes` / `edges` 状态由 `C
 
 1. **历史展示与导入判定漂移**。现象一：生成历史列表显示图片（`exists=true`）但导入报「不是可用的历史输出」；现象二（画布回流）：每张结果都弹软提示「节点 prompt-xxx：生成成功，但结果导入画布失败」，历史里却能看见图。根因（同一条坑的两个方向，任一侧漂移都会复现）：展示按资产注册表解析（账本带 outputAssetIds → `resolve_asset`，`.assets` 副本在、原 output 文件被移动/删除仍显示），导入白名单必须同时接受账本行的**两个合法派生路径**——注册表副本路径（历史面板「导入画布」传它）与账本 `output` 原路径（画布回流传任务结果 URL 反解的 run_generation 落盘路径）——只收其一必然另一侧失配：曾先只认原路径（原文件被清理后「列表有图、导入失败」，f4126fe 修至注册表副本优先），继而只认注册表副本（画布回流固定失败，本条修复）。规范：导入白名单 = 每个账本行的注册表副本路径 ∪ output 原路径（原路径须文件仍存在）；判定仍只来自账本记录，任意未记录路径拒绝（不能退化成任意路径读取接口）；展示与导入共用 `resolve_history_asset_path`。测试：test_server_helpers.py「只接受记录路径」+「注册表副本路径可导入」+「带 outputAssetIds 时原路径可导入（画布回流回归）」。
 
+2. **「同参数聚合」把成功记录也折掉了 → 产出比历史多**。现象：同一张提示词卡片、同一提示词、同一参考图连跑两次，画布上踏实出现两张图，生成历史里却只有一条（两次的 output / outputAssetIds 只有最新的那行在列表里，被折掉那张连「导入画布」的白名单都进不去）。根因：聚合键（mode/prompt/size/quality/refs/inputAssetIds，**时间不算参数**）本来是为「同一卡片失败多次刷屏」设计的，实现却对所有状态一视同仁地「只留最新一条」——而**成功不是重复，是产出**：同参数再跑一次就是另一张图。规范：聚合只压失败——`status == "ok"` 的行**永远全留**；同组的失败行最多留最新一条，且仅当它比该组最新成功更晚（否则已被成功取代）。判据：账本里同参数 N 条 ok → 列表里就是 N 行；不变量「成功的 outputAssetIds 集合 ⊆ 历史列表可点到的集合」。测试：test_core_history.py「成功记录不去重（连跑两次 = 两行）」「成功之后的失败照实显示（更早的成功仍各占一行）」。
+
 ## 10. 测试与验证
 
 ### 10.1 单元测试
 
-- 后端 pytest：**473 用例**（Windows 含 5 个专属测试，CI 必须 `windows-latest`；默认 tmp 路径的 WinError 5 历史坑已随目录重建恢复，见 AGENTS「活跃坑」）
+- 后端 pytest：**475 用例**（Windows 含 5 个专属测试，CI 必须 `windows-latest`；默认 tmp 路径的 WinError 5 历史坑已随目录重建恢复，见 AGENTS「活跃坑」）
 - 前端 vitest：**1057 用例**；`tsc --noEmit` + `vite build` 成功；`npm run lint` / `uv run ruff check .` 均零告警
 - 文档完整性：`python scripts/check_docs.py`（相对链接可解析 + AGENTS/tests-README/ARCHITECTURE/frontend-README 的测试计数与源码一致；改任何文档后必跑，见 [scripts/README.md](../scripts/README.md)）
 - **逐文件用例 / 覆盖范围 / 变更影响路由（完整表）见 [tests/README.md](../tests/README.md) 文件索引**
