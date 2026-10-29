@@ -3,69 +3,50 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { CLICK_OPEN_DELAY_MS, useImageZoom, type ZoomTarget } from "./useImageZoom";
+import { useImageZoom, type ZoomTarget } from "./useImageZoom";
 
-const ITEM: ZoomTarget = { url: "https://example.com/a.png", name: "测试图" };
-
-/** 单击事件桩：真实 React 事件（MouseEvent）同样满足 preventDefault 结构 */
-const clickEvent = () => ({ preventDefault: vi.fn() });
+const ITEM: ZoomTarget = { url: "/api/image?path=C%3A%5Ca.png", name: "测试图" };
 
 /**
- * 回归测试：Gallery 与 HistoryGallery 共用的「单击开原图 / 双击放大」时序。
- * 锁定：双击第二击必须取消未决的单击开窗（否则双击连开两个新标签）；
- *       卸载时必须清掉未决延时（否则幽灵开窗）。
+ * 回归测试：Gallery / HistoryGallery / 上传区共用的图片预览开关。
+ *
+ * 锁定 2026-10-29 起的交互契约：**单击不打开任何新页面**，双击才开放大预览。
+ * 旧实现是「单击延时 250ms 开原图、双击取消那次开窗」，问题是单击即跳走（丢了当前
+ * 上下文）且慢双击会连闪两个标签；现在没有任何延时/未决定时器，
+ * 所以整个测试里 `window.open` 必须一次都没被调用。
  */
-describe("useImageZoom（单击开原图 / 双击放大，250ms 区分）", () => {
+describe("useImageZoom（单击不跳转，双击开预览）", () => {
   afterEach(() => {
-    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
-  it("单击：延时 250ms 后开原图新标签（期间不立即打开）", () => {
-    vi.useFakeTimers();
-    const open = vi.spyOn(window, "open").mockReturnValue(null);
+  it("初始无预览", () => {
     const { result } = renderHook(() => useImageZoom());
-
-    act(() => result.current.handleClick(clickEvent(), ITEM));
-    expect(open).not.toHaveBeenCalled();
-
-    act(() => vi.advanceTimersByTime(CLICK_OPEN_DELAY_MS));
-    expect(open).toHaveBeenCalledWith(ITEM.url, "_blank", "noopener");
+    expect(result.current.zoom).toBeNull();
   });
 
-  it("双击：第二击取消未决开原图，改为放大预览（不连开两个标签）", () => {
-    vi.useFakeTimers();
+  it("openZoom 打开预览；全程不开新标签页", () => {
     const open = vi.spyOn(window, "open").mockReturnValue(null);
     const { result } = renderHook(() => useImageZoom());
 
-    act(() => result.current.handleClick(clickEvent(), ITEM)); // 第一击
-    act(() => result.current.handleClick(clickEvent(), ITEM)); // 第二击：取消未决的开原图
-    act(() => result.current.handleDoubleClick(ITEM)); // dblclick 事件到达
+    act(() => result.current.openZoom(ITEM));
 
-    act(() => vi.runAllTimers());
-    expect(open).not.toHaveBeenCalled();
     expect(result.current.zoom).toEqual(ITEM);
+    expect(open).not.toHaveBeenCalled();
   });
 
   it("closeZoom 关闭预览", () => {
     const { result } = renderHook(() => useImageZoom());
 
-    act(() => result.current.handleDoubleClick(ITEM));
-    expect(result.current.zoom).toEqual(ITEM);
-
+    act(() => result.current.openZoom(ITEM));
     act(() => result.current.closeZoom());
+
     expect(result.current.zoom).toBeNull();
   });
 
-  it("卸载时清理未决延时，不产生幽灵开窗", () => {
-    vi.useFakeTimers();
-    const open = vi.spyOn(window, "open").mockReturnValue(null);
-    const { result, unmount } = renderHook(() => useImageZoom());
-
-    act(() => result.current.handleClick(clickEvent(), ITEM));
-    unmount();
-    act(() => vi.runAllTimers());
-
-    expect(open).not.toHaveBeenCalled();
+  it("hook 不再暴露单击开窗入口（删掉才不会有人把它接回 onClick）", () => {
+    const { result } = renderHook(() => useImageZoom());
+    expect(result.current).not.toHaveProperty("handleClick");
+    expect(result.current).not.toHaveProperty("handleDoubleClick");
   });
 });

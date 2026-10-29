@@ -11,6 +11,7 @@ import {
   type HistoryStats,
 } from "../api";
 import { errMessage } from "../format";
+import { imagePathFromUrl } from "../imagePath";
 import { useImageZoom } from "../useImageZoom";
 import { CostBoard } from "./CostBoard";
 import { ModalShell } from "./ModalShell";
@@ -118,8 +119,8 @@ export function HistoryGallery({
   const statusRef = useRef(status);
   queryRef.current = query;
   statusRef.current = status;
-  /** 单击开原图 / 双击放大预览（与经典表单结果图同款交互，共用 ZoomModal） */
-  const { zoom, handleClick, handleDoubleClick, closeZoom } = useImageZoom();
+  /** 双击放大预览（与经典表单结果图同款交互，共用 ZoomModal）；单击不跳转 */
+  const { zoom, openZoom, closeZoom } = useImageZoom();
 
   /* ---------------- 成本看板 ---------------- */
   const [stats, setStats] = useState<HistoryStats | null>(null);
@@ -293,21 +294,20 @@ export function HistoryGallery({
                 <li key={`${item.time}-${item.output}-${index}`} className="flex gap-3 rounded-lg border border-neutral-200 surface-float p-3">
                   <div className="w-40 min-h-36 flex-none self-stretch overflow-hidden bg-neutral-100">
                     {item.url ? (
-                      <a
-                        href={item.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="block h-full w-full"
-                        title="单击新窗口打开原图 · 双击放大预览"
+                      <div
+                        className="h-full w-full cursor-zoom-in"
+                        title="双击放大预览"
+                        onDoubleClick={() =>
+                          openZoom({
+                            url: item.url ?? "",
+                            name: item.prompt || "生成结果",
+                            // 历史记录的 path 就是本机绝对路径，直接给弹窗做「复制路径」
+                            ...(item.path ? { path: item.path } : {}),
+                          })
+                        }
                       >
-                        <div
-                          className="h-full w-full cursor-zoom-in"
-                          onClick={(e) => handleClick(e, { url: item.url, name: item.prompt || "生成结果" })}
-                          onDoubleClick={() => handleDoubleClick({ url: item.url, name: item.prompt || "生成结果" })}
-                        >
-                          <img src={item.url} alt={item.prompt || "生成结果"} loading="lazy" decoding="async" className="h-full w-full object-contain" />
-                        </div>
-                      </a>
+                        <img src={item.url} alt={item.prompt || "生成结果"} loading="lazy" decoding="async" className="h-full w-full object-contain" />
+                      </div>
                     ) : (
                       <div className="flex h-full w-full items-center justify-center px-1">
                         <span className="text-center text-[11px] leading-tight text-neutral-400">{item.status === "error" ? "生成失败" : "文件已移动"}</span>
@@ -323,9 +323,16 @@ export function HistoryGallery({
                           <div
                             key={ref.id}
                             className="h-14 w-14 cursor-zoom-in overflow-hidden border border-neutral-200 bg-neutral-100"
-                            title="单击新窗口打开参考图 · 双击放大预览"
-                            onClick={(e) => handleClick(e, { url: ref.url, name: "参考图" })}
-                            onDoubleClick={() => handleDoubleClick({ url: ref.url, name: "参考图" })}
+                            title="双击放大预览"
+                            onDoubleClick={() =>
+                              openZoom({
+                                url: ref.url,
+                                name: "参考图",
+                                ...(imagePathFromUrl(ref.url)
+                                  ? { path: imagePathFromUrl(ref.url) }
+                                  : {}),
+                              })
+                            }
                           >
                             <img src={ref.url} alt="参考图" loading="lazy" decoding="async" className="h-full w-full object-cover" />
                           </div>
@@ -361,7 +368,14 @@ export function HistoryGallery({
           )}
         </div>
       </ModalShell>
-      {zoom && <ZoomModal imageUrl={zoom.url} name={zoom.name} onClose={closeZoom} />}
+      {zoom && (
+        <ZoomModal
+          imageUrl={zoom.url}
+          name={zoom.name}
+          {...(zoom.path ? { copyPath: zoom.path } : {})}
+          onClose={closeZoom}
+        />
+      )}
 
     </>
   );

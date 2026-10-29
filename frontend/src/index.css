@@ -518,25 +518,42 @@ html[data-wallpaper="on"] select {
   color: #52606f;
 }
 .studio-canvas .react-flow__controls-button:hover { background: color-mix(in srgb, var(--color-brand) 10%, white); color: var(--color-brand); }
-/* 缩放滑杆：塞进 Controls 的按钮栈里（30px 宽的一列）。
- * 垂直 range 用 writing-mode 实现——不要用 transform: rotate(90deg)，
- * 旋转后命中区与视觉位置会错位（拖动点偏移一个滑杆高度），键盘方向键语义也会反。
- * 轨道与滑块只用品牌色 + 中性色，不引入新色板。 */
-.zoom-slider {
-  writing-mode: vertical-lr;
-  direction: rtl;
-  width: 14px;
-  height: 68px;
-  margin: 0;
-  accent-color: var(--color-brand);
-  cursor: pointer;
-  background: transparent;
-  appearance: none;
+/* 画布左下角控制坞：每一行 = 图标 + 中文标签，竖排成一列、同宽同高。
+ *
+ * 为什么要有标签：这一列原本只有图标（`+ − ⛶ 🔒 ▣ ◎`），除加减号外全靠猜 ——
+ * 小地图的「方点 / 方块」两个状态肉眼几乎一样，锁与聚焦也不自明，用户的第一反应是
+ * 「完全糊里糊涂」。标签才是语义来源，别改回纯图标（样式可以改，文字不能删）。
+ * 宽度钉死 64px：四位数百分比（`200%`）与两字标签都放得下，也保证没有哪一行按内容
+ * 撑宽整列（曾因为 `115%` 撑开导致左边缘参差）。 */
+.studio-canvas .react-flow__controls .dock-row {
+  width: 64px;
+  height: 30px;
+  justify-content: flex-start;
+  gap: 4px;
+  padding-inline: 8px;
+  color: #52606f;
 }
-.zoom-slider:focus-visible {
-  outline: 2px solid var(--color-brand);
-  outline-offset: 2px;
-  border-radius: 4px;
+.dock-row__label {
+  font-size: 10px;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+/* 开关态（吸附 / 小地图 / 锁定）：主体色 + 加粗，一眼看出「这个现在是开着的」。
+ * 不靠图标换形状表达状态 —— 那正是原来两个方块图标认不出来的原因。 */
+.studio-canvas .react-flow__controls .dock-row.is-on {
+  color: var(--color-brand);
+  font-weight: 600;
+}
+/* 缩放读数那一行：只有数字，不可交互（滑杆已移除，见 CanvasPage 注释） */
+.studio-canvas .react-flow__controls .dock-row--readout {
+  cursor: default;
+}
+.dock-row__value {
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  width: 100%;
+  font-weight: 600;
 }
 /* 小地图：底色走 --surface-float 与浮层同 token；边框/圆角与 Controls 保持一套语言 */
 .studio-canvas .react-flow__minimap {

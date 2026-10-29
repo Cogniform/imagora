@@ -628,6 +628,44 @@ describe("LOD abstract mode", () => {
     expect(stacks).toHaveLength(3);
   });
 
+  /**
+   * 叠卡的几何与配色约束（真机截图踩出来的）：
+   * ① 只往**左上**错开，错开量必须小于根节点 `pt-3 pl-3` 预留的 12px —— 否则叠卡伸出卡面、
+   *    压到相邻节点，看起来像一堆没对齐的纸片糊在外面；
+   * ② 不许旋转 —— 每组朝向不同会让整块画布显乱；
+   * ③ 各层同一套底色（bg-brand/5）—— 混用 5% / 9% 会出现「最底层发白、前两层发红」的割裂感。
+   */
+  it("叠卡只向左上错开、无旋转、各层同色", () => {
+    const props = nodeProps<typeof GroupNode>({
+      id: "group-1",
+      type: "group",
+      data: { name: "图片组", imageCount: 6, totalSize: 6 * 1024 * 1024 },
+      selected: false,
+      onDelete: vi.fn(),
+    });
+
+    const { container } = render(<ReactFlowProvider><GroupNode {...props} /></ReactFlowProvider>);
+    const stacks = Array.from(
+      container.querySelectorAll<HTMLElement>('[aria-hidden="true"].pointer-events-none'),
+    );
+    expect(stacks.length).toBeGreaterThan(0);
+
+    for (const stack of stacks) {
+      const transform = stack.style.transform;
+      // 只向左上：translate(-Npx, -Npx)
+      const matched = transform.match(/translate\((-[\d.]+)px, (-[\d.]+)px\)/);
+      expect(matched, `叠卡位移应只向左上，实际：${transform}`).toBeTruthy();
+      const [x, y] = [Number(matched?.[1]), Number(matched?.[2])];
+      // 错开量必须 ≤ 12px（根节点 pt-3/pl-3 预留的正是 12px）
+      expect(Math.abs(x)).toBeLessThanOrEqual(12);
+      expect(Math.abs(y)).toBeLessThanOrEqual(12);
+      expect(transform).not.toContain("rotate");
+      // 各层同一套底色 + 细边，不靠换色造深度
+      expect(stack.className).toContain("bg-brand/5");
+      expect(stack.className).toContain("border-brand/10");
+    }
+  });
+
   it("caps the stack at three cards no matter how many images are in the group", () => {
     const props = nodeProps<typeof GroupNode>({
       id: "group-1",

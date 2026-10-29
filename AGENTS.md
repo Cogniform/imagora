@@ -38,13 +38,16 @@
 - 改**弹窗内的浮层 / Esc 行为**（下拉、日期选择、自绘浮层）→ 浮层开关必须配 `popupLayer` 的 push/pop，否则 Esc 会连弹窗一起关掉 → 跑 `pytest` 无关、跑 `npm test`（`popupLayer.test.ts` + `ModalShell.test.tsx`）→ 防错条见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) 9.4 第 13 条
 - 改配置加载 / 本机覆盖通道 / 配置写入接口 → 查 [core/README.md](core/README.md) 的 config.py、config_write.py、config_guard.py 三节 → 跑 `pytest tests/test_core_config.py tests/test_core_config_override.py tests/test_core_config_write.py tests/test_server_config_write.py tests/test_server_config_profile.py` → 契约同步 [docs/config-write-api-design.md](docs/config-write-api-design.md)
 - 改**本机来源层**（`providers.local.json` / 「添加第三方供应商」）→ 查 [core/README.md](core/README.md) 的 provider_store.py 节 → 跑 `pytest tests/test_core_provider_store.py tests/test_server_config_providers.py` → 前端跑 `npm test`（`ProviderModal.test.tsx`）→ **三条不许破的边界**：密钥只进 `.env` 不进本机来源文件、新建来源默认不切换、校验失败必须不落盘
+- 改**输出路径**（默认 / 上次使用 / 每卡路径）→ 机制与边界只在 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) 8.5「输出路径分两件事」→ 后端 `pytest tests/test_server_helpers.py`（`resolve_default_output_dir` 优先级、`/api/output-dir/default` 校验）→ 前端 `npm test`（`CanvasPage.baseline.test.tsx` 的默认路径用例）
+- 改**图片预览 / 单击双击** → 查 [frontend/README.md](frontend/README.md) 的 `useImageZoom.ts` / `ZoomModal` 条目 → 跑 `npm test`（`useImageZoom.test.ts` 锁定「单击不开新标签页」+ `WorkflowModals.test.tsx` 的复制入口）→ 契约见 ARCHITECTURE 8.3 预览弹窗
+- 改测试隔离 / 报「测试打到了上游」→ 查 [tests/README.md](tests/README.md) 的隔离节 → 防错条见 ARCHITECTURE 9.5（任务池 worker 会在 monkeypatch 撤销后真调上游）
 - 改 [scripts/migrate.py](scripts/migrate.py) 或存储格式 → 查 [scripts/README.md](scripts/README.md) → 跑 `pytest tests/test_core_migrate.py` → **必须先 Handoff 确认（硬边界）**
 - 改测试文件 → 查 [tests/README.md](tests/README.md) → 按模块筛选跑 → 增/删用例后更新本文档「仪表盘」数字
 
-## 仪表盘（最近验证快照，2026-09-29，main）
+## 仪表盘（最近验证快照，2026-10-29，main）
 
-- 后端 pytest：**467 passed**（命令与逐文件覆盖见 [tests/README.md](tests/README.md)）
-- 前端 vitest：**1040 passed**；tsc + vite build 成功；lint / ruff 零告警（命令见 [frontend/README.md](frontend/README.md)、[tests/README.md](tests/README.md)）
+- 后端 pytest：**473 passed**（命令与逐文件覆盖见 [tests/README.md](tests/README.md)）
+- 前端 vitest：**1057 passed**；tsc + vite build 成功；lint / ruff 零告警（命令见 [frontend/README.md](frontend/README.md)、[tests/README.md](tests/README.md)）
 - E2E [verify_canvas.py](frontend/e2e/verify_canvas.py)：**105/105 PASS**；[verify_provider.py](frontend/e2e/verify_provider.py)：**38/38 PASS**（前置：起 7860 服务，见 [frontend/README.md](frontend/README.md)；两条都可用 `--base` 打隔离实例，verify_provider 另需 `--app-root` 对齐服务进程的应用根，否则断言的是仓库里那份真实 `providers.local.json`）
 - 迁移（v1→v2 / .canvas→.assets / 账本回填）已完成，日常无需执行（见 [scripts/README.md](scripts/README.md)）
 
@@ -83,6 +86,7 @@ CI 在 push 后自动跑，红叉处理顺序：`gh run view <id>` 看哪个 job
 
 - `%TEMP%\pytest-of-speak` 的 ACL 若被改坏会报 WinError 5（多为管理员权限进程遗留）：提权删除该目录即恢复（pytest 自动重建），此前"必须 `--basetemp`"的绕法已不必要；CI 固定用 `${{ runner.temp }}`（见 [.github/workflows/ci.yml](.github/workflows/ci.yml)）
 - 测试用户数据默认隔离（autouse `isolate_user_data`，见 [tests/conftest.py](tests/conftest.py)）：pytest **不得**读写真实 `output/`、`logs/`（历史坑：`asset_iso` 曾为 opt-in，漏用即往真实资产库写假图）
+- **测试会真调上游生图（2026-10-29 实测，已堵）**：提交类用例把任务丢进全局 `task_manager`，worker 可能在该用例 monkeypatch **撤销之后**才跑 → 函数级替身失效 → 真发请求 + 写进用户 `output/`（曾留下 prompt「repaint the sky」的真图，费用 0 但确实打了上游）。对策：`conftest.py` 的 `forbid_real_generation` session 级兜底 + 只登记的 `task_manager` 替身 + `config.DEFAULT_OUTPUT_DIR` 一并指向 tmp。机制见 ARCHITECTURE 9.5
 - [server.py](server.py) LSP 报「Argument missing for parameter id」是误报（GenerationTask.id 有 default_factory），勿修
 - `dist/` git 忽略：改前端后 `npm run build` 才在浏览器生效；CI/E2E 须自建（见 [frontend/README.md](frontend/README.md)）
 - 改后端（`server.py` / `core`）后行为没变：清 `__pycache__` 再重启服务（`Remove-Item -Recurse -Force __pycache__, core\__pycache__`）——曾出现旧字节码被复用、新接口字段不下发

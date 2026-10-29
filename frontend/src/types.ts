@@ -158,7 +158,15 @@ export interface ProviderDeleteResult {
 export interface AppConfig {
   sizes: SizeOption[];
   qualities: string[];
+  /** 新建提示词卡片的输出路径（显式默认 > 上次使用 > 按窗口分区）。仍可逐卡手动改。 */
   defaultOutputDir: string;
+  /** 上面那个值的来源：`explicit` = 用户手动设过（稳定，跑图不改它）；
+   *  `last` = 自动跟「上次生成落在哪」（**任何一次生成都会把它带走**）；
+   *  `window` = 都没设过，按窗口分区 `output/win{N}`。
+   *  界面据此区分「你定的」与「自动的」——两者长得一样时用户没法判断自己设没设上。 */
+  defaultOutputDirSource?: "explicit" | "last" | "window";
+  /** 用户显式设定的默认输出路径；null / 缺省 = 没设过 */
+  savedDefaultOutputDir?: string | null;
   /** 窗口编号（多开页面时由后端分配或沿用已有编号） */
   windowId: number;
   /** 当前中转站 base URL（config.json profile 解析，前端展示用） */

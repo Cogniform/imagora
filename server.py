@@ -98,6 +98,12 @@ _REF_SEQ = itertools.count(1)
 REF_MAX_AGE_SECONDS = 24 * 3600
 # 上次输出路径记录：服务重启后默认沿用（无记录才按窗口分区）
 LAST_OUTPUT_DIR_FILE = os.path.join(config.DEFAULT_OUTPUT_DIR, ".last_output_dir")
+# 用户**显式设定**的默认输出路径（工具栏「默认输出路径」手动选目录时写入）。
+# 与上面的「上次使用」是两件事，别合并：
+#   ・上次使用 = 运行期事实，每次生成成功都会被那张卡片的路径覆盖 → 会自己漂移
+#   ・显式默认 = 用户意图，只有再手动选一次才会变 → 生成永远不碰它
+# 早期把两者当成同一个值，表现是「跑一张旧卡片，新建卡片的默认路径就被它带跑了」。
+DEFAULT_OUTPUT_DIR_FILE = os.path.join(config.DEFAULT_OUTPUT_DIR, ".default_output_dir")
 # 串行化有界面副作用的系统调用（tkinter 选择器、explorer 置前）
 _UI_LOCK = threading.Lock()
 
@@ -129,6 +135,57 @@ def save_last_output_dir(path: str) -> None:
             f.write(path)
     except OSError:
         pass
+
+
+def load_default_output_dir() -> str | None:
+    """读取用户显式设定的默认输出路径；未设定 / 读取失败返回 None。
+
+    自愈但与「上次使用」略有不同：目录当前不存在（外接盘没挂上、网络盘掉线）
+    视为**本轮无效**，但**不删除记录文件** —— 盘回来之后这条设置应当照旧生效。
+    """
+    try:
+        with open(DEFAULT_OUTPUT_DIR_FILE, encoding="utf-8") as f:
+            path = f.read().strip()
+    except OSError:
+        return None
+    if not path or not os.path.isdir(path):
+        return None
+    return path
+
+
+def save_default_output_dir(path: str) -> bool:
+    """写入（path 非空）或清除（path 为空）显式默认输出路径；成功返回 True。
+
+    记录失败要能被调用方看见（用户点了「默认输出路径」却没记住，比不生效更难查），
+    所以这里不像 save_last_output_dir 那样静默吞掉异常。
+    """
+    try:
+        if not path:
+            if os.path.exists(DEFAULT_OUTPUT_DIR_FILE):
+                os.unlink(DEFAULT_OUTPUT_DIR_FILE)
+            return True
+        os.makedirs(os.path.dirname(DEFAULT_OUTPUT_DIR_FILE), exist_ok=True)
+        with open(DEFAULT_OUTPUT_DIR_FILE, "w", encoding="utf-8") as f:
+            f.write(path)
+        return True
+    except OSError:
+        return False
+
+
+def resolve_default_output_dir(window_id: int) -> tuple[str, str]:
+    """算出「新建卡片该落哪」及其来源：显式默认 > 上次使用 > 按窗口分区。
+
+    返回 (路径, 来源)，来源取 "explicit" / "last" / "window"。
+    前端用来源区分「这是你定的」与「这是自动的（会被跑图带跑）」，
+    否则两者在界面上长得一样，用户没法判断自己到底设没设成功。
+    """
+    explicit = load_default_output_dir()
+    if explicit:
+        return explicit, "explicit"
+    last = load_last_output_dir()
+    if last:
+        return last, "last"
+    return os.path.join(config.DEFAULT_OUTPUT_DIR, f"win{window_id}"), "window"
 
 
 def safe_ref_path(path: str) -> str | None:
@@ -266,8 +323,13 @@ def health_details():
     checks = {
         "apiKey": has_api_key(),
         "frontendBuilt": (DIST_DIR / "index.html").is_file(),
+        # 探测「新建卡片实际会落到的目录」：显式默认 > 上次使用 > output/。
+        # 显式默认所在盘掉线时 load_default_output_dir 会返回 None（自愈），
+        # 这里探测的正是回退后的那个 —— 与实际写入位置一致，不会误报「不可写」。
         "outputWritable": _directory_writable(
-            load_last_output_dir() or config.DEFAULT_OUTPUT_DIR
+            load_default_output_dir()
+            or load_last_output_dir()
+            or config.DEFAULT_OUTPUT_DIR
         ),
     }
     issues = []
@@ -285,21 +347,25 @@ def get_config(win: int | None = None):
     """前端初始化配置。
 
     多开页面：前端传已有窗口号（URL ?win= 或 window.name 记忆）则沿用，
-    否则服务端原子分配下一个编号；默认输出目录按窗口分区 output/win{N}。
+    否则服务端原子分配下一个编号；默认输出目录见 resolve_default_output_dir
+    （显式默认 > 上次使用 > 按窗口分区 output/win{N}）。
 
     令牌响应头由 ConfigGuardMiddleware 统一挂（它能看到每个响应），
     这里不接收 Response 参数——既有测试与调用方按 get_config(win) 直调，签名须保持可用。
     """
     window_id = win if win and win > 0 else _next_window_id()
-    # 默认输出路径：优先记住的上次路径（服务重启沿用），无记录才按窗口分区
-    last_dir = load_last_output_dir()
-    default_dir = last_dir or os.path.join(config.DEFAULT_OUTPUT_DIR, f"win{window_id}")
+    default_dir, default_source = resolve_default_output_dir(window_id)
     # 一律经 config.xxx 取运行期值：顶层 `from core.config import ...` 是导入时绑定的
     # 快照，配置热加载后拿到仍是旧值（见 _config_file_state 的同类说明）。
     return {
         "sizes": config.SIZE_OPTIONS,
         "qualities": config.QUALITY_OPTIONS,
         "defaultOutputDir": default_dir,
+        # 来源让前端能区分「你手动设定的默认」与「自动跟上次用的」：
+        # 后者会被任何一次生成覆盖，界面上必须能看出来，否则用户以为设过了。
+        "defaultOutputDirSource": default_source,
+        # 显式设定的那条（null = 没设过）；工具栏据此显示「默认输出路径」的状态
+        "savedDefaultOutputDir": load_default_output_dir(),
         "windowId": window_id,
         "baseUrl": config.BASE_URL,
         "apiPath": config.API_PATHS.get("generations", ""),
@@ -971,9 +1037,64 @@ def delete_ref(path: str = Body(..., embed=True)):
 
 @app.post("/api/output-dir")
 def remember_output_dir(path: str = Body(..., embed=True)):
-    """记住输出路径：用户一改路径前端即上报，服务重启后 /api/config 默认返回它"""
+    """记住「上次用过的输出路径」：用户一改路径前端即上报，服务重启后作为兜底默认。
+
+    注意这**不是**默认输出路径 —— 生成成功时 run_generation 也会写它（见那里），
+    所以它会被跑来跑去的历史卡片带着漂移。要「定住」得用下面的
+    /api/output-dir/default（显式默认优先于本记录）。
+    """
     save_last_output_dir(str(path))
     return {"ok": True}
+
+
+@app.post("/api/output-dir/default")
+def set_default_output_dir(
+    path: str = Body("", embed=True), win: int = Body(0, embed=True)
+):
+    """设定「新建提示词卡片的默认输出路径」（工具栏按钮手动选目录后调用）。
+
+    path 为空 = 清除设定，回到「上次使用 → 按窗口分区」的自动行为。
+    与 /api/output-dir 的差别：这条是**用户意图**，只有再设一次才会变；
+    run_generation 永远不写它 —— 这正是「跑一张旧卡片就把默认路径带跑」的修复点。
+
+    写入前校验：必须是绝对路径、且目录可创建可写（不可写就明确 400，
+    不要等到用户下次生成失败才发现）。
+    """
+    target = str(path or "").strip()
+    window_id = win if isinstance(win, int) and win > 0 else 0
+
+    if target:
+        if not os.path.isabs(target):
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "invalid_value",
+                    "reason": "输出路径必须是绝对路径（如 D:\\\\图\\\\产品）",
+                },
+            )
+        target = os.path.abspath(target)
+        if not _directory_writable(target):
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "not_writable",
+                    "reason": "该目录不可写，请换一个目录",
+                },
+            )
+
+    if not save_default_output_dir(target):
+        raise HTTPException(
+            status_code=500,
+            detail={"error": "write_failed", "reason": "默认输出路径未能保存"},
+        )
+
+    effective, source = resolve_default_output_dir(window_id)
+    return {
+        "ok": True,
+        "savedDefaultOutputDir": load_default_output_dir(),
+        "defaultOutputDir": effective,
+        "defaultOutputDirSource": source,
+    }
 
 
 @app.post("/api/canvas/upload")
@@ -1096,6 +1217,9 @@ def select_folder(body: dict):
 
     多窗口并发调用 tkinter 会触发 Tcl 线程错误，用 _UI_LOCK 串行化
     （对话框是模态的，用户同一时刻只会操作一个，锁不会阻塞正常使用）。
+
+    响应里带 `canceled`：调用方要区分「选了同一个目录」与「直接取消」——
+    只比 path 会把取消当成确认（「设定默认输出路径」会被一次取消悄悄改成隐式设定）。
     """
     current = str(body.get("current", ""))
     try:
@@ -1108,9 +1232,14 @@ def select_folder(body: dict):
             root.attributes("-topmost", True)
             folder = filedialog.askdirectory(title="选择输出文件夹")
             root.destroy()
-            return {"path": folder if folder else current}
+            return {
+                "path": folder if folder else current,
+                "canceled": not bool(folder),
+            }
     except Exception:
-        return {"path": current}
+        # 选择器不可用（无图形环境 / tkinter 缺组件）：按「取消」处理，
+        # 让调用方保持原值不动，而不是误以为选中了什么。
+        return {"path": current, "canceled": True}
 
 
 def size_cost(size: str, model_id: str | None = None) -> float:
@@ -1194,8 +1323,15 @@ def run_generation(task: GenerationTask) -> None:
     失败写 task.error（TaskManager 据此置 failed）。临时兜底文件由 TaskManager 统一清理。
     保存路径统一以绝对路径进消息（前端动态显示本机路径 + 点击复制词条），不再相对化。
     """
+    # 空 output_dir = 调用方（批量接口 / 脚本）没指定：用用户设定的默认路径。
+    # 注意**只读不写** —— 这里绝不回写默认，否则「跑一张旧卡片就把默认路径带跑」
+    # （历史 bug：默认值等于「上次生成落在哪」，用户设过的路径会被历史卡片顶掉）。
     out_dir = os.path.abspath(
-        (task.output_dir.strip() or config.DEFAULT_OUTPUT_DIR).rstrip("\\/")
+        (
+            task.output_dir.strip()
+            or load_default_output_dir()
+            or config.DEFAULT_OUTPUT_DIR
+        ).rstrip("\\/")
     )
     os.makedirs(out_dir, exist_ok=True)
     stamp = time.strftime("%Y%m%d_%H%M%S")
@@ -1266,7 +1402,9 @@ def run_generation(task: GenerationTask) -> None:
     ok_count = sum(1 for r in results if r.get("status") == "ok")
     messages.append(f"本次成功 {ok_count} 张 · 费用 {total_cost:.2f} 元")
 
-    # 记住本次输出路径：下次服务启动默认沿用（生成失败不算"用过"）
+    # 记住「上次用过的路径」：仅作为**没设显式默认时**的兜底 + 自检探测用
+    # （生成失败不算"用过"）。它**不参与**显式默认的判定 —— 见 resolve_default_output_dir
+    # 的优先级说明：用户手动设过的默认必须稳，不能被任何一次生成改写。
     if ok_count > 0:
         save_last_output_dir(out_dir)
 

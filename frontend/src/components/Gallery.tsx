@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { formatBytes } from "../format";
+import { imagePathFromUrl } from "../imagePath";
 import type { ResultItem } from "../types";
 import { useImageZoom } from "../useImageZoom";
 import { ZoomModal } from "./WorkflowModals";
@@ -38,12 +39,12 @@ function AspectImage({ url, alt }: { url: string; alt: string }) {
 
 /**
  * 结果画廊：成功生成的图片网格展示。
- * 单击在新窗口打开原图；双击打开放大预览（ZoomModal 与画布/生产历史同组件、同注册表 URL）。
- * 单击/双击用 250ms 延时区分（useImageZoom 公共 hook）：第二击到达即取消单击的「开原图」，再触发双击放大。
+ * **单击不跳转**，双击打开放大预览（ZoomModal 与画布/生产历史同组件、同注册表 URL），
+ * 复制图片 / 复制路径 / 新标签打开都在预览弹窗里（见 useImageZoom 的交互契约）。
  */
 export function Gallery({ items, recentPrompts, onPickPrompt }: GalleryProps) {
   const images = items.filter((item): item is ResultItem & { url: string } => Boolean(item.url));
-  const { zoom, handleClick, handleDoubleClick, closeZoom } = useImageZoom();
+  const { zoom, openZoom, closeZoom } = useImageZoom();
 
   if (images.length === 0) {
     const recents = recentPrompts ?? [];
@@ -96,19 +97,21 @@ export function Gallery({ items, recentPrompts, onPickPrompt }: GalleryProps) {
     <>
       <div className="result-gallery grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] items-start gap-3">
         {images.map((item, i) => (
-          <a
+          <div
             key={`${item.url}-${i}`}
-            href={item.url}
-            target="_blank"
-            rel="noreferrer"
             className="group block enter-up"
             style={{ animationDelay: `${i * 70}ms` }}
-            title="单击新窗口打开原图 · 双击放大预览"
+            title="双击放大预览"
           >
             <div
               className="transition-transform duration-300 group-hover:-translate-y-0.5"
-              onClick={(e) => handleClick(e, { url: item.url, name: item.message })}
-              onDoubleClick={() => handleDoubleClick({ url: item.url, name: item.message })}
+              onDoubleClick={() =>
+                openZoom({
+                  url: item.url,
+                  name: item.message,
+                  path: imagePathFromUrl(item.url),
+                })
+              }
             >
               <AspectImage url={item.url} alt={item.message} />
               <p className="text-caption mt-1 text-center">
@@ -118,10 +121,17 @@ export function Gallery({ items, recentPrompts, onPickPrompt }: GalleryProps) {
                 {item.cost !== undefined ? ` · ${item.cost}元` : ""}
               </p>
             </div>
-          </a>
+          </div>
         ))}
       </div>
-      {zoom && <ZoomModal imageUrl={zoom.url} name={zoom.name} onClose={closeZoom} />}
+      {zoom && (
+        <ZoomModal
+          imageUrl={zoom.url}
+          name={zoom.name}
+          {...(zoom.path ? { copyPath: zoom.path } : {})}
+          onClose={closeZoom}
+        />
+      )}
     </>
   );
 }

@@ -43,12 +43,30 @@ class _Recorded:
 
 @pytest.fixture
 def recorded(monkeypatch):
-    """挡掉真实 API：generate_image 记录 kwargs 伪成功，日志/记忆空"""
+    """挡掉真实 API：generate_image 记录 kwargs 伪成功，日志/记忆空。
+
+    另外把**全局任务池换成只登记不执行**：提交类用例只读 `_tasks[taskId]`（那些字段在
+    submit 时就写好了），真让 worker 跑起来毫无收益 —— 反而会在本 fixture 撤销后才执行，
+    那时替身已失效，会真发请求并把图写进 output/（实测留下过一批 prompt「repaint the sky」
+    的真图）。只登记不执行从根上掐掉这条路径。
+    """
     rec = _Recorded()
     monkeypatch.setattr("server.generate_image", rec)
     monkeypatch.setattr("server.log_generation", lambda **kw: None)
     monkeypatch.setattr("server.save_last_output_dir", lambda p: None)
+    monkeypatch.setattr("server.task_manager", _RegisterOnlyManager())
     return rec
+
+
+class _RegisterOnlyManager:
+    """任务池替身：登记不执行（只给「提交后任务对象长什么样」这类断言用）"""
+
+    def __init__(self):
+        self._tasks: dict[str, server.GenerationTask] = {}
+
+    def submit(self, task) -> str:
+        self._tasks[task.id] = task
+        return task.id
 
 
 def _submit(**overrides):
@@ -153,6 +171,9 @@ def test_run_generation_mask_without_base_surfaces_clear_error(monkeypatch):
     monkeypatch.setattr(core_api, "get_api_key", lambda: "sk-test-placeholder")
     monkeypatch.setattr("server.log_generation", lambda **kw: None)
     monkeypatch.setattr("server.save_last_output_dir", lambda p: None)
+    # conftest 有 session 级兜底守卫（默认把所有 generate_image 换成抛错版）。
+    # 这条用例要的是 core/api 自己的中文报错，所以把 server 侧换回真实实现。
+    monkeypatch.setattr("server.generate_image", core_api.generate_image)
 
     task = server.GenerationTask(
         prompt="repaint",

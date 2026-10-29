@@ -271,25 +271,35 @@ export const GroupNode = memo(function GroupNode({
   /* 叠卡：用几张错位的背景卡把「这是一组、里面有 N 张」直接画出来，不靠读数字。
    *
    * 参考 basketikun/infinite-canvas 的 BatchFrame（MIT）：纯 CSS、零状态、零布局计算 ——
-   * 只是几个绝对定位的 div 平移 + 微旋转，不参与 React Flow 的节点尺寸测量。
+   * 只是几个绝对定位的 div 平移，不参与 React Flow 的节点尺寸测量。
+   *
+   * **两个不许改回去的约束**（都是真机截图踩出来的）：
+   *
+   * 1) **不许往右下角叠**。上一版 translate(+10..+22, +4..+10) 且带 1.5~3.5° 旋转，
+   *    叠卡整块伸出卡面右下角，压到相邻节点、也和卡片自己的圆角对不上——看起来像
+   *    「一堆没对齐的纸片糊在外面」。现在一律往**左上**错开，错开量（最大 12px）
+   *    全部由根节点的 `pt-3 pl-3` 预留出来，所以叠卡永远落在节点边界**以内**。
+   * 2) **不许旋转、不许各层不同色**。旋转会让每组朝向都不一样（整块画布看着乱），
+   *    而 5% / 9% 两种掺色叠在一起会出现「最底层发白、前两层发红」的割裂感。
+   *    统一 `bg-brand/5` + `border-brand/10`：卡面本身半透明，透出来的那几道浅边
+   *    自然形成「一叠纸」的层次，不需要靠换颜色制造深度。
    *
    * 为什么要夹到 3 张：张数是数据，不能直接当渲染数量 —— 一个 40 张图的组会渲染 39 层
    * 叠卡，每层都是独立合成层，缩放时帧率会掉。夹到 3 张之后「3 张以上」在视觉上是同一个
    * 意思（后面还有很多），用数字补足精度。
    *
-   * z 序靠 DOM 顺序而不是 z-index：叠卡写在 body 之前，后绘制的 body 自然压在上面；
+   * z 序靠 DOM 顺序而不是 z-index：叠卡写在卡面之前，后绘制的卡面自然压在上面；
    * 父元素没有 z-index 也就没有层叠上下文，写负 z-index 反而会被父元素背景盖住。
    */
+  const STACK_STEP_PX = 4;
   const stackCount = Math.min(Math.max(data.imageCount - 1, 0), 3);
   const stackCards = Array.from({ length: stackCount }, (_, index) => (
     <div
       key={index}
       aria-hidden="true"
-      className="pointer-events-none absolute inset-0 rounded-lg"
+      className="pointer-events-none absolute inset-0 rounded-lg border border-brand/10 bg-brand/5"
       style={{
-        transform: `translate(${10 + index * 6}px, ${4 + index * 3}px) rotate(${1.5 + index}deg)`,
-        background: "color-mix(in srgb, var(--color-brand) 9%, transparent)",
-        boxShadow: "inset 0 0 0 1px color-mix(in srgb, var(--color-brand) 14%, transparent)",
+        transform: `translate(${-(index + 1) * STACK_STEP_PX}px, ${-(index + 1) * STACK_STEP_PX}px)`,
       }}
     />
   ));
@@ -305,28 +315,31 @@ export const GroupNode = memo(function GroupNode({
   // LOD 抽象模式：去掉 hover 删除栏，只保留组本体（组节点本身已足够轻量）
   if (lod) {
     return (
-      <div
-        className={`relative w-56 rounded-lg bg-brand/5 !p-4 ${selected ? "node-selected" : ""}`}
-      >
+      <div className={`relative w-56 pt-3 pl-3 ${selected ? "node-selected" : ""}`}>
         <NodeHandles />
-        {stackCards}
-        {body}
+        {/* 叠卡与卡面同处一个定位父级：错开量落在根节点 pt-3/pl-3 的预留区里，不越界 */}
+        <div className="relative">
+          {stackCards}
+          <div className="relative rounded-lg border border-brand/15 bg-brand/5 !p-4">{body}</div>
+        </div>
       </div>
     );
   }
   return (
-    <div
-      className={`group relative w-56 rounded-lg bg-brand/5 !p-4 node-pop ${selected ? "node-selected" : ""}`}
-    >
+    <div className={`group relative w-56 pt-3 pl-3 node-pop ${selected ? "node-selected" : ""}`}>
       {/* 顶部接收图片，底部输出到提示词。 */}
       <NodeHandles />
-      {stackCards}
-      <NodeActions>
-        <ActionButton label="删除图片组" onClick={() => onDelete(id)} danger>
-          <Trash2 aria-hidden="true" size={14} />
-        </ActionButton>
-      </NodeActions>
-      {body}
+      <div className="relative">
+        {stackCards}
+        <div className="relative rounded-lg border border-brand/15 bg-brand/5 !p-4">
+          <NodeActions>
+            <ActionButton label="删除图片组" onClick={() => onDelete(id)} danger>
+              <Trash2 aria-hidden="true" size={14} />
+            </ActionButton>
+          </NodeActions>
+          {body}
+        </div>
+      </div>
     </div>
   );
 });

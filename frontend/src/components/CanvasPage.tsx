@@ -29,7 +29,20 @@ import {
   type ReactFlowInstance,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { CircleHelp, Crosshair, GripVertical, Magnet, Square, SquareDot } from "lucide-react";
+// `Map` 图标必须起别名：直接叫 Map 会遮蔽全局 Map 类型，React Flow 的泛型推断
+// （useNodesState / NodeChange<...>）会当场崩掉，报一串与 UI 毫无关系的类型错误。
+import {
+  CircleHelp,
+  Crosshair,
+  GripVertical,
+  Lock,
+  LockOpen,
+  Magnet,
+  Map as MapIcon,
+  Maximize,
+  ZoomIn,
+  ZoomOut,
+} from "lucide-react";
 
 import {
   canvasUpload,
@@ -48,13 +61,8 @@ import { errMessage } from "../format";
 import { minimapNodeColor } from "../minimapColor";
 import {
   readMinimapVisible,
-  readZoomSliderPercent,
   saveMinimapVisible,
-  saveZoomSliderPercent,
-  sliderPercentToZoom,
-  zoomToSliderPercent,
-  ZOOM_SLIDER_MAX_PERCENT,
-  ZOOM_SLIDER_MIN_PERCENT,
+  zoomToPercent,
 } from "../minimapVisible";
 import {
   applySnapToChanges,
@@ -184,6 +192,41 @@ function ToolbarButton({
   );
 }
 
+/** 画布左下角控制坞的一行：**图标 + 中文标签**（同宽同高，竖排成一列）。
+ *
+ *  为什么必须有文字：这一列原本只有图标（`+ − ⛶ 🔒 ▣ ◎`），除了加减号之外
+ *  全靠猜——小地图那个「方点/方块」两个状态肉眼几乎一样，锁、聚焦也都不自明。
+ *  实测用户的第一反应是「完全糊里糊涂」。标签是这套控件的语义来源，别去掉只留图标。
+ *  `pressed` 用 --color-brand 高亮 + 加粗，表示这个开关现在是开着的（吸附/小地图/锁定）。 */
+function DockRow({
+  icon,
+  label,
+  onClick,
+  title,
+  ariaLabel,
+  pressed,
+}: {
+  icon: ReactNode;
+  label: string;
+  onClick: () => void;
+  title: string;
+  ariaLabel: string;
+  pressed?: boolean;
+}) {
+  return (
+    <ControlButton
+      onClick={onClick}
+      title={title}
+      aria-label={ariaLabel}
+      {...(pressed === undefined ? {} : { "aria-pressed": pressed })}
+      className={`dock-row nodrag ${pressed ? "is-on" : ""}`}
+    >
+      {icon}
+      <span className="dock-row__label">{label}</span>
+    </ControlButton>
+  );
+}
+
 /** 画布右下角日志轮播：只露最新几条，新条目淡入上移，旧的自然被挤出去。
  *  pointer-events-none 保证不挡画布拖拽。 */
 const LOG_VISIBLE_COUNT = 5;
@@ -207,6 +250,13 @@ interface CanvasPageProps {
   config: AppConfig;
   /** 当前模型是否认「质量」档位（豆包 Seedream 不认 → 提示词节点不渲染那一栏）。默认 true。 */
   qualityEffective?: boolean;
+  /** 新建提示词卡片用的默认输出路径（服务端权威，显式默认 > 上次使用 > 按窗口分区）。
+   *  缺省回退 `config.defaultOutputDir`（既有调用方/测试不必都改）。 */
+  defaultOutputDir?: string;
+  /** 该默认值是不是用户手动设的（`explicit`）—— 决定工具栏按钮显示「已设定」还是「自动」 */
+  defaultOutputDirIsExplicit?: boolean;
+  /** 点「默认输出路径」：由上层弹系统文件夹选择器并写回服务端（画布不自己拼路径） */
+  onSetDefaultOutputDir?: (() => void) | undefined;
   /** 待整图导入画布的提交 id（经典结果导入触发；导入完成后回调清空） */
   importSubmissionId?: string | null;
   onSubmissionImported?: () => void;
@@ -215,6 +265,9 @@ interface CanvasPageProps {
 export function CanvasPage({
   config,
   qualityEffective = true,
+  defaultOutputDir,
+  defaultOutputDirIsExplicit = false,
+  onSetDefaultOutputDir,
   importSubmissionId,
   onSubmissionImported,
 }: CanvasPageProps) {
@@ -230,16 +283,15 @@ export function CanvasPage({
   const lodRef = useRef(false);
   /** 小地图开关（纯本机偏好，默认关：卡片少时占地方没价值，用户显式打开才落盘） */
   const [minimapVisible, setMinimapVisible] = useState(readMinimapVisible);
-  /** 缩放滑杆位置（百分比整数）。初值取上次位置，但**视口不会被它拖动** ——
-   *  滑杆是「显示当前缩放 + 拖它才改视口」的受控显示，初值只影响首帧读数；
-   *  真正的视口缩放由 ReactFlow 的 onInit / onMove 回写（handleViewportMove）。 */
-  const [zoomPercent, setZoomPercent] = useState(readZoomSliderPercent);
-  /** 拖动滑杆期间不把 onMove 回写的值再灌回滑杆，否则会与用户拖动打架（见 handleViewportMove） */
-  const draggingSliderRef = useRef(false);
+  /** 当前缩放读数（百分比整数）。**纯派生显示**：视口一变就重算，不接受用户输入。
+   *
+   *  原先这里是缩放滑杆的位置（还落 localStorage、拖动期间要闸门防互相拉扯）。
+   *  滑杆已移除——滚轮与「放大/缩小」「适应」足够用，而滑杆要维护一条双向同步：
+   *  拖它改视口、视口变化再回灌读数，中间还得挡住互相拉扯。收益不值。 */
+  const [zoomPercent, setZoomPercent] = useState(100);
   const handleViewportMove = useCallback(
     (_event: unknown, viewport: { zoom: number }) => {
-      // 拖滑杆时视口跟着滑杆走，此时若把视口值再灌回滑杆会与拖动互相拉扯（读数抖动）
-      if (!draggingSliderRef.current) setZoomPercent(zoomToSliderPercent(viewport.zoom));
+      setZoomPercent(zoomToPercent(viewport.zoom));
       const z = viewport.zoom;
       if (!lodRef.current && z < LOD_IN_ZOOM) {
         lodRef.current = true;
@@ -251,17 +303,6 @@ export function CanvasPage({
     },
     [],
   );
-  /** 滑杆拖动：立刻改视口缩放（围绕视口中心，不跳位），松手才落盘 */
-  const handleZoomSlider = useCallback((percent: number) => {
-    draggingSliderRef.current = true;
-    setZoomPercent(percent);
-    void rfInstanceRef.current?.zoomTo(sliderPercentToZoom(percent), { duration: 0 });
-  }, []);
-  /** 滑杆松手：恢复「视口回写滑杆」的联动并持久化 */
-  const commitZoomSlider = useCallback((percent: number) => {
-    draggingSliderRef.current = false;
-    saveZoomSliderPercent(percent);
-  }, []);
   const toggleMinimap = useCallback(() => {
     setMinimapVisible((visible) => {
       saveMinimapVisible(!visible);
@@ -270,6 +311,11 @@ export function CanvasPage({
   }, []);
   /** 拖拽吸附开关（纯本机偏好，默认开：对齐是画布的默认期望，想自由摆放的人才去关） */
   const [snapEnabled, setSnapEnabled] = useState(readSnapEnabled);
+  /** 锁定画布（对应 React Flow 自带锁图标，现改为带文字的「锁定」行）：
+   *  锁定后不能拖节点 / 框选 / 平移，但滚轮缩放与「适应/聚焦」照旧 ——
+   *  「看图时别把手抖弄乱布局」和「不能缩放看图」是两码事，别一起关掉。
+   *  纯本机临时状态，不落盘：锁定是随手开关，不是需要记住的偏好。 */
+  const [canvasLocked, setCanvasLocked] = useState(false);
   /** 对齐线不进 CanvasPage 的 state：拖拽时每帧都可能变，写模块级 store，
    *  只让订阅它的 <SnapGuides /> 重渲染（见 snapGuidesStore.ts） */
   /** 节点/边的最新引用：回调经 ref 读取，避免 useCallback 依赖 nodes/edges
@@ -402,6 +448,8 @@ export function CanvasPage({
   /** 放大预览：当前预览的图片绝对路径（null 关闭）与文件名 */
   const [zoomImage, setZoomImage] = useState<string | null>(null);
   const [zoomName, setZoomName] = useState("");
+  /** 预览图在本机的绝对路径（空串 = 没有可复制路径，弹窗里就不出「复制路径」） */
+  const [zoomPath, setZoomPath] = useState("");
   /** 裁剪 / 放大对话框的加工对象（null 关闭）。
    *  产出走「上传注册表 + 源图右侧新建节点」，与「替换图片」（原地换掉）语义不同：
    *  加工是可回溯的派生操作，原图必须留着，否则用户裁坏了没法退回。 */
@@ -988,12 +1036,13 @@ export function CanvasPage({
 
   /* ---------------- 图片双击动作：放大预览 ---------------- */
   /** 画布与经典表单共用 ZoomModal，统一传注册表派生的完整 URL（node.data.url）；
-   *  缺失节点无 url，不弹预览（红框已提示）。 */
+   *  缺失节点无 url，不弹预览（红框已提示）。absPath 给弹窗做「复制路径」。 */
   const handleZoom = useCallback((nodeId: string) => {
     const node = nodesRef.current.find((n) => n.id === nodeId);
     if (node?.type === "image" && node.data.url) {
       setZoomImage(node.data.url);
       setZoomName(node.data.name);
+      setZoomPath(node.data.absPath ?? "");
     }
   }, []);
 
@@ -1248,9 +1297,10 @@ export function CanvasPage({
     () => ({
       size: config.sizes[0]?.value ?? "1024x1024",
       quality: defaultQuality,
-      outputDir: config.defaultOutputDir,
+      // 实时默认（不是 config 里那份页面加载快照）：设完默认后立刻新建卡片就该用它
+      outputDir: defaultOutputDir ?? config.defaultOutputDir,
     }),
-    [config, defaultQuality],
+    [config, defaultQuality, defaultOutputDir],
   );
 
   /** 文件拖放落画布：上传画布注册表 → 以落点为起点建节点（files 已过滤、落点已夹紧，由 hook 传入）。
@@ -1313,14 +1363,18 @@ export function CanvasPage({
         // 铺排（按卡片真实尺寸、每行 3 张）在 buildPromptNodes 内部完成
         ...buildPromptNodes(
           cards,
-          { sizes: config.sizes, defaultQuality, defaultOutputDir: config.defaultOutputDir },
+          {
+            sizes: config.sizes,
+            defaultQuality,
+            defaultOutputDir: defaultOutputDir ?? config.defaultOutputDir,
+          },
           origin,
         ).map((node, i) => withEnterAnim(node, nds.length + i)),
       ]);
       setShowImportModal(false);
       pushLog(`已从粘贴导入建卡 ${cards.length} 张提示词卡片`);
     },
-    [config, defaultQuality, getCreatePosition, pushLog, recordHistory, setNodes],
+    [config, defaultQuality, defaultOutputDir, getCreatePosition, pushLog, recordHistory, setNodes],
   );
 
   /** 新建图片组节点（聚合多图后连到提示词统一管理；视口中心定位 + 入场动画；也可拖出到画布任意位置） */
@@ -2157,10 +2211,26 @@ export function CanvasPage({
             新建图片组
           </ToolbarButton>
         </div>
+        {/* 右侧按「文件 → 信息 → 设置 → 编辑 → 执行」排：同类的挨着，主行动（全部运行）压最右。
+            默认输出路径是**设置**不是画布动作，所以放在「生成历史」之后、「撤销/恢复」之前，
+            不插进自动连线/全部运行那两个执行动作中间 —— 点了它只是改一个以后生效的值。 */}
         <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2">
           <ToolbarButton onClick={() => void handleSave()}>保存工作流</ToolbarButton>
           <ToolbarButton onClick={() => void handleLoad()}>加载工作流</ToolbarButton>
           <ToolbarButton onClick={() => setShowHistory(true)}>生成历史</ToolbarButton>
+          <ToolbarButton
+            onClick={() => onSetDefaultOutputDir?.()}
+            disabled={!onSetDefaultOutputDir}
+            title={
+              `新建提示词卡片默认保存到：${defaultOutputDir ?? config.defaultOutputDir}\n` +
+              (defaultOutputDirIsExplicit
+                ? "（已手动设定，跑图不会改它）点这里重新选一个目录。"
+                : "（当前跟随「上次生成落在哪」，任何一次生成都会把它带走）点这里手动选一个目录，就能把它定住。") +
+              "\n只影响以后新建的卡片；已建的卡片仍可在卡片上单独改，或全选后用右上角「设置输出路径」批量改。"
+            }
+          >
+            默认输出路径
+          </ToolbarButton>
           <ToolbarButton onClick={handleUndo} disabled={!historyRef.current.canUndo()}>撤销</ToolbarButton>
           <ToolbarButton onClick={handleRestore} disabled={!historyRef.current.canRestore()}>恢复</ToolbarButton>
           <ToolbarButton onClick={handleAutoConnect}>自动连线</ToolbarButton>
@@ -2270,14 +2340,24 @@ export function CanvasPage({
           // 只匹配 Mac 的 Cmd，Windows 的 Ctrl 不生效，需传数组同时覆盖两种修饰键
           multiSelectionKeyCode={["Meta", "Control"]}
           proOptions={{ hideAttribution: true }}
+          // 锁定画布：只关「会改布局/视口」的三件事（拖节点、框选/连线、平移），
+          // 滚轮缩放与「适应/聚焦」保持可用 —— 锁定的目的是防手抖，不是让人连图都看不了。
+          nodesDraggable={!canvasLocked}
+          nodesConnectable={!canvasLocked}
+          elementsSelectable={!canvasLocked}
+          panOnDrag={!canvasLocked}
         >
           <Background variant={BackgroundVariant.Dots} gap={24} size={1} />
-          {/* 小地图（右下角，默认关）：卡片铺开后靠它定位；点击/拖动小地图可跳视口。
-              节点按类型取色 —— 提示词卡 / 图片 / 图片组三色，缩略图上仍能分辨结构。 */}
+          {/* 小地图（**左上角**，默认关）：卡片铺开后靠它定位；点击/拖动小地图可跳视口。
+              节点按类型取色 —— 提示词卡 / 图片 / 图片组三色，缩略图上仍能分辨结构。
+              放左上：右下角是日志轮播（`CanvasLog`，最多 5 行、右对齐），小地图在那一角会
+              把刚出现的日志压住 —— 日志是「刚刚发生了什么」的即时反馈，不能被遮。
+              右上角让给选中操作栏（选中节点时出现），左下角是 Controls 按钮栈。 */}
           {minimapVisible && (
             <MiniMap
               pannable
               zoomable
+              position="top-left"
               ariaLabel="画布小地图"
               className="!bg-[var(--surface-float)]"
               maskColor="rgba(31, 41, 55, 0.08)"
@@ -2285,61 +2365,97 @@ export function CanvasPage({
               nodeStrokeWidth={2}
             />
           )}
-          {/* 左下角控制钮：fitView 显式放宽 minZoom，节点再多也能一屏全览 */}
-          <Controls fitViewOptions={{ padding: 0.15, minZoom: MIN_FIT_ZOOM, maxZoom: 2 }}>
-            {/* 缩放滑杆：读数即百分比，拖动实时改视口（对数/线性已退化为线性，见 minimapVisible.ts） */}
-            <div className="react-flow__controls-button !h-auto !w-auto !cursor-default flex-col !gap-1 !px-1 !py-2">
-              <span className="text-[11px] font-medium leading-none tabular-nums" aria-hidden="true">
-                {zoomPercent}%
-              </span>
-              <input
-                type="range"
-                aria-label="画布缩放"
-                aria-valuetext={`${zoomPercent}%`}
-                min={ZOOM_SLIDER_MIN_PERCENT}
-                max={ZOOM_SLIDER_MAX_PERCENT}
-                step={1}
-                value={zoomPercent}
-                onChange={(e) => handleZoomSlider(Number(e.target.value))}
-                onPointerUp={() => commitZoomSlider(zoomPercent)}
-                onKeyUp={() => commitZoomSlider(zoomPercent)}
-                className="zoom-slider nodrag"
-              />
+          {/* 左下角控制坞：fitView 显式放宽 minZoom，节点再多也能一屏全览。
+              三个自带按钮（+ / − / ⛶ / 🔒）全部关掉、改用下面这套带文字的 DockRow ——
+              它们本来没有任何说明，混在一列图标里最难认。 */}
+          <Controls
+            showZoom={false}
+            showFitView={false}
+            showInteractive={false}
+            fitViewOptions={{ padding: 0.15, minZoom: MIN_FIT_ZOOM, maxZoom: 2 }}
+          >
+            {/* 缩放读数（只显示，不可拖）。**滑杆已移除**：滚轮与「放大/缩小/适应」够用，
+                而滑杆要维护一条双向同步（拖它改视口 + 视口变化回灌读数 + 拖动期间挡互相拉扯），
+                收益不值。整行宽度由 .dock-row 钉死，不能用 w-auto —— `200%` 按内容撑开会让
+                整列变宽、左边缘参差（真机踩过）。 */}
+            <div className="react-flow__controls-button dock-row dock-row--readout !cursor-default">
+              <span className="dock-row__label dock-row__value">{zoomPercent}%</span>
             </div>
-            {/* 操作帮助与缩放/适应视图同一栈：不再单占工具栏下方一整行 */}
-            <ControlButton
-              onClick={() => setShowHelp(true)}
-              title="操作帮助与快捷键"
-              aria-label="操作帮助与快捷键"
-            >
-              <CircleHelp aria-hidden="true" size={14} />
-            </ControlButton>
-            {/* 小地图开关：同一栈里，避免再往画布上叠一块常驻 UI */}
-            <ControlButton
-              onClick={toggleMinimap}
-              title={minimapVisible ? "隐藏小地图" : "显示小地图"}
-              aria-label={minimapVisible ? "隐藏小地图" : "显示小地图"}
-              aria-pressed={minimapVisible}
-            >
-              {minimapVisible ? <SquareDot aria-hidden="true" size={14} /> : <Square aria-hidden="true" size={14} />}
-            </ControlButton>
-            {/* 吸附开关：默认开，关掉后拖拽完全自由（偏好落 localStorage） */}
-            <ControlButton
-              onClick={toggleSnap}
-              title={snapEnabled ? "关闭拖拽吸附" : "开启拖拽吸附"}
-              aria-label={snapEnabled ? "关闭拖拽吸附" : "开启拖拽吸附"}
-              aria-pressed={snapEnabled}
-            >
-              <Magnet aria-hidden="true" size={14} />
-            </ControlButton>
+            <DockRow
+              icon={<ZoomIn aria-hidden="true" size={14} />}
+              label="放大"
+              title="放大画布（滚轮同样可以缩放）"
+              ariaLabel="放大画布"
+              onClick={() => void rfInstanceRef.current?.zoomIn({ duration: 180 })}
+            />
+            <DockRow
+              icon={<ZoomOut aria-hidden="true" size={14} />}
+              label="缩小"
+              title="缩小画布（滚轮同样可以缩放）"
+              ariaLabel="缩小画布"
+              onClick={() => void rfInstanceRef.current?.zoomOut({ duration: 180 })}
+            />
+            <DockRow
+              icon={<Maximize aria-hidden="true" size={14} />}
+              label="适应"
+              title="适应视图：把所有节点缩放到一屏可见"
+              ariaLabel="适应视图"
+              onClick={fitCanvasToContent}
+            />
             {/* 聚焦：有选中就聚焦选中，没选中就聚焦全图。取代 fitView 的「全塞进屏幕」 */}
-            <ControlButton
-              onClick={handleFocusSelected}
+            <DockRow
+              icon={<Crosshair aria-hidden="true" size={14} />}
+              label="聚焦"
               title="聚焦（有选中时只看选中的，否则看全图）"
-              aria-label="聚焦所选节点"
-            >
-              <Crosshair aria-hidden="true" size={14} />
-            </ControlButton>
+              ariaLabel="聚焦所选节点"
+              onClick={handleFocusSelected}
+            />
+            {/* 吸附开关：默认开，关掉后拖拽完全自由（偏好落 localStorage） */}
+            <DockRow
+              icon={<Magnet aria-hidden="true" size={14} />}
+              label="吸附"
+              title={snapEnabled ? "关闭拖拽吸附" : "开启拖拽吸附"}
+              ariaLabel={snapEnabled ? "关闭拖拽吸附" : "开启拖拽吸附"}
+              pressed={snapEnabled}
+              onClick={toggleSnap}
+            />
+            {/* 小地图开关：同一栈里，避免再往画布上叠一块常驻 UI */}
+            <DockRow
+              icon={<MapIcon aria-hidden="true" size={14} />}
+              label="地图"
+              title={minimapVisible ? "隐藏小地图" : "显示小地图"}
+              ariaLabel={minimapVisible ? "隐藏小地图" : "显示小地图"}
+              pressed={minimapVisible}
+              onClick={toggleMinimap}
+            />
+            {/* 锁定画布（对应 React Flow 原来的锁图标）：锁定后不能拖节点/框选/平移，
+                但滚轮缩放照旧 —— 看图时防止手一抖把布局拖乱。 */}
+            <DockRow
+              icon={
+                canvasLocked ? (
+                  <Lock aria-hidden="true" size={14} />
+                ) : (
+                  <LockOpen aria-hidden="true" size={14} />
+                )
+              }
+              label={canvasLocked ? "已锁" : "锁定"}
+              title={
+                canvasLocked
+                  ? "解锁画布：恢复拖拽节点、框选与平移"
+                  : "锁定画布：防止误拖节点（滚轮缩放与「适应」仍然可用）"
+              }
+              ariaLabel={canvasLocked ? "解锁画布" : "锁定画布"}
+              pressed={canvasLocked}
+              onClick={() => setCanvasLocked((locked) => !locked)}
+            />
+            {/* 操作帮助与缩放/适应视图同一栈：不再单占工具栏下方一整行 */}
+            <DockRow
+              icon={<CircleHelp aria-hidden="true" size={14} />}
+              label="帮助"
+              title="操作帮助与快捷键"
+              ariaLabel="操作帮助与快捷键"
+              onClick={() => setShowHelp(true)}
+            />
           </Controls>
           {/* 对齐线：画在 React Flow 的视口坐标层里，随平移/缩放自动跟随。
               只在拖拽的那几帧存在，松手即清空（见 onNodesChange）。
@@ -2425,7 +2541,15 @@ export function CanvasPage({
         </ModalShell>
       )}
       {zoomImage && (
-        <ZoomModal imageUrl={zoomImage} name={zoomName} onClose={() => setZoomImage(null)} />
+        <ZoomModal
+          imageUrl={zoomImage}
+          name={zoomName}
+          {...(zoomPath ? { copyPath: zoomPath } : {})}
+          onClose={() => {
+            setZoomImage(null);
+            setZoomPath("");
+          }}
+        />
       )}
       {cropTarget && (
         <ImageCropDialog

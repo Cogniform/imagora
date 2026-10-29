@@ -107,6 +107,11 @@ def _patch_user_data_paths(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(
         config, "LOCAL_PROVIDERS_FILE", tmp_path / "providers.local.json", raising=False
     )
+    # DEFAULT_OUTPUT_DIR 是「写哪」的**唯一来源**（server.run_generation 拿它当空
+    # output_dir 的兜底），必须一起指向 tmp：曾有一批真实生成结果被写进用户的
+    # output/ 根目录 —— 任务池 worker 在用例的 monkeypatch 撤销之后才跑，既没走到
+    # 替身、也没落到 tmp，真发了请求还落了盘。
+    monkeypatch.setattr(config, "DEFAULT_OUTPUT_DIR", str(tmp_path))
     # server 的派生常量（import 时由 DEFAULT_OUTPUT_DIR 算出）：仅在已导入时补丁
     srv = sys.modules.get("server")
     if srv is not None:
@@ -117,6 +122,14 @@ def _patch_user_data_paths(tmp_path, monkeypatch) -> None:
             str(tmp_path / ".last_output_dir"),
             raising=False,
         )
+        # 显式默认输出路径：同样必须在 tmp 里。漏了这条，用例里点一次「默认输出路径」
+        # 就会把开发机真实设置改成 tmp 死目录（重跑时表现为「默认路径莫名变成乱码目录」）。
+        monkeypatch.setattr(
+            srv,
+            "DEFAULT_OUTPUT_DIR_FILE",
+            str(tmp_path / ".default_output_dir"),
+            raising=False,
+        )
 
 
 @pytest.fixture(autouse=True)
@@ -124,6 +137,35 @@ def isolate_user_data(tmp_path, monkeypatch):
     """自动隔离（无需声明）：输出目录 / 注册表 / 工作流 / 账本 / 预算全部落 tmp_path。"""
     _patch_user_data_paths(tmp_path, monkeypatch)
     return tmp_path
+
+
+@pytest.fixture(scope="session", autouse=True)
+def forbid_real_generation():
+    """兜底：任何用例默认不得真的调用上游生图 API（花钱）。
+
+    为什么需要 session 级守卫：提交类用例把任务丢进**全局任务池**，worker 线程可能在
+    该用例的 monkeypatch 撤销之后才真正执行 —— 那一刻函数级替身已经没了，于是发出
+    真实请求、还把图写进用户 output/（实测留下过一批 prompt「repaint the sky」的真图）。
+    函数级 patch 撤得早，挡不住这条路径；只有活到会话结束的守卫才兜得住。
+
+    需要真实实现的用例在自己函数级 monkeypatch 里覆盖即可（函数级撤销更早，仍然有效）。
+
+    只挡 `server.generate_image`（提交链与任务池 worker 走的是这个绑定）；
+    `core.api.generate_image` 不挡 —— `test_core_api.py` 那批用例是「直调 core.api +
+    mock 掉网络」的合法测法，连它一起挡会把它们全部打红。
+    """
+    import server as srv
+
+    patcher = pytest.MonkeyPatch()
+
+    def _blocked(*args, **kwargs):
+        raise AssertionError(
+            "测试不得调用真实生图 API（花钱）：请在用例里 monkeypatch 掉 generate_image"
+        )
+
+    patcher.setattr(srv, "generate_image", _blocked)
+    yield
+    patcher.undo()
 
 
 @pytest.fixture

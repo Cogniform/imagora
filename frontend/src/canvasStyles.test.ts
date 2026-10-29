@@ -33,3 +33,27 @@ describe("canvas node enter/exit animations", () => {
     }
   });
 });
+
+describe("画布控制坞", () => {
+  const page = readFileSync(new URL("./components/CanvasPage.tsx", import.meta.url), "utf8");
+
+  /**
+   * 每一行必须带中文标签：这一列原本只有图标（`+ − ⛶ 🔒 ▣ ◎`），用户反馈「完全糊里糊涂」。
+   * 同时锁住两个已知几何坑：① 行宽由 `.dock-row` 钉死，不能写 `w-auto`（`115%` 会把整列撑宽）；
+   * ② 小地图在左上角 —— 右下角是日志轮播，放一起会把刚出现的日志压住。
+   */
+  it("控制坞每行都是「图标 + 文字标签」", () => {
+    for (const label of ["放大", "缩小", "适应", "聚焦", "吸附", "地图", "帮助"]) {
+      expect(page).toContain(`label="${label}"`);
+    }
+  });
+
+  it("行宽钉死，不靠内容撑开", () => {
+    expect(css).toMatch(/\.dock-row\s*\{[^}]*width:\s*64px/);
+    expect(page).not.toContain("!w-auto");
+  });
+
+  it("小地图放左上角（右下角留给日志轮播）", () => {
+    expect(page).toContain('position="top-left"');
+  });
+});

@@ -13,7 +13,7 @@ FastAPI 路由（`server.py`）与 CLI（`main.py`）共用的业务层。**不�
 - `canvas.py` 只是兼容 shim（星号 re-export registry + graphstore），**不在这里加新逻辑**
 - pytest 默认临时目录即可；WinError 5 属 `%TEMP%\pytest-of-speak` 的 ACL 被改坏（解法见 [../tests/README.md](../tests/README.md) 坑清单）
 - 单测不真调上游：`api.py` 走 monkeypatch mock 保持接口可注入（纪律细则见 [AGENTS.md](AGENTS.md)）
-- 展示与导入同源防错条（ARCHITECTURE 9.7）：`resolve_history_asset_path` 在 `server.py`，不在 core
+- 展示与导入同源防错条（ARCHITECTURE 9.9）：`resolve_history_asset_path` 在 `server.py`，不在 core
 
 ## 文件索引（每个文件：职责 / 关键导出 / 被谁依赖 / 改后必测）
 
@@ -70,7 +70,7 @@ FastAPI 路由（`server.py`）与 CLI（`main.py`）共用的业务层。**不�
 - 关键导出：`TaskManager`（`submit` / `snapshot` / `cancel`）、`GenerationTask`、`MAX_CONCURRENCY`
 - 被谁依赖：`server.py`（/api/generate、/api/tasks/*）
 - 改后必测：`tests/test_core_tasks.py` + `tests/test_server_tasks.py`
-- 注意：任务表纯内存；uvicorn 必须单 worker（见 ARCHITECTURE 9.6）
+- 注意：任务表纯内存；uvicorn 必须单 worker（见 ARCHITECTURE 9.8）
 - 注意：`GenerationTask.mask_data_url` 存的是**data URL 字符串而非临时文件路径**——任务可能排队很久，临时文件会被系统清理，data URL 随任务对象一起回收，不需要额外清理逻辑
 
 ### [registry.py](registry.py)
@@ -90,9 +90,9 @@ FastAPI 路由（`server.py`）与 CLI（`main.py`）共用的业务层。**不�
 ### [history.py](history.py)
 - 职责：生成历史 JSONL 读取（容错坏行、筛选、**同参数聚合**）+ 账本迁移（backfill）
 - 关键导出：`read_generation_history()` / `read_generation_history_paged()`（分页 {items,total}，offset 为聚合后偏移，供滚动加载）、`read_raw_history()`（**原始行**口径：不去重、不截断 500 行，供成本统计/计费）、`dedupe_generation_history()`（同参数只留最新一条，时间不算参数，失败不刷屏）、`resolve_output_path()`、`backfill_output_asset_ids()`
-- 被谁依赖：`server.py`（/api/history、/api/history/import，白名单同源判定——注册表副本 + 账本 output 原路径双收，见 ARCHITECTURE 9.7；/api/history/stats 走 `read_raw_history`）、`core/cost.py`（统计读原始行）
+- 被谁依赖：`server.py`（/api/history、/api/history/import，白名单同源判定——注册表副本 + 账本 output 原路径双收，见 ARCHITECTURE 9.9；/api/history/stats 走 `read_raw_history`）、`core/cost.py`（统计读原始行）
 - 改后必测：`tests/test_core_history.py` + `tests/test_server_helpers.py`
-- 注意：展示与导入同源（ARCHITECTURE 9.7）——改路径解析逻辑必须两端一致；**搜索对换行鲁棒**：query 与账本字段两侧都做空白折叠（账本 prompt 存 CRLF，用户粘进单行搜索框换行被浏览器归一/移除，折叠后才不整串错位）；**列表口径 vs 计费口径**：展示用聚合+500 行上限，统计/预算必须用 `read_raw_history`（聚合会少算费用）
+- 注意：展示与导入同源（ARCHITECTURE 9.9）——改路径解析逻辑必须两端一致；**搜索对换行鲁棒**：query 与账本字段两侧都做空白折叠（账本 prompt 存 CRLF，用户粘进单行搜索框换行被浏览器归一/移除，折叠后才不整串错位）；**列表口径 vs 计费口径**：展示用聚合+500 行上限，统计/预算必须用 `read_raw_history`（聚合会少算费用）
 
 ### [cost.py](cost.py)
 - 职责：成本统计与预算保护——账本原始行聚合（总量/成功率/费用/耗时/按天/按尺寸/按模式）+ 本机预算设置读写 + 超预算判定
@@ -172,7 +172,7 @@ FastAPI 路由（`server.py`）与 CLI（`main.py`）共用的业务层。**不�
 - 改 `history.py`
   → 查 `server.py` /api/history 两路由
   → 跑 `tests/test_core_history.py` + `tests/test_server_helpers.py`
-  → 验证展示与导入同源（ARCHITECTURE 9.7）
+  → 验证展示与导入同源（ARCHITECTURE 9.9）
 
 - 改 `tasks.py`
   → 查 `server.py` 任务路由
