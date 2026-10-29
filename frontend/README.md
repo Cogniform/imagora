@@ -8,7 +8,7 @@ React 19 + TypeScript + Vite + Tailwind v4 + React Flow（`@xyflow/react`）。�
 npm install
 npm run dev        # 开发模式（热更新；需后端已启动，见下）
 npm run build      # tsc --noEmit + vite build → dist/（git 忽略，由后端服务托管）
-npm test           # vitest run（1040 用例）
+npm test           # vitest run（1057 用例）
 npm run lint       # eslint
 npx tsc --noEmit   # 类型检查
 ```
@@ -93,7 +93,8 @@ $env:IMAGORA_APP_ROOT = $h
 | 画布边界 | `html[data-canvas-bounds="off"] .studio-canvas` | 关闭时收掉画布边框 / 底色 / 投影与渲染层底色晕，与页面背景融为一体 |
 | 滚动条 | `--sb-size` · `--sb-thumb` · `--sb-track` | 全局统管；轨道 transparent = 跟随所在容器底色 |
 | 主体色选择 | `.accent-hue` | 外观弹窗**只有一条色相滑杆**（九色预设方块已移除，2026-10-03）：`--r-pill` 轨道 + 自定义 thumb，轨道底色是色相彩虹——那只属于「选色」，其余参数用中性的「通用滑杆」`.range-field`；宽度交给容器（配 `flex-1`），与「卡片通透度」那行逐行对齐。取到的色相写到根元素 `--accent-hue`，背景底色与页面光晕都读它 |
-| 画布控件 | `.zoom-slider` · `.studio-canvas .react-flow__minimap` | 缩放滑杆塞进左下角 `<Controls>` 的按钮栈（30px 宽一列）。**垂直 range 用 `writing-mode: vertical-lr` + `direction: rtl`**，不要用 `transform: rotate(90deg)`——旋转后命中区与视觉位置错位（拖动点偏移一个滑杆高度），键盘方向键语义也会反。小地图底色走 `--surface-float` 与浮层同 token，边框/圆角/投影与 Controls 保持一套语言 |
+| 画布控制坞 | `.dock-row` · `.dock-row__label` · `.dock-row__is-on` · `.dock-row--readout` | 左下角一列「图标 + 中文标签」（放大/缩小/适应/聚焦/吸附/地图/锁定/帮助）。行宽钉死 64px、不按内容撑宽（曾因 `115%` 把整列撑歪）；开关态用主体色 + 加粗表达。**标签是语义来源，别改回纯图标** |
+| 画布控件 | `.dock-row--readout` · `.dock-row__value` · `.studio-canvas .react-flow__minimap` | 缩放读数只显示百分比、不可拖（滑杆已移除：滚轮与放大/缩小/适应够用）。小地图底色走 `--surface-float`，默认关、位置在**左上角**（右下角留给日志轮播） |
 | 下拉浮层 | `.select-list` · `--search` · `--empty` · `--group__title` · `--group__rows` · `--trigger` | 通用下拉（[Select.tsx](src/components/Select.tsx)）：浮层 `createPortal` 到 body 后坐标由 TSX 现算内联给，这里只管外观。底色走 `--surface-float`，与弹窗同一档。搜索框在**列表内部顶部**、不替换触发器。组标题 `position: sticky; top: 0`，底色同样只能取 `--surface-float`（表面系统要求底色唯一产地是 [surface.ts](src/surface.ts)，不能为它单独写不透明色）——代价是粘顶时下方选项会按通透度透上来一点，属既有设计不是缺陷 |
 | 生成中占位卡 | `.generation-pending` + `__label` / `__track` / `__bar` | 等待结果的细进度条（画布提示词节点）。**进度只由 `transform: scaleX()` 驱动，绝不给 `width` 加 transition**——width 运动会每帧重排布局，在缩放中的画布上尤其卡；`prefers-reduced-motion: reduce` 时去掉过渡。卡内两层中性色都从 `--color-brand` 掺出来（`color-mix` 加深），因为掺色 token 本身是浅底，直接拿它画细线 / 进度条会看不见 |
 | 对齐线 | `.snap-guide` | 拖拽吸附时的辅助线（[CanvasPage.tsx](src/components/CanvasPage.tsx) 画在 React Flow 的 `ViewportPortal` 层里，位置由 TSX 用视口坐标算，随平移缩放自动跟随；这里只给视觉不给尺寸）。颜色取 `--color-brand` 不取中性灰（点阵背景上灰线看不清），`opacity: 0.55` 免得盖过节点。**`pointer-events: none` 必须写死**——它横跨整个视口，可点的话会挡住所有节点拖拽与点击 |
@@ -133,9 +134,9 @@ $env:IMAGORA_APP_ROOT = $h
 - 注意：工具栏拖出画布外 = 取消（防错条 ARCHITECTURE 9.2.8）
 
 ### [previewZoom.ts](src/previewZoom.ts)
-- 职责：预览缩放/平移数学（`clampZoom` / `clampPreviewPan` / `ZOOM_MIN..MAX`）
+- 职责：预览缩放/平移数学（`clampZoom` / `clampPreviewPan` / `ZOOM_MIN..MAX`）+ **倍率↔真实像素换算**（`layoutScale` / `actualZoomPercent` / `zoomForActualPixels`）
 - 被谁依赖：WorkflowModals.tsx（ZoomModal）
-- 注意：数学进纯函数，UI 不重算（ARCHITECTURE 9.5）
+- 注意：数学进纯函数，UI 不重算（ARCHITECTURE 9.7 坐标与几何）
 
 ### [canvasHistory.ts](src/canvasHistory.ts)
 - 职责：撤销/恢复栈（`createCanvasHistory`，limit=50）
@@ -293,7 +294,8 @@ $env:IMAGORA_APP_ROOT = $h
 - 注意：默认 `true`（显示边框 + 底色，保持既有观感），只有用户显式关掉才进「融为一体」档
 
 ### [minimapVisible.ts](src/minimapVisible.ts)
-- 职责：画布**小地图开关**与**缩放滑杆刻度**两件偏好（`readMinimapVisible` / `saveMinimapVisible`；`zoomToSliderPercent` / `sliderPercentToZoom` / `clampSliderPercent` / `readZoomSliderPercent` / `saveZoomSliderPercent`）
+- 职责：画布**小地图开关**（`readMinimapVisible` / `saveMinimapVisible`，落 localStorage）+ **缩放读数归一化**（`zoomToPercent` / `clampZoomPercent`，纯派生显示、不落盘）
+- 注意：缩放滑杆已于 2026-10-29 移除，所以不再有反向换算（`sliderPercentToZoom`）与滑杆持久化；常量 `CANVAS_ZOOM_MIN/MAX_PERCENT` 必须与 CanvasPage 的 `minZoom`/`maxZoom` 同步
 - 被谁依赖：`components/CanvasPage.tsx`（`<MiniMap>` 显隐 + `<Controls>` 里的缩放滑杆）
 - 注意：小地图默认 **`false`**——它固定占画布右下角 160×110，卡片少时是纯负担，用户显式打开才落盘。滑杆**用直接百分比 `p = 100z` 而不是对数刻度**：滑杆行程 5%~200% 与缩放区间 0.05~2 的跨度都正好是 40 倍，端点对齐后对数映射在数学上精确退化为直线（`ln p = ln 100 + ln z` 系数恰为 1），写一套 log 运算只是把同一根直线算两遍还多出浮点误差；直接百分比另有两个好处——读数就是用户看到的缩放百分比、100% 天然落在行程 48.7% 处接近居中。`ZOOM_SLIDER_MIN_PERCENT = 5` / `ZOOM_SLIDER_MAX_PERCENT = 200` **刻意写成模块常量而不是函数参数**，与 `CanvasPage.tsx` 的 ReactFlow `minZoom={0.05}` / `maxZoom={2}` 对齐；做成参数两处数字必然漂移（滑杆拖到底但视口还在缩是最难查的一类 bug）。两个换算函数互为反函数（往返误差 < 1e-9，单测钉住）；非法输入（NaN / ±Infinity）一律夹到端点而不抛错——滑杆是受控组件，抛错会让整个画布白屏
 
@@ -338,13 +340,25 @@ $env:IMAGORA_APP_ROOT = $h
 - 注意：**两段式缩放**——`setZoomAround` 只记锚点再 setState，真正反算 `scrollLeft/scrollTop` 在 `useLayoutEffect` 里做（同步 setState 时拿不到新尺寸，会跳一格）；滚轮必须 `{ passive: false }` 且 `preventDefault + stopPropagation`，否则画布跟着一起缩放；空格拖拽监听挂 window capture 阶段且先 `document.activeElement.blur()`，否则输入框里打空格会触发平移。移植自 basketikun/infinite-canvas（MIT）的 `use-image-editor-viewport.ts`
 
 ### [useImageZoom.ts](src/useImageZoom.ts)
-- 职责：图片「单击开原图 / 双击放大预览」时序区分（`useImageZoom`，250ms 延时）
-- 被谁依赖：Gallery.tsx（经典表单结果图）、HistoryGallery.tsx（生产历史）
+- 职责：图片预览开关状态（`zoom` / `openZoom` / `closeZoom`）
+- 被谁依赖：Gallery.tsx、HistoryGallery.tsx
+- 改后必测：`npm test`（`useImageZoom.test.ts` 锁定「全程不开新标签页」）
+- 交互契约与历史原因（单击不跳转）→ [../docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md) 8.3 预览弹窗
+
+### [imagePath.ts](src/imagePath.ts)
+- 职责：从 `/api/image?path=…` 反解本机绝对路径（`imagePathFromUrl`）
+- 被谁依赖：Gallery.tsx、HistoryGallery.tsx（预览弹窗的「复制路径」）
+- 改后必测：`npm test`（`imagePath.test.ts`：外链 / `blob:` / `data:` 必须返回空串）
+
+### [imageCopy.ts](src/imageCopy.ts)
+- 职责：写剪贴板（`copyImageToClipboard` 非 PNG 先转 PNG、`copyTextToClipboard`）
+- 被谁依赖：WorkflowModals.tsx（ZoomModal 复制按钮）
+- 无单测：jsdom 无 canvas，同 [imageOps.ts](src/imageOps.ts) B 层约定，由真机兜底
 - 注意：双击第二击必须取消未决的单击开窗（防连开两个新标签，单测锁定）
 
 ### 组件（components/；改后跑 `npm test` + E2E）
 
-- [`CanvasPage.tsx`](src/components/CanvasPage.tsx) — 无限画布主页面（React Flow 集成、选中操作栏、操作帮助弹窗、历史面板入口、**取消入口**（工具栏「取消全部 (n)」只在有任务在跑时出现，单卡取消按钮在 [CanvasNodes.tsx](src/components/CanvasNodes.tsx)；取消是逻辑取消——排队出队后不再发上游、生成中跑完当前张才作废（产物仍落盘并计费，只是不派回画布），判定口径是本机意图 OR 服务端快照，见 [ARCHITECTURE.md](../docs/ARCHITECTURE.md) 5.4）+ **小地图显隐** + **缩放滑杆**（塞在左下角 `<Controls>` 按钮栈里，偏好见 [minimapVisible.ts](src/minimapVisible.ts)）+ **吸附开关** + **聚焦控件**（[canvasGeometry.ts](src/canvasGeometry.ts) 的 `focusViewportForNode`，让选中内容最多占视口 60%）；拖拽时经 [snapDrag.ts](src/snapDrag.ts) 吸到邻居边缘，对齐线由 [SnapGuides.tsx](src/components/SnapGuides.tsx) 单独订阅 [snapGuidesStore.ts](src/snapGuidesStore.ts) 画；**连线悬停高亮 / 选中降权**（[edgeStyle.ts](src/edgeStyle.ts)，选中一条线后其余连线淡出，避免满屏线里找不到刚点的那条）+ 选中连线后 `Delete` / `Backspace` 删除；**节点右键菜单**（[NodeContextMenu.tsx](src/components/NodeContextMenu.tsx)，动作与定位由 [contextMenu.ts](src/contextMenu.ts) 给出）；**蒙版局部重绘**入口）
+- [`CanvasPage.tsx`](src/components/CanvasPage.tsx) — 无限画布主页面（React Flow 集成、选中操作栏、操作帮助弹窗、历史面板入口、**取消入口**（工具栏「取消全部 (n)」只在有任务在跑时出现，单卡取消按钮在 [CanvasNodes.tsx](src/components/CanvasNodes.tsx)；取消是逻辑取消——排队出队后不再发上游、生成中跑完当前张才作废（产物仍落盘并计费，只是不派回画布），判定口径是本机意图 OR 服务端快照，见 [ARCHITECTURE.md](../docs/ARCHITECTURE.md) 5.4）+ **小地图显隐** + **缩放读数**（左下角控制坞里只显示百分比，视口由滚轮/按钮驱动；归一化见 [minimapVisible.ts](src/minimapVisible.ts)）+ **吸附开关** + **聚焦控件**（[canvasGeometry.ts](src/canvasGeometry.ts) 的 `focusViewportForNode`，让选中内容最多占视口 60%）；拖拽时经 [snapDrag.ts](src/snapDrag.ts) 吸到邻居边缘，对齐线由 [SnapGuides.tsx](src/components/SnapGuides.tsx) 单独订阅 [snapGuidesStore.ts](src/snapGuidesStore.ts) 画；**连线悬停高亮 / 选中降权**（[edgeStyle.ts](src/edgeStyle.ts)，选中一条线后其余连线淡出，避免满屏线里找不到刚点的那条）+ 选中连线后 `Delete` / `Backspace` 删除；**节点右键菜单**（[NodeContextMenu.tsx](src/components/NodeContextMenu.tsx)，动作与定位由 [contextMenu.ts](src/contextMenu.ts) 给出）；**蒙版局部重绘**入口）
 - [`SnapGuides.tsx`](src/components/SnapGuides.tsx) — 拖拽对齐线（`className="snap-guide"` + `data-axis`，E2E 依赖这套 DOM 契约）。**必须画在 React Flow 的 `ViewportPortal` 里**才随平移缩放跟随；`memo` + `useSyncExternalStore` 让它只在 store 真变化时重画，拖拽每帧不再整页重渲染
 - [`CanvasNodes.tsx`](src/components/CanvasNodes.tsx) — 三类节点（图片/图片组/提示词卡）+ `ActionButton`（nodrag 胶囊按钮）；`StatusLight` 状态灯 running 恒定「生成中」，`ElapsedText` 秒数文字以 `startedAtMs` 自计时（防逐秒重渲染，见 ARCHITECTURE 5.3）。图片节点的悬停操作栏七个按钮：预览大图 / **裁剪图片** / **放大图片** / **切分图片** / **蒙版重绘** / 替换图片 / 删除图片；图片带蒙版时左侧出现可点击的「清除蒙版」角标（蒙版会跟着图走、对后续每次生成都生效，用户会忘掉自己设过，角标本身就是撤销入口）。**操作栏是 `opacity-0 pointer-events-none`，不是 `invisible`** —— `visibility:hidden` 会把按钮从无障碍树摘掉（E2E 的 `get_by_role` 与读屏器都查不到）；用 `pointer-events` 拦命中测试才既不挡画布又能被查到。悬停区用 `pl-2` 内边距而不是 `ml-2` 外边距，否则鼠标从节点移向按钮途中会掉出 `.group` 而闪断。图片组节点用**叠卡**（`Math.min(n-1, 3)` 张错位背景卡）表达「这是一批」，纯 CSS 零状态。提示词卡底部在任务排队/生成中出现「取消」按钮（`cancelRequested` 为真时变「取消中…」并禁用，防重复点；终态到达才复位——后端是「排队的不发上游、生成中的跑完当前那张才作废，产物仍落盘并计费」，点完立刻复位等于撒谎）。尺寸下拉经 `Select` 的 `renderOption` 挂 [AspectIcon.tsx](src/components/AspectIcon.tsx) 比例图标，并开 `searchable` + `allowCustom`（清单只有固定几档，而上游常认清单外的尺寸，如 `1280x720`；选项清单用 `mergeCustomOption` 把当前值合进去，否则选过自定义值后触发器会退化成「请选择」）
 - [`AspectIcon.tsx`](src/components/AspectIcon.tsx) — 按比例画一个空心矩形（图形代替文字表达「1:1 / 16:9」），几何算 [aspectIcon.ts](src/aspectIcon.ts)。颜色只用 `currentColor`（写死 hex 会被 `surfaceAudit.test.ts` 拦下）
@@ -352,13 +366,13 @@ $env:IMAGORA_APP_ROOT = $h
 - [`ImageSplitDialog.tsx`](src/components/ImageSplitDialog.tsx) — 切分对话框：五个预设（2×2 / 2×3 / 3×2 / 3×3 / 4×4）+ 行列手填（即时夹到 1~8）、网格预览（在图片上铺 `grid` 格子而不是画 canvas）、文件名预览、1×1 时禁用确认（等于不切）。几何与导出在 [imageSplit.ts](src/imageSplit.ts)
 - [`ImageCropDialog.tsx`](src/components/ImageCropDialog.tsx) — 裁剪对话框（`ModalShell` + [useImageEditorViewport.ts](src/useImageEditorViewport.ts) 做视口 + [imageOps.ts](src/imageOps.ts) 做几何）：八向手柄拖拽、比例预设（自由 / 1:1 / 4:3 / 3:4 / 16:9 / 9:16）、实时像素读数、确认后回传 dataUrl 给上层落库。**遮罩用 `boxShadow: 0 0 0 9999px` 而不是四块 div** —— 四块只能盖住 stage 层（图片宽度），盖不满视口留白，且 spread 型阴影不参与布局
 - [`ImageUpscaleDialog.tsx`](src/components/ImageUpscaleDialog.tsx) — 放大对话框：目标长边预设（1024 / 2048 / 3072 / 4096，默认原长边 ×2 夹在区间内）+ 自定义、算法选择（high / bilinear / nearest）、换算文案（`原 1024×768 → 2048×1536（2.0×）· 显示比例 4:3`）。目标小于原图长边时只提示不禁用（缩小也是合法诉求）。**处理期间用户仍可取消**，卸载后用 `aliveRef` 拦住迟到的结果，避免窗都关了 `onConfirm` 还被调一次
-- [`WorkflowModals.tsx`](src/components/WorkflowModals.tsx) — 保存/加载/导入弹窗 + **`ZoomModal` 全屏预览**（createPortal 到 body，画布 / 经典表单 / 生产历史共用；Portal 根截停 click 冒泡，防误关外层宿主遮罩）
+- [`WorkflowModals.tsx`](src/components/WorkflowModals.tsx) — 保存/加载/导入弹窗 + **`ZoomModal` 全屏预览**（createPortal 到 body，画布 / 经典表单 / 生产历史共用；Portal 根截停 click 冒泡，防误关外层宿主遮罩；控制条含「复制图片 / 复制路径 / 新标签打开」，`copyPath` 缺省则不出路径按钮）
 - [`ResultPanel.tsx`](src/components/ResultPanel.tsx) — 经典表单结果区 5 态容器：主图形层 absolute 居中钉死 + 副信息层底部独立生长（行增减不挤动主图形）；切换交叉淡化（swap-in/swap-out，旧层保留 200ms）；排队/生成中/失败/已取消/透传 Gallery；生成中图标本体按自身颜色呼吸光（`icon-breathe`）
-- [`Gallery.tsx`](src/components/Gallery.tsx) — 经典表单结果图（双击放大 / 单击新窗口开原图，250ms 区分，走 useImageZoom；被 ResultPanel 透传）
+- [`Gallery.tsx`](src/components/Gallery.tsx) — 经典表单结果图（双击放大预览，走 [useImageZoom.ts](src/useImageZoom.ts)；被 ResultPanel 透传）
 - [`LogLine.tsx`](src/components/LogLine.tsx) — 日志单行：文本里的本机绝对路径拆成可点击复制词条（CopyChip），其余保持文本；行动画 log-line
 - [`CopyChip.tsx`](src/components/CopyChip.tsx) — 路径词条：点击复制完整路径（`navigator.clipboard`），复制后边框/底色高亮反馈 1.2s（不换文字，避免宽度跳动）
 - [`UploadZone.tsx`](src/components/UploadZone.tsx) — 参考图上传区（缩略图单击不触发文件选择器、双击放大）
-- [`HistoryGallery.tsx`](src/components/HistoryGallery.tsx) — 生成历史面板：**分页滚动加载**（首屏 60 条，滚动接近底部 600px 内自动追加、未占满视口自动续拉，按钮仅兜底，DOM 恒在单页数量级）两栏网格卡片（160px 结果图 | 提示词 2 行截断随容器宽 | 56px 参考图换行 | 按钮底部对齐横排）；提示词超 2 行时悬浮浮层补全（仅截断弹、宽固定 80vw 水平居中左/右各留 10vw、高随行数自动长、垂直跟随鼠标、无滚动条）；搜索/状态筛选重置到第 0 页；双击放大预览 / 单击新窗口开原图 / 导入当前画布；每行按钮与成败无关（复制提示词 / 打开目录 / 导入当前画布）；参考图已丢失的失败记录只给一条条数提示（无法还原，无重跑入口）
+- [`HistoryGallery.tsx`](src/components/HistoryGallery.tsx) — 生成历史面板：**分页滚动加载**（首屏 60 条，滚动接近底部 600px 内自动追加、未占满视口自动续拉，按钮仅兜底，DOM 恒在单页数量级）两栏网格卡片（160px 结果图 | 提示词 2 行截断随容器宽 | 56px 参考图换行 | 按钮底部对齐横排）；提示词超 2 行时悬浮浮层补全（仅截断弹、宽固定 80vw 水平居中左/右各留 10vw、高随行数自动长、垂直跟随鼠标、无滚动条）；搜索/状态筛选重置到第 0 页；双击放大预览（走 [useImageZoom.ts](src/useImageZoom.ts)）/ 导入当前画布；每行按钮与成败无关（复制提示词 / 打开目录 / 导入当前画布）；参考图已丢失的失败记录只给一条条数提示（无法还原，无重跑入口）
 - [`CostBoard.tsx`](src/components/CostBoard.tsx) — 成本看板条（历史面板顶部）：今日/累计花费、成功率、失败数、成功平均耗时、按尺寸分布 + 本机预算（日预算 / 单次上限，0 = 不限）编辑保存；数据来自 `/api/history/stats`，保存走 `/api/budget`
 - [`PromptImportModal.tsx`](src/components/PromptImportModal.tsx) — 粘贴导入弹窗（实时解析 + 问题标红）
 - [`ProviderModal.tsx`](src/components/ProviderModal.tsx) — **添加第三方供应商**弹窗（顶栏插头图标入口）：Provider ID（前端先按 `^[a-z][a-z0-9_-]{0,31}$` 即时提示，服务端仍会再校验）/ 显示名称 / API 地址 / API 协议（`openai` 标准 `/v1` · `ark` 已含版本号 · `custom` 手填路径）/ API 密钥（只进 `.env`）/ 默认模型（「获取可用模型」探 `GET {base}/models`，**探到即从文本框切成下拉**并选第一个，点「手填」可切回自由输入 —— 两种都要留：下拉解决「探到 7 个却看不见」，手填解决「清单外的 ID」）/ 「创建后立即切换」（默认不勾：新建来源只是目录多一条，换 profile 属「改了要重启」）。全部字段统一走 [`Field.tsx`](src/components/Field.tsx)（label + 控件 + 单行消息槽位），模型下拉开 `searchable`（中转站常报出几十上百个 ID，不给搜索只能盲滚）。**别用 `<datalist>`**：它只提供输入建议、会按已输入内容过滤，原生渲染还随浏览器变，曾导致「上游 7 个模型只显示 2 个」

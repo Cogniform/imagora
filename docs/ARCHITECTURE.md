@@ -47,7 +47,7 @@ Imagora 是本地单机工具，运行时分三层，方向单一：
 | `core/` | 后端核心逻辑（见 2.2），全部无 HTTP 依赖的纯业务模块；**双件**：规则层 core/AGENTS.md + 文件索引 core/README.md |
 | `frontend/` | React SPA（见 2.3）；**双件**：frontend/AGENTS.md（规则）+ frontend/README.md（索引） |
 | `scripts/` | 独立运维脚本：`migrate.py`（存储一步到最新，默认只报告、`--apply` 才落盘备份校验）；**双件**：scripts/AGENTS.md + scripts/README.md |
-| `tests/` | 后端 pytest（467 用例）+ 前端 vitest（1040 用例），全部不调上游；**双件**：tests/AGENTS.md + tests/README.md（逐文件覆盖） |
+| `tests/` | 后端 pytest（473 用例）+ 前端 vitest（1057 用例），全部不调上游；**双件**：tests/AGENTS.md + tests/README.md（逐文件覆盖） |
 | `docs/` | 设计圣经 `ARCHITECTURE.md`（本文档）+ `prompt-import-format.md` / `ecom-prompt-import-format.md`（格式规范）；**双件**：docs/AGENTS.md + docs/README.md |
 | `assets/` | **文档配图**（只服务 markdown 渲染，不是应用资源）：`screenshots/` 放 README「界面一览」的界面截图；**双件**：assets/AGENTS.md + assets/README.md |
 | `_ui-audit/` | 开发期 UI 审计图（本机产物，git 忽略）：由 [scripts/capture.py](../scripts/capture.py) 生成，与门面配图 `assets/screenshots/` 不是一回事 |
@@ -82,7 +82,7 @@ Imagora 是本地单机工具，运行时分三层，方向单一：
 
 - 外壳：`main.tsx` / `App.tsx` —— 入口与双模式外壳（经典表单 / 无限画布切换，`?mode=canvas` 直达），多窗口编号与主体色、标题栏品牌区 3D（见 8.4）
 - 契约：`api.ts`（`/api/*` 封装）+ `types.ts`（前后端类型契约，见 7.2）
-- Hooks：`useGenerationTask`（提交-轮询任务）、`useCanvasDrop`（拖放接线）、`useCanvasRecovery`（快照自动恢复）、`useImageZoom`（单击开原图/双击放大时序，Gallery 与 HistoryGallery 共用）
+- Hooks：`useGenerationTask`（提交-轮询任务）、`useCanvasDrop`（拖放接线）、`useCanvasRecovery`（快照自动恢复）、`useImageZoom`（预览开关状态，Gallery / HistoryGallery 共用；**单击不跳转**，双击才开预览）
 - 纯函数模块（零 UI 依赖，全部有单测，用例分布见 tests/README.md）：`workflow` / `layout` / `canvasDrop` / `promptImportFormat` / `canvasHistory` / `recovery` / `previewZoom` / `format` / `accent` / `windowInherit` / `cost` / `logPath` / `api-guards`
 - `components/`：`CanvasPage`（画布状态中枢 + 工具栏 + ReactFlow）、`CanvasNodes`（三类节点）、`WorkflowModals`（保存/加载/预览弹窗，ZoomModal 画布/经典表单/生产历史共用）、`PromptImportModal` / `HistoryGallery` / `UploadZone` / `Gallery` / `Select` / `FolderPicker`
 
@@ -242,7 +242,7 @@ React Flow v12（`@xyflow/react`）受控模式：`nodes` / `edges` 状态由 `C
 - **快捷键**：Ctrl+A 全选、Ctrl+Z/Y 撤销恢复、Ctrl+S 保存、Delete 删除（带退场动画）；输入框聚焦时不拦截。
 - **撤销/恢复**：`canvasHistory.ts` 50 条上限的 past/future 栈，删除/连线/新建/导入前记录快照。
 - **画布日志**：右下角浮层只露最新 5 条（`log-toast` 淡入上移），低饱和中性色弱化存在感，`pointer-events-none` 不挡画布操作。
-- **视口辅助（小地图 / 缩放滑杆）**：两者都塞进左下角 `<Controls>` 同一列，不往画布上另叠常驻 UI。缩放滑杆是垂直 `input[type=range]`，行程 5%~200% 与 React Flow 的 `minZoom=0.05` / `maxZoom=2` **严格对齐**（写死在 `minimapVisible.ts` 的常量里，不做成参数——参数化会让两处数字各自漂移）。滑杆与视口**双向同步**：拖动滑杆 → `zoomTo()`；视口变化（滚轮 / fitView）→ `handleViewportMove` 把 zoom 回灌读数。回灌有一道闸门 `draggingSliderRef`：拖动期间不回灌，否则用户手指与视口更新会互相拉扯；闸门靠 `pointerup` / `keyup` 松开。**刻度是线性的，不是对数**——两端跨度恰好都是 40 倍（0.05→2 与 5%→200%），端点对齐后对数映射系数精确为 1，写一套 log 只是把同一条直线算两遍再加浮点误差；滑杆读数因此直接就是用户看到的百分比。小地图**默认关闭**（右下角 160×110 固定面积，卡片少时是纯负担），开关状态与滑杆位置落 localStorage（`imagora.canvas-minimap.v1` / `imagora.canvas-zoom-slider.v1`，读写一律 try/catch 静默降级）。
+- **视口辅助（小地图 / 缩放读数）**：都塞进左下角控制坞同一列，不往画布上另叠常驻 UI。**缩放只有读数，没有滑杆**——滚轮与「放大 / 缩小 / 适应」已经够用，滑杆只换来一条要维护的双向同步（拖动改视口 + 视口变化回灌读数 + 拖动期间挡互相拉扯），2026-10-29 移除。读数是纯派生显示：`handleViewportMove` 把视口 zoom 经 `zoomToPercent` 归一成 5%~200% 的整数（行程与 React Flow 的 `minZoom=0.05` / `maxZoom=2` 对齐，常量写死在 `minimapVisible.ts`、不做参数——参数化会让两处数字各自漂移），不落盘。小地图**默认关闭**（卡片少时是纯负担），位置在**左上角**（右下角留给日志轮播）；开关状态落 localStorage（`imagora.canvas-minimap.v1`，读写一律 try/catch 静默降级）。
 - **生成中占位卡**：提示词节点 running 时在运行按钮上方长出一条细进度条（`.generation-pending`），文案按秒轮播（理解提示词 → 构图 → 铺设光影 → 细化细节 → 收尾），进度是**假进度**：`10 + (1 - e^(-s/28)) × 88`，渐近到 98% 永不越过（最后 2% 留给真实完成，不能让用户看到 100% 却还在等）。秒数锚定节点 `data.startedAtMs` 而不是卡片自走表——切后台、组件重挂载都不倒退；`GenerationPending` 的 `elapsed` 受控，不传才自建 interval，避免同一张卡上跑两套时钟。**进度只由 `transform: scaleX()` 驱动，绝不给 `width` 加 transition**：width 运动会每帧重排布局，在缩放中的画布上尤其卡。
 - **图片派生加工（裁剪 / 放大）**：画布图片节点悬停栏的「裁剪」「放大」都走**派生新图**而不是原地替换——加工是可回溯的派生操作，同一张原图常要裁好几个比例，原地换会连原图一起丢掉且无法从画布回溯。链路：对话框产出 `data:image/png;base64,...` → `dataUrlToFile()` 转 `File`（`canvasUpload` 只收 File）→ 上传注册表 → 在源图右侧偏移 `DERIVED_NODE_OFFSET_X = 200` 处新建图片节点（源节点已删则退化为视口中心）→ `recordHistory()`。裁剪与放大的几何运算**全在前端 canvas 完成**，后端零参与（不新增接口、不改 `generate_image` 契约）。
 - **`dataUrl` 转 `File` 失败必须抛错，不能返回空 File**：上传 0 字节会在画布上多出一个永远加载失败的红框节点，比当场报错难排查得多。
@@ -342,7 +342,7 @@ React Flow v12（`@xyflow/react`）受控模式：`nodes` / `edges` 状态由 `C
 
 | 方法 | 路径 | 请求 | 响应 |
 | --- | --- | --- | --- |
-| GET | `/api/config` | `?win=`（沿用窗口号，缺省服务端分配） | sizes / qualities / defaultOutputDir / windowId / baseUrl / defaultModel / activeProfile / models / providers / profileView（值 + 来源）/ fileState（文件值 + mtime + pending）；**响应头带 `X-Config-Token`**（写配置用） |
+| GET | `/api/config` | `?win=`（沿用窗口号，缺省服务端分配） | sizes / qualities / defaultOutputDir / **defaultOutputDirSource**（`explicit`/`last`/`window`）/ **savedDefaultOutputDir**（没设过为 null）/ windowId / baseUrl / defaultModel / activeProfile / models / providers / profileView（值 + 来源）/ fileState（文件值 + mtime + pending）；**响应头带 `X-Config-Token`**（写配置用） |
 | POST | `/api/config` | { profile, changes{baseUrl?,apiPath?,model?,apiKey?}, expectedMtimes{env?,config?} } | 写 `.env`（行级原地更新 + 原子写）：{ ok, written, mtimes, pending, fileState }。`changes` 里空字符串 = 不修改该字段；mtime 与磁盘不符 → 409 `stale_file`（绝不静默覆盖） |
 | POST | `/api/config/secret` | { profile, confirm: true } | { ok, cleared, fileState }（清空密钥：把 `.env` 里那一行注释掉，手工去掉 `#` 即恢复；必须显式 confirm） |
 | POST | `/api/config/providers` | { name, label?, baseUrl, protocol(`openai`/`ark`/`custom`), generationsPath?, editsPath?, model?, apiKey?, activate? } | { ok, name, profile, path, pending, fileState }（**新增第三方来源**：profile 写 `providers.local.json`、密钥写 `.env` 的 `API_KEY_<NAME>`；重名 / 名非法 / 地址非法 → 400 `invalid_value`；`activate` 才写 `ACTIVE_PROFILE` 并计入 pending；落盘后服务端 `reload_config()`，不用重启） |
@@ -350,11 +350,12 @@ React Flow v12（`@xyflow/react`）受控模式：`nodes` / `edges` 状态由 `C
 | DELETE | `/api/config/providers/{name}` | 路径参数 | { ok, removed, cleared, pending, fileState }（**删除本机来源**：只删 `providers.local.json` 里的条目，并把 `.env` 的 `API_KEY_<NAME>` 注释掉（不删行，可反悔）；出厂来源 → 400 `not_local`；**正在生效的来源 → 400 `profile_in_use`**（删了进程仍在用旧配置，下次启动静默回落，报错时联想不到是删了来源）；落盘后 `reload_config()`） |
 | GET | `/api/window/next` | 无 | { windowId }（原子分配，与 config 共用计数器） |
 | GET | `/api/status` | 无 | { windowCounter }（只读最大已分配编号） |
-| POST | `/api/select-folder` | { current } | { path }（系统弹窗，取消返回原值） |
+| POST | `/api/select-folder` | { current } | { path, canceled }（系统弹窗；取消返回原值且 `canceled: true` —— 调用方要区分「选了同一个目录」与「取消」） |
 | POST | `/api/open-folder` | { path } | { ok }（不存在自动创建；explorer 打开置前） |
 | POST | `/api/upload-ref` | multipart：images | { refs[ id, path, url, name, size, ext, mime ] }（落盘 `output/.refs/`） |
 | POST | `/api/delete-ref` | { path } | { ok }（尽力删除，文件不存在也算 ok） |
-| POST | `/api/output-dir` | { path } | { ok }（记住输出路径，重启沿用） |
+| POST | `/api/output-dir` | { path } | { ok }（记「上次用过的路径」：**每次生成成功也会写它**，只当没设默认时的兜底与自检探测用） |
+| POST | `/api/output-dir/default` | { path, win? } | { ok, savedDefaultOutputDir, defaultOutputDir, defaultOutputDirSource }（**设定新建卡片的默认输出路径**：`path` 空串 = 清除；相对路径 → 400 `invalid_value`；目录不可写 → 400 `not_writable`；**生成链路永不写它**，所以跑任何旧卡片都不会把它带走） |
 | POST | `/api/generate` | multipart：prompt/size/quality/output_dir/win/allow_over_budget + images 或 ref_paths + `mask`（**data URL 字符串**，非文件字段；透明像素 = 要重绘区域，不透明 = 保持原样，有 mask 时强制走 edits 接口且必须有底图）（**不接收任何凭据**：配置在文件里，服务端自己读） | { taskId, status }（提交即返回；**预算闸门**：超出 `singleRunLimit`/`dailyLimit` 且 `allow_over_budget≠true` 时 409 + `detail{reason, estimate, spentToday, settings}`） |
 | POST | `/api/generate/batch` | { items[{prompt,size,quality,refPaths[]}], outputDir, win, allowOverBudget } | { submitted[{taskId,prompt,size,cost}], skipped[{index,reason}], estimate, budget }（CLI 批量用：一次提交多条，单条非法只跳过该条；全部被跳过或超预算未确认则不提交任何任务） |
 | GET | `/api/tasks/{task_id}` | 无 | 快照（queued → running → done/failed，可 cancelled；终态保留 10 分钟，超时 404） |
@@ -419,9 +420,12 @@ React Flow v12（`@xyflow/react`）受控模式：`nodes` / `edges` 状态由 `C
 - **落点示意是纯 DOM 特效**：跟随光标的小胶囊（portal 到 body 的 fixed 元素），位置由 JS 直接写 transform——高频 dragover 移动不触发 React 渲染，只有拖拽起止等低频事件才改状态；文案/图标按意图区分（文件数量 / 新建类型），工具栏拖出画布外时**图标（红色 X）与文案（松开取消）同步切换**（`is-outside` 类直接写 DOM），与画布光标同款品牌色加号图形，风格统一。
 - **一屏全览**：不用 ReactFlow 初始 `fitView` prop——空画布时它会被 React Flow 延迟到「第一个节点出现」才执行，导致新建/上传后视口突然放大跳动（已实测复现）。统一走 `fitCanvasToContent()`（自动整理/加载工作流/恢复存档后调用），`minZoom` 放宽到 0.05，fitView 显式允许缩到 0.02，节点再多也能全览。
 - **自定义光标**：画布空白区域用高对比十字准星 SVG data-URI 光标（细十字 + 白描边 + 中心白底品牌色加号，与拖拽落点示意同款图形，风格统一），平移切抓手；文件拖拽悬停时切系统 `copy` 光标；可拖出按钮（新建卡片/图片组）悬浮时给 grab 光标 + 品牌色呼吸光晕 + 拖拽图标（`.btn-draggable`）——拖入时可放感明确、可拖出暗示明显。
-- **预览弹窗（ZoomModal，画布/经典表单/生产历史共用）**：状态收敛为单一 `view{zoom,pan}`，缩放/夹紧数学在 `previewZoom.ts` 纯函数；滚轮以指针为锚缩放，放大后拖拽平移（位移阈值区分点击与拖拽），双击复位，Esc/点击空白关闭。入口一致：画布图片节点双击或操作栏「预览大图」、经典表单参考图缩略图双击（UploadZone，单击缩略图不触发文件选择器）、结果图双击与生产历史图双击（Gallery / HistoryGallery，单击仍新窗口开原图——250ms 延时区分单击/双击，避免双击连开两个标签；时序逻辑抽在 `useImageZoom.ts` 公共 hook）。统一传注册表派生的完整 url，不传存储路径，组件内不再拼 `/api/image?path=`。全屏布局：`createPortal` 到 body（脱离含动画 transform 的祖先——如结果栏 `panel-card enter-up` fill both 后 transform 仍非 none，会把 fixed 后代捕获进自己的包含块），图片区占满窗口（contain 不裁切），控制条/文件名/提示悬浮叠加底部、不占图片空间。
+- **预览弹窗（ZoomModal，画布/经典表单/生产历史共用）**：状态收敛为单一 `view{zoom,pan}`，缩放/夹紧数学在 `previewZoom.ts` 纯函数；**`zoom` 是叠在「已按窗口缩好的布局盒」上的倍率，不是相对原图的比例**——百分比读数与「实际大小」都要经 `layoutScale` 换算（`actualZoomPercent` / `zoomForActualPixels`），否则一张被缩到 68% 的图会显示 100%，「1:1」也只是回到刚打开时的大小（曾与「适应窗口」完全重合）；滚轮以指针为锚缩放，放大后拖拽平移（位移阈值区分点击与拖拽），双击复位，Esc/点击空白关闭。入口一致：画布图片节点双击或操作栏「预览大图」、经典表单参考图缩略图单击（UploadZone，不触发文件选择器）、结果图与生产历史图双击（Gallery / HistoryGallery）。**单击不再打开任何新页面**：早先是「单击延时 250ms 开原图、双击取消那次开窗」，代价是点一下就把浏览器切走（丢了当前上下文），且慢双击会连闪两个标签；现在单击无动作、双击直达预览，复制（图片本体 / 文件路径）与「新标签打开」都在弹窗控制条里做成显式按钮，`useImageZoom` 因此退化为纯开关、不再有任何延时或未决定时器。统一传注册表派生的完整 url，不传存储路径，组件内不再拼 `/api/image?path=`；可复制路径由 `imagePath.ts:imagePathFromUrl` 从 url 反解（外链 / blob / data URL 返回空串 → 该按钮不渲染）。全屏布局：`createPortal` 到 body（脱离含动画 transform 的祖先——如结果栏 `panel-card enter-up` fill both 后 transform 仍非 none，会把 fixed 后代捕获进自己的包含块），图片区占满窗口（contain 不裁切），控制条/文件名/提示悬浮叠加底部、不占图片空间。
 - **生成历史列表视图（HistoryGallery）**：两栏网格卡片——横排卡片：左侧 160px 结果图占满卡片高度（`self-stretch` + `min-h-36` 兜底卡片高度，object-contain 不裁切）| 右侧提示词随容器宽（2 行截断 `line-clamp-2` 超出省略）+ 元信息（时间·质量·尺寸）| 参考图（56px 小图、超出换行）| 全文字按钮横排、`mt-auto` 永远底部对齐（复制提示词/打开目录/导入当前画布）。提示词仅在 2 行真被截断时悬浮补全（`scrollHeight > clientHeight` 判定，短文案不弹多余浮层），浮层宽固定为屏幕 80%（`width: 80vw`）且**水平居中**（`left: 10vw`，左/右各留 10vw 永不出屏）、高随行数自动长；垂直跟随鼠标 y 并 clamp 进视口（下边防溢出靠挪位而非滚动条）、`pointer-events-none`。参考图按注册表解析（`inputRefs`），找不回时保留琥珀「参考图缺失」提示。**性能与聚合**：同参数记录由后端读取层聚合（7.1 /api/history，时间不算参数）——失败刷屏不进入渲染；**分页滚动加载**——首屏 60 条、滚动接近底部 600px 内自动追加（`onScroll` 判定）+ 追加后未占满视口自动续拉，按钮仅兜底，DOM 恒在单页数量级，图片加 `decoding="async"`；注册表在路由内一次加载（`resolve_asset` 预载 entries）供全列表解析，避免逐行读盘。分页 offset 是聚合后偏移，与搜索/状态筛选天然一致（筛选在聚合前）。
 - **选中操作栏**：选中 ≥1 个节点即出现「运行所选/自动整理/自动连线/设置输出路径/删除所选」，运行与设路径只作用于提示词卡片；自动连线只补选中节点之间的边（`workflow.ts:autoConnectSelection`，候选与新增边两端均限定在选中集合内），未选中节点不受影响；自动整理时未选中的参考图/组作为只读锚点参与对齐。
+- **画布左下角控制坞（`.dock-row`）**：每行 = 图标 + 中文标签（放大/缩小/适应/聚焦/吸附/地图/锁定/帮助），React Flow 自带的「+ − ⛶ 🔒」全部关掉改走同一套 —— 纯图标竖列里除加减号外全靠猜（小地图两个方块状态肉眼无差别），用户反馈「完全糊里糊涂」。开关态用主体色 + 加粗表达，不靠换图标形状。行宽钉死 64px：四位数百分比（`200%`）与两字标签都放得下，且没有哪一行会按内容把整列撑宽。锁定只关「会改布局/视口」的东西（拖节点/框选/平移），滚轮缩放与「适应/聚焦」保持可用。
+- **小地图放左上角**：右下角是日志轮播（最多 5 行、右对齐），放一起会压住刚出现的日志；右上角让给选中操作栏，左下角是控制坞。`Select` 下拉宽度取 `offsetWidth`（布局尺寸）而非 `getBoundingClientRect().width`：后者含祖先 `scale` 变换，画布缩到 30% 时浮层只有触发器可视宽度的 30%，每行被截成 `1536…`。
+- **组节点叠卡**：`bg-brand/5` + `border-brand/10` 的若干层只向**左上**错开（≤12px，由根节点 `pt-3 pl-3` 预留，故永不越出节点边界），无旋转、各层同色。往右下叠会压到相邻节点、旋转会让每组朝向不一，混用两种掺色会出现「最底层发白、前两层发红」的割裂感。
 
 ### 8.4 视觉与动效
 
@@ -440,7 +444,12 @@ React Flow v12（`@xyflow/react`）受控模式：`nodes` / `edges` 状态由 `C
 - **窗口编号**：服务端锁保护原子递增；前端沿用优先级 `?win= > window.name（跨刷新记忆，复制标签不继承）> 服务端分配`。
 - **新窗口状态继承**：参考图已服务端落盘，继承只传元信息 + 尺寸/质量/输出路径（sessionStorage，几百字节）；提示词不保留。
 - **参考图服务端化**：添加进上传区即上传落盘 `.refs/`；启动时清理 24h 孤儿文件（不引入引用计数）。
-- **记住输出路径**：用户修改即上报 + 生成成功兜底写入 `output/.last_output_dir`，重启沿用。
+- **输出路径分两件事**（`output/.default_output_dir` + `output/.last_output_dir`）：
+  - **显式默认** = 用户意图。只在点工具栏「默认输出路径」（弹系统选目录窗口）时改写，`/api/output-dir/default` 落盘；生成链路**永不写它**。
+  - **上次使用** = 运行期事实。经典表单改路径即上报、生成成功也写（`/api/output-dir`）。
+  - 新建卡片取 `显式默认 > 上次使用 > output/win{N}`（`server.resolve_default_output_dir`），`/api/config` 一并下发来源供界面区分。
+  - 早先把两者当同一个值：任何一次跑图都会把用户设过的路径顶掉（跑一张旧卡片，新建卡片就跟着漂），且 `output/win{N}` 分区从此形同虚设。空 `output_dir`（批量/脚本）也只读默认、不回写。
+  - **边界**：已存在卡片不追溯（批量改走选中栏「设置输出路径」，可撤销）；经典表单在用户手动改过之后不再跟随默认；默认目录离线（外接盘没挂）时本轮回退但不删记录。
 
 ## 9. 防错清单（历史 bug 模式 → 规范）
 
@@ -490,7 +499,12 @@ React Flow v12（`@xyflow/react`）受控模式：`nodes` / `edges` 状态由 `C
 12. **模块表面各自硬编码 = 换主体色只变一半**。现象：换成紫色主体色后，经典表单三张卡与输出区跟着变，顶栏、画布工具栏、画布主体纹丝不动 —— 同一屏里一半紫调、一半偏白，像是两套界面；更早一轮还出现过「左边卡片是粉的、右边结果区是白的」这种同屏反向。根因有三层：① 15 处容器写死 `rgba(255,255,255,…)`（生成历史整窗是 `#f4f1eb` 米色，另有加载工作流列表、下拉浮层、画布节点卡、结果缩略图、最近提示词行…），绕过 token 的次数比走它的还多；② 就算走了 token 也看不出来 —— token 写的是 `hsl(hue 30% 98.4% / a)`，98.4% 亮度 + 30% 饱和度算出来离纯白只有 **2/255**，**数学上不可见**，看到的「跟色」全来自 alpha 低、页面底色透上来，于是任何需要不透明的面（弹窗、列表行）颜色就消失，且「更强的一档」反而更白；③ 硬编码 `blur(12px)` / `blur(16px)` 让这两处单独把壁纸糊掉，与第 7 条直接冲突。规范：**容器底色只能来自 `src/surface.ts`**，它把表面拆成两个正交的轴 —— **掺色 `tint`**（这个面是什么色，按角色分配：外壳多、内容区少、画布为 0）与**不透明度 `alpha`**（用户的通透度滑杆），掺色由「对饱和基色 `hsl(hue 80% 62%)` 做线性混合」解出**真实 RGB**，`tint` 因此等于可见量本身（0.10 ≈ 离白 15/255）。六档角色：`base` 骨架 / `card` 大面衬底 / `panel` 台面 / `float` 浮层 / `inset` 内嵌 / `plain` 中性。**嵌套不变量：内层不许比外层更透**，否则壁纸从容器中间透出一个洞（默认通透度：卡片 0.47 < 台面 0.85 < 浮层 0.94）。**画布主体走 `plain`（掺色 0）是有意的** —— 它是看图的台面，带色会干扰对生成图本身颜色的判断，别「顺手统一」掉。**可读性优先的角色不再用硬 floor**（老写法把通透度滑杆压成死值：拉到一半以上毫无反应），改为各角色自己的两端插值，台面全程 ≥0.68、浮层 ≥0.86。护栏：[surfaceAudit.test.ts](../frontend/src/surfaceAudit.test.ts) **解析 `index.css` 与全部 `.tsx`**，未登记的写死底色、或任何硬编码 `backdrop-filter: blur()` 直接红；豁免清单必须写理由，且 TSX 侧按「文件 + 类名」精确匹配（不做全局放行，否则清单会变成后门）。判据（可复跑）：同一表面在 `--accent-hue` 取 0 与 285 两档下 `getComputedStyle().backgroundImage` 必须不同（画布主体除外）、采样像素离白 >6/255、`backdropFilter` 一律 `none`。
 13. **弹窗内的浮层被 Esc 抢关**。现象：配置弹窗里展开下拉，按 Esc 想收起下拉，结果**整个弹窗被关掉**，正在填的内容全丢。根因：`ModalShell` 的 Esc 监听挂在 `document` 上且是 **capture 阶段**（`addEventListener("keydown", h, true)`），比浮层自己挂在触发元素上的 `onKeyDown` 先跑；`preventDefault()` 只能拦默认行为，拦不住已经排在前面的监听。规范：**关窗类全局快捷键要先问「有浮层吗」**——浮层打开时 `Select` 调 `pushPopup()`、关闭时 `popPopup()`，`ModalShell` 在关窗前 `hasOpenPopup()` 为真就让给浮层，因此需要两次 Esc（先收浮层、再关弹窗）。计数必须做负数保护，否则多余的 `pop` 会让 `hasOpenPopup()` 永远为真、弹窗**再也关不掉**（比原 bug 更糟）。测试：`popupLayer.test.ts`（含负数保护）+ `ModalShell.test.tsx` 的交互回归（已验证去掉守卫会失败）。
 
-### 9.5 配置写入
+### 9.5 测试隔离
+
+1. **提交类用例把任务丢进全局任务池 → 真打上游**。现象：`output/` 根目录反复出现 9 字节桩文件与 1~3MB 真图，账本里对应 prompt 是 `repaint the sky`（mask 用例的提示词），费用 0。根因：`generate()` 把任务交给**全局 `task_manager`** 后立刻返回；worker 线程可能在用例的 `monkeypatch` 撤销**之后**才真正执行，那一刻 `server.generate_image` 的函数级替身已失效 → 真实请求 + 真实落盘。规范：① 只读提交结果的用例把任务池换成「只登记不执行」替身；② `conftest.py` 的 `forbid_real_generation` 在 **session 作用域**兜底把 `server.generate_image` 换成抛错版（函数级撤销早，挡不住跨用例泄漏）；③ `isolate_user_data` 把 `config.DEFAULT_OUTPUT_DIR` 也指向 tmp ——它是「写哪」的唯一来源，漏了就写进用户目录。只挡 `server.generate_image`、不挡 `core.api.generate_image`：后者有成批「直调 + mock 网络」的合法用例。
+2. **用例断言写死真实目录名**。现象：`build_default_output_path` 的用例断言 `parent.name == "output"`，隔离把默认目录改成 tmp 后立刻红。规范：断言对 `config.DEFAULT_OUTPUT_DIR` 本身，不对它的字面名字。
+
+### 9.6 配置写入
 
 1. **界面写配置文件会污染 git 状态，且可能在冲突时静默丢数据**。现象：改的是一个本机偏好（我用的哪家接口），动的却是 git 跟踪的 `config.json`。规范：`config.json` 是**出厂目录**（只读），本机偏好一律写 `.env` 的 `<KEY>_<PROFILE>` 覆盖键，见 4.4。
 2. **从解析后的 dict 重新 dump 配置文件会冲掉用户内容**。现象：`.env` 里的注释、空行、键顺序、引号风格被重排，diff 爆炸。规范：**行级原地更新**——只改目标行，其余逐字保留（`core/config_write.py`）。
@@ -498,13 +512,13 @@ React Flow v12（`@xyflow/react`）受控模式：`nodes` / `edges` 状态由 `C
 4. **用模块顶层 `from core.config import XXX` 的值做运行时判断**。现象：`server.py` 里 `BASE_URL` / `DEFAULT_MODEL` / `ACTIVE_PROFILE` 是**导入时绑定**的快照，测试替换 `config.X` 不生效，将来做热加载也读不到新值（曾导致 pending 恒为空）。规范：运行时一律走 `config.xxx`。
 5. **两个解析器各写一套**。现象：`config_write.split_key_value` 与 `config._load_env_file` 规则若不一致，改的键可能被加载器忽略，或更糟——漏改它实际会读的键。规范：两者按同一套规则（strip / 跳过注释 / 按第一个 `=` 切）。
 
-### 9.6 坐标与几何
+### 9.7 坐标与几何
 
 1. **screenToFlowPosition 基准**：它接受相对视口容器的屏幕坐标并内部修正（domNode = `.react-flow` wrapper），传 window 坐标给 `getBoundingClientRect` 中心即可，**不要再手动减 rect 偏移**（会双重偏移）。换算公式：flow = (screen - vx) / zoom，与库实现保持一致。
 2. **预览缩放锚点**：transform-origin 为图片中心时，保持指针下内容不动的补偿公式 `pan_new = p - (p - pan_old) * k`（k = zoom_new/zoom_old）；数学进纯函数，UI 不重算。
 3. **平移夹紧**：放大后图片主体不能丢出可视区，中心对称夹紧；未测量（box 为 0）时原样返回。测试：previewZoom.test.ts。
 
-### 9.7 进程与并发
+### 9.8 进程与并发
 
 1. **taskkill /t 只杀子树不杀父**：单杀监听层会留 uv/python 宿主。规范：先回溯祖先链再连根杀。测试：test_main_process.py。
 2. **PID 文件互相覆盖**：多开脚本同时写会误杀/漏杀。规范：端口是唯一真相源，动态探测，不落 PID 文件。
@@ -512,7 +526,7 @@ React Flow v12（`@xyflow/react`）受控模式：`nodes` / `edges` 状态由 `C
 4. **配置 typo 静默失效**：config.json 拼错键名/选不存在的 profile → 控制台警告 + 回退默认。规范：profile 键有白名单校验（`unknown_profile_keys`），新增键必须同步加入 config 白名单和测试。
 5. **写文件瞬时锁（Windows 杀软/云同步）**。现象：输出目录存在且可写、手动写入正常，但生成结果偶发 `PermissionError [Errno 13]`——杀软（Defender/火绒等）实时扫描刚落盘的文件、或 OneDrive 云同步托管目录时短暂持有句柄。规范：图片落盘统一走 `core/api.py:write_file_with_retry`（只捕获 PermissionError、退避 0.3s/0.8s/1.5s 重试 3 次、耗尽原样抛出、其余异常不重试）；若每次都失败则非瞬时问题，应排查目录权限/杀软排除目录，不依赖重试框住。测试：test_core_api.py「瞬时锁重试」。
 
-### 9.8 数据一致性
+### 9.9 数据一致性
 
 1. **历史展示与导入判定漂移**。现象一：生成历史列表显示图片（`exists=true`）但导入报「不是可用的历史输出」；现象二（画布回流）：每张结果都弹软提示「节点 prompt-xxx：生成成功，但结果导入画布失败」，历史里却能看见图。根因（同一条坑的两个方向，任一侧漂移都会复现）：展示按资产注册表解析（账本带 outputAssetIds → `resolve_asset`，`.assets` 副本在、原 output 文件被移动/删除仍显示），导入白名单必须同时接受账本行的**两个合法派生路径**——注册表副本路径（历史面板「导入画布」传它）与账本 `output` 原路径（画布回流传任务结果 URL 反解的 run_generation 落盘路径）——只收其一必然另一侧失配：曾先只认原路径（原文件被清理后「列表有图、导入失败」，f4126fe 修至注册表副本优先），继而只认注册表副本（画布回流固定失败，本条修复）。规范：导入白名单 = 每个账本行的注册表副本路径 ∪ output 原路径（原路径须文件仍存在）；判定仍只来自账本记录，任意未记录路径拒绝（不能退化成任意路径读取接口）；展示与导入共用 `resolve_history_asset_path`。测试：test_server_helpers.py「只接受记录路径」+「注册表副本路径可导入」+「带 outputAssetIds 时原路径可导入（画布回流回归）」。
 
@@ -520,8 +534,8 @@ React Flow v12（`@xyflow/react`）受控模式：`nodes` / `edges` 状态由 `C
 
 ### 10.1 单元测试
 
-- 后端 pytest：**467 用例**（Windows 含 5 个专属测试，CI 必须 `windows-latest`；默认 tmp 路径的 WinError 5 历史坑已随目录重建恢复，见 AGENTS「活跃坑」）
-- 前端 vitest：**1040 用例**；`tsc --noEmit` + `vite build` 成功；`npm run lint` / `uv run ruff check .` 均零告警
+- 后端 pytest：**473 用例**（Windows 含 5 个专属测试，CI 必须 `windows-latest`；默认 tmp 路径的 WinError 5 历史坑已随目录重建恢复，见 AGENTS「活跃坑」）
+- 前端 vitest：**1057 用例**；`tsc --noEmit` + `vite build` 成功；`npm run lint` / `uv run ruff check .` 均零告警
 - 文档完整性：`python scripts/check_docs.py`（相对链接可解析 + AGENTS/tests-README/ARCHITECTURE/frontend-README 的测试计数与源码一致；改任何文档后必跑，见 [scripts/README.md](../scripts/README.md)）
 - **逐文件用例 / 覆盖范围 / 变更影响路由（完整表）见 [tests/README.md](../tests/README.md) 文件索引**
 

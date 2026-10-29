@@ -48,7 +48,7 @@ The interface has changed several times; the screenshots above are due for a res
 ### From one prompt to one image
 
 Type a prompt, click "Generate". With no reference image it is text-to-image; with one or several it is image-to-image.
-Every entry in the size dropdown is labelled with its price, quality is selectable and defaults to high, and the output location remembers the one you used last.
+Every entry in the size dropdown is labelled with its price, quality is selectable and defaults to high, and the output folder is set by picking one or typing a path.
 Reference images can be dragged in, pasted with `Ctrl+V`, or picked from a dialog — several at a time, and each one can be replaced or removed individually.
 If no key is configured, the top of the page says so right away — you won't fill in a whole round only to find out it cannot run.
 
@@ -61,6 +61,7 @@ Taking it back is just as easy: every card carries its own "Cancel", and "Cancel
 Queued tasks are simply never sent; the one already generating cannot be un-sent, so it finishes the current image and then voids it — the file still lands in the output folder and is still billed, it just never comes back to the canvas. The UI says so instead of pretending it stopped.
 A generated result automatically becomes a new image node right below that prompt, ready to be wired onward — no dragging images around.
 Any single result from the classic form can also be imported into the current canvas with one click and refined further.
+Every prompt card carries its own output folder. To pin one for future cards, click "Default output folder" on the toolbar and pick a folder in the dialog. Once set it stays put — running any old card will no longer drag it elsewhere; before you set it, it merely follows whatever generated last, and the button shows "(auto)" to say so. Existing cards are untouched — to change them all at once, select them and use "Set output folder" in the top-right selection bar (undoable).
 
 ### Batch and reuse
 
@@ -92,7 +93,7 @@ Failed records show why they failed in the panel (missing reference images are c
 | | |
 | --- | --- |
 | Generation history | Search by prompt, quality, or filename; filter by success or failure; scrolling to the bottom keeps loading |
-| Full-size preview | Double-click an image for a full-screen view; wheel to zoom, drag to pan, one click back to actual size or fit-to-window |
+| Full-size preview | Double-click an image for a full-screen view; wheel to zoom, drag to pan, one click back to actual size or fit-to-window; copy the image, copy its path, or open it in a new tab |
 | Output location | Type a path or pick a folder; after generation, open it in Explorer with one click |
 | Log | Only final results and action feedback; local paths that appear can be clicked to copy |
 | Workflows | Save and restore the canvas by name, asking first if the name is taken; workflows still restore after the project is renamed or moved |
