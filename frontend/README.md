@@ -8,7 +8,7 @@ React 19 + TypeScript + Vite + Tailwind v4 + React Flow（`@xyflow/react`）。�
 npm install
 npm run dev        # 开发模式（热更新；需后端已启动，见下）
 npm run build      # tsc --noEmit + vite build → dist/（git 忽略，由后端服务托管）
-npm test           # vitest run（1057 用例）
+npm test           # vitest run（1061 用例）
 npm run lint       # eslint
 npx tsc --noEmit   # 类型检查
 ```
@@ -366,7 +366,7 @@ $env:IMAGORA_APP_ROOT = $h
 - [`ImageSplitDialog.tsx`](src/components/ImageSplitDialog.tsx) — 切分对话框：五个预设（2×2 / 2×3 / 3×2 / 3×3 / 4×4）+ 行列手填（即时夹到 1~8）、网格预览（在图片上铺 `grid` 格子而不是画 canvas）、文件名预览、1×1 时禁用确认（等于不切）。几何与导出在 [imageSplit.ts](src/imageSplit.ts)
 - [`ImageCropDialog.tsx`](src/components/ImageCropDialog.tsx) — 裁剪对话框（`ModalShell` + [useImageEditorViewport.ts](src/useImageEditorViewport.ts) 做视口 + [imageOps.ts](src/imageOps.ts) 做几何）：八向手柄拖拽、比例预设（自由 / 1:1 / 4:3 / 3:4 / 16:9 / 9:16）、实时像素读数、确认后回传 dataUrl 给上层落库。**遮罩用 `boxShadow: 0 0 0 9999px` 而不是四块 div** —— 四块只能盖住 stage 层（图片宽度），盖不满视口留白，且 spread 型阴影不参与布局
 - [`ImageUpscaleDialog.tsx`](src/components/ImageUpscaleDialog.tsx) — 放大对话框：目标长边预设（1024 / 2048 / 3072 / 4096，默认原长边 ×2 夹在区间内）+ 自定义、算法选择（high / bilinear / nearest）、换算文案（`原 1024×768 → 2048×1536（2.0×）· 显示比例 4:3`）。目标小于原图长边时只提示不禁用（缩小也是合法诉求）。**处理期间用户仍可取消**，卸载后用 `aliveRef` 拦住迟到的结果，避免窗都关了 `onConfirm` 还被调一次
-- [`WorkflowModals.tsx`](src/components/WorkflowModals.tsx) — 保存/加载/导入弹窗 + **`ZoomModal` 全屏预览**（createPortal 到 body，画布 / 经典表单 / 生产历史共用；Portal 根截停 click 冒泡，防误关外层宿主遮罩；控制条含「复制图片 / 复制路径 / 新标签打开」，`copyPath` 缺省则不出路径按钮）
+- [`WorkflowModals.tsx`](src/components/WorkflowModals.tsx) — 保存/加载/导入弹窗 + **`ZoomModal` 全屏预览**（createPortal 到 body，画布 / 经典表单 / 生产历史共用；Portal 根截停 click 冒泡，防误关外层宿主遮罩）。**控制层分两处**：顶部一条放文件名（超长省略、悬停给完整路径）+ 关闭按钮；底部**单行控制坞**三组（`缩小 · 读数 · 放大` → 分隔线 → `适应窗口 / 实际大小` → 分隔线 → `复制图片 / 复制路径 / 新标签打开`，`copyPath` 缺省则不出路径按钮）。长操作说明只在坞的 `title` 里，不常驻；复制反馈是坞上方的绝对定位浮标（不进布局，避免反馈一变宽窄就让鼠标底下的按钮挪位置）
 - [`ResultPanel.tsx`](src/components/ResultPanel.tsx) — 经典表单结果区 5 态容器：主图形层 absolute 居中钉死 + 副信息层底部独立生长（行增减不挤动主图形）；切换交叉淡化（swap-in/swap-out，旧层保留 200ms）；排队/生成中/失败/已取消/透传 Gallery；生成中图标本体按自身颜色呼吸光（`icon-breathe`）
 - [`Gallery.tsx`](src/components/Gallery.tsx) — 经典表单结果图（双击放大预览，走 [useImageZoom.ts](src/useImageZoom.ts)；被 ResultPanel 透传）
 - [`LogLine.tsx`](src/components/LogLine.tsx) — 日志单行：文本里的本机绝对路径拆成可点击复制词条（CopyChip），其余保持文本；行动画 log-line

@@ -152,6 +152,73 @@ describe("ZoomModal 复制入口", () => {
 });
 
 /**
+ * 控制坞排版：旧版把「文件名 / 缩放 / 复制 / 四段提示语」堆成一列居中的灰方块，
+ * 既没主次、也分不清状态行与按钮行（用户反馈「排版奇怪、很混乱」）。现在的分工是：
+ * 身份信息（文件名 + 关闭）在上，操作在下成**单行三组**，长说明只在 title 里、不常驻。
+ * 这里锁住这三条，改回多行堆叠或把说明塞回来就会红。
+ */
+describe("ZoomModal 控制坞排版", () => {
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  it("顶部有关闭按钮，点了关闭（不再只能靠 Esc / 点空白）", () => {
+    const onClose = vi.fn();
+    render(<ZoomModal imageUrl="https://example.com/a.png" name="测试图" onClose={onClose} />);
+    fireEvent.click(screen.getByRole("button", { name: "关闭预览" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("控制坞是单行三组：缩放（缩小/读数/放大）、视图档位、动作按钮都在同一行容器里", () => {
+    render(
+      <ZoomModal
+        imageUrl="https://example.com/a.png"
+        name="测试图"
+        copyPath={COPY_PATH}
+        onClose={vi.fn()}
+      />,
+    );
+    const zoomIn = screen.getByRole("button", { name: "放大" });
+    const zoomOut = screen.getByRole("button", { name: "缩小" });
+    // 缩放组的三个成员是同一个 flex 行的兄弟（读数夹在两颗按钮中间）
+    const zoomGroup = zoomIn.parentElement as HTMLElement;
+    expect(zoomGroup).toBe(zoomOut.parentElement);
+    expect(zoomGroup.textContent).toContain("%");
+
+    // 视图 + 动作与缩放组同属一个 flex 容器（单行），不再各自成行
+    const dock = zoomGroup.parentElement as HTMLElement;
+    for (const name of ["适应窗口", "实际大小", "复制图片", "复制路径"]) {
+      const node = screen.getByRole("button", { name });
+      expect(dock.contains(node), `${name} 不在同一个控制坞里`).toBe(true);
+    }
+    expect(dock.className).toContain("flex");
+    expect(dock.className).toContain("items-center");
+  });
+
+  it("长说明不常驻：提示语退到 title，界面上没有那一行灰字", () => {
+    render(<ZoomModal imageUrl="https://example.com/a.png" name="测试图" onClose={vi.fn()} />);
+    expect(screen.queryByText(/滚轮缩放 · 放大后拖拽平移/)).toBeNull();
+    expect(document.querySelector('[title*="滚轮缩放"]')).toBeTruthy();
+  });
+
+  it("复制反馈是坞上方的浮标（绝对定位），不挤进控制坞的布局行", async () => {
+    vi.mocked(copyTextToClipboard).mockResolvedValue(undefined);
+    render(
+      <ZoomModal
+        imageUrl="https://example.com/a.png"
+        name="测试图"
+        copyPath={COPY_PATH}
+        onClose={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "复制路径" }));
+    const badge = await screen.findByText("已复制路径");
+    expect(badge.className).toContain("absolute");
+  });
+});
+
+/**
  * 「实际大小」与百分比读数：老实现把 1:1 写成 zoom=1，实际只是「回到刚打开时的大小」，
  * 与「适应窗口」完全重合（用户看不懂 1:1 到底指什么）。这里锁定：
  * ① 按钮叫「实际大小」而不是 `1:1`；② 读数按原始像素算（jsdom 里 naturalWidth 与

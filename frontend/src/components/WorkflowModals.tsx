@@ -133,6 +133,14 @@ export function WorkflowLoadModal({
 /** 滚轮缩放步进 */
 const ZOOM_STEP = 1.2;
 
+/** 预览控制坞的按钮样式：压在图片上的中性半透白（不跟随主体色，见 surfaceAudit 的 TSX 豁免）。
+ *  统一定义而不是每处重写 —— 早先 6 个按钮三种写法（有的带圆角、有的没有、字号还不一致），
+ *  排在同一行里像是拼出来的。**高度必须一致**（`h-7` + `inline-flex items-center`）：
+ *  只按 padding 撑高时，图标按钮（24px）会比文字按钮（20px）高一圈，一行里出现两种基线。 */
+const DOCK_BUTTON =
+  "inline-flex h-7 items-center justify-center rounded-md bg-white/10 px-2.5 leading-none text-white/90 transition-colors duration-200 hover:bg-white/20 hover:text-white";
+const DOCK_ICON_BUTTON = `${DOCK_BUTTON} w-7 px-0`;
+
 interface PreviewView {
   zoom: number;
   pan: { x: number; y: number };
@@ -406,83 +414,128 @@ export function ZoomModal({
           }}
         />
       </div>
-      {/* 全屏悬浮控制条：不占图片空间，半透明叠加在底部（data-zoom-controls 供 overlay 排除，点击不误关） */}
+      {/* 顶部信息条：左侧文件名（超长省略，悬停给完整路径）、右侧关闭。
+          旧版把文件名塞进底部控制条的第一行，于是「一列三个居中的东西」（名字 / 缩放 / 操作 /
+          提示语）挤成一个灰方块，既没有主次也分不清哪行是状态、哪行是按钮。现在按职责分两处：
+          身份信息在上、操作在下，中间整块留给图片。 */}
       <div
         data-zoom-controls
-        className="absolute bottom-3 left-1/2 flex -translate-x-1/2 flex-col items-center gap-1 rounded-xl bg-black/40 px-3 py-2 text-xs text-white shadow-lg"
+        className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-3 p-3"
       >
-        <div className="max-w-[70vw] truncate">{name}</div>
-        <div className="flex items-center gap-2">
-          <button type="button" className="px-1.5 hover:text-brand" onClick={() => setView((prev) => clampPan({ ...prev, zoom: clampZoom(prev.zoom * ZOOM_STEP) }))} aria-label="放大">
-            ＋
-          </button>
-          <button type="button" className="px-1.5 hover:text-brand" onClick={() => setView((prev) => clampPan({ ...prev, zoom: clampZoom(prev.zoom / ZOOM_STEP) }))} aria-label="缩小">
-            －
-          </button>
-          {/* 读数按**原始像素**算（view.zoom × 布局缩放比），不是 view.zoom 本身：
-              图片先被 max-width/height 缩进窗口，直接乘 100 会对着 68% 的画面写 100%。 */}
-          <span
-            className="w-12 text-center tabular-nums"
-            title={`${natural ? `${natural.width}×${natural.height} · ` : ""}相对原图的实际显示比例`}
-          >
-            {actualZoomPercent(view.zoom, natural, imageBoxRef.current)}%
-          </span>
-          <button type="button" className="rounded bg-white/10 px-2 py-0.5 hover:bg-white/20" onClick={fitToWindow}>
-            适应窗口
-          </button>
-          {/* 「实际大小」= 1 图像像素 = 1 屏幕像素。旧标签写 `1:1` 且实现是 zoom=1，
-              实际只是「回到刚打开时的大小」，与「适应窗口」完全重合 —— 已改为真 1:1。 */}
-          <button
-            type="button"
-            className="rounded bg-white/10 px-2 py-0.5 hover:bg-white/20"
-            onClick={actualSize}
-            title="实际大小：1 个图像像素 = 1 个屏幕像素（大图会超出窗口，可拖拽查看）"
-          >
-            实际大小
-          </button>
+        <div
+          className="pointer-events-auto flex h-7 max-w-[62vw] items-center truncate rounded-lg bg-black/40 px-2.5 text-xs text-white/85 shadow-lg"
+          title={copyPath || name}
+        >
+          {name}
         </div>
-        {/* 复制 / 打开：图片单击不再跳到新页面（那是旧行为），能力集中到这里做成显式按钮。
-            反馈落在同一行的右侧（已复制 / 失败原因），不弹 toast，也不改按钮文字——改文字会让
-            控制条宽度跳动，鼠标下的按钮会在指针底下挪位置。 */}
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            className="rounded bg-white/10 px-2 py-0.5 hover:bg-white/20"
-            onClick={() => void handleCopyImage()}
-          >
-            复制图片
-          </button>
-          {copyPath && (
+        <button
+          type="button"
+          aria-label="关闭预览"
+          title="关闭（Esc）"
+          onClick={onClose}
+          className="pointer-events-auto flex h-7 w-7 flex-none items-center justify-center rounded-full bg-black/40 text-white/80 shadow-lg transition-colors duration-200 hover:bg-white/20 hover:text-white"
+        >
+          <svg viewBox="0 0 16 16" aria-hidden="true" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
+            <path d="M4 4l8 8M12 4l-8 8" />
+          </svg>
+        </button>
+      </div>
+      {/* 底部控制坞：**单行三组**（缩放 / 视图 / 动作），组间一条细分隔线。
+          不占图片空间；data-zoom-controls 让 overlay 的「点空白关闭」把它排除在外。
+          提示语不再常驻显示（四段说明挤在 10px 灰字里最乱），改挂 title —— 交互本身一用就会。 */}
+      <div data-zoom-controls className="absolute inset-x-0 bottom-3 flex justify-center px-3">
+        <div
+          className="relative flex items-center gap-1 rounded-xl bg-black/40 px-1.5 py-1 text-xs text-white shadow-lg"
+          title="滚轮缩放 · 放大后拖拽平移 · 双击回到适应窗口 · 点击空白处或 Esc 关闭"
+        >
+          {/* 组 1：缩放（步进按钮夹住读数，读数是这一组的中心而不是夹在操作按钮中间） */}
+          <div className="flex items-center gap-1">
             <button
               type="button"
-              className="rounded bg-white/10 px-2 py-0.5 hover:bg-white/20"
-              title={copyPath}
-              onClick={() => void handleCopyPath()}
+              aria-label="缩小"
+              title="缩小"
+              className={DOCK_ICON_BUTTON}
+              onClick={() => setView((prev) => clampPan({ ...prev, zoom: clampZoom(prev.zoom / ZOOM_STEP) }))}
             >
-              复制路径
+              <svg viewBox="0 0 16 16" aria-hidden="true" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+                <path d="M3.5 8h9" />
+              </svg>
             </button>
-          )}
-          <a
-            href={imageUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="rounded bg-white/10 px-2 py-0.5 hover:bg-white/20"
-          >
-            新标签打开
-          </a>
+            {/* 读数按**原始像素**算（view.zoom × 布局缩放比），不是 view.zoom 本身：
+                图片先被 max-width/height 缩进窗口，直接乘 100 会对着 68% 的画面写 100%。 */}
+            <span
+              className="flex h-7 w-12 items-center justify-center tabular-nums text-white/90"
+              title={`${natural ? `${natural.width}×${natural.height} · ` : ""}相对原图的实际显示比例`}
+            >
+              {actualZoomPercent(view.zoom, natural, imageBoxRef.current)}%
+            </span>
+            <button
+              type="button"
+              aria-label="放大"
+              title="放大"
+              className={DOCK_ICON_BUTTON}
+              onClick={() => setView((prev) => clampPan({ ...prev, zoom: clampZoom(prev.zoom * ZOOM_STEP) }))}
+            >
+              <svg viewBox="0 0 16 16" aria-hidden="true" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+                <path d="M3.5 8h9M8 3.5v9" />
+              </svg>
+            </button>
+          </div>
+
+          <span aria-hidden="true" className="mx-0.5 h-4 w-px flex-none bg-white/20" />
+
+          {/* 组 2：视图档位。「实际大小」= 1 图像像素 = 1 屏幕像素（旧标签写 1:1 而实现是 zoom=1，
+              只等于「回到刚打开时的大小」，与「适应窗口」完全重合 —— 已改为真 1:1）。 */}
+          <div className="flex items-center gap-1">
+            <button type="button" className={DOCK_BUTTON} onClick={fitToWindow}>
+              适应窗口
+            </button>
+            <button
+              type="button"
+              className={DOCK_BUTTON}
+              onClick={actualSize}
+              title="实际大小：1 个图像像素 = 1 个屏幕像素（大图会超出窗口，可拖拽查看）"
+            >
+              实际大小
+            </button>
+          </div>
+
+          <span aria-hidden="true" className="mx-0.5 h-4 w-px flex-none bg-white/20" />
+
+          {/* 组 3：动作。图片单击不再跳新页面（旧行为），复制/打开都是显式按钮；
+              反馈做成坞上方的浮标（绝对定位），不进布局 —— 反馈一变宽窄就会让鼠标底下的
+              按钮挪位置（早先改按钮文字也踩过同一个坑）。 */}
+          <div className="flex items-center gap-1">
+            <button type="button" className={DOCK_BUTTON} onClick={() => void handleCopyImage()}>
+              复制图片
+            </button>
+            {copyPath && (
+              <button
+                type="button"
+                className={DOCK_BUTTON}
+                title={copyPath}
+                onClick={() => void handleCopyPath()}
+              >
+                复制路径
+              </button>
+            )}
+            <a href={imageUrl} target="_blank" rel="noreferrer" className={DOCK_BUTTON}>
+              新标签打开
+            </a>
+          </div>
+
           {copyState && (
             <span
               role="status"
               aria-live="polite"
-              className={`max-w-[40vw] truncate text-[10px] ${
-                copyState.kind === "copied" ? "text-emerald-300" : "text-amber-300"
+              className={`pointer-events-none absolute -top-9 left-1/2 max-w-[60vw] -translate-x-1/2 truncate rounded-md px-2 py-1 text-[11px] shadow-lg ${
+                copyState.kind === "copied" ? "bg-emerald-600/90 text-white" : "bg-amber-600/90 text-white"
               }`}
             >
               {copyState.text}
             </span>
           )}
         </div>
-        <div className="text-[10px] text-white/50">滚轮缩放 · 放大后拖拽平移 · 双击回到适应窗口 · 点击空白处或 Esc 关闭</div>
       </div>
     </div>,
     document.body,
