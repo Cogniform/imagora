@@ -107,10 +107,16 @@ def test_output_path_returns_given_path():
 
 
 def test_output_path_generates_default_name():
-    """未给路径 -> 生成 output/ai_时间戳_序号.png"""
+    """未给路径 -> 落到**默认输出目录**下的 ai_时间戳_序号.png
+
+    断言对的是 `config.DEFAULT_OUTPUT_DIR`（而不是字面量 "output"）：isolate_user_data
+    会把它指到 tmp_path，写死目录名就跟隔离机制打架。真正要守的是「落在默认目录里」。
+    """
+    import core.config as config
+
     result = build_default_output_path(None, "png")
     path = Path(result)
-    assert path.parent.name == "output"
+    assert path.parent == Path(config.DEFAULT_OUTPUT_DIR)
     assert re.fullmatch(r"ai_\d{8}_\d{6}_\d+\.png", path.name), (
         f"文件名格式不符: {path.name}"
     )
