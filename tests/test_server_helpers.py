@@ -439,6 +439,124 @@ def test_remember_output_dir_saves(monkeypatch, tmp_path):
     assert saved["path"] == target
 
 
+def test_save_default_output_dir_round_trip(tmp_path):
+    """显式默认：写入后能读回；清除后回到 None（空串 = 清除设定）"""
+    import server
+
+    server.DEFAULT_OUTPUT_DIR_FILE = str(tmp_path / ".default_output_dir")
+    target = tmp_path / "my_output"
+    target.mkdir()
+
+    assert server.load_default_output_dir() is None
+    assert server.save_default_output_dir(str(target)) is True
+    assert server.load_default_output_dir() == str(target)
+
+    # 空串 = 清除，回到自动
+    assert server.save_default_output_dir("") is True
+    assert server.load_default_output_dir() is None
+    assert not (tmp_path / ".default_output_dir").exists()
+
+
+def test_load_default_output_dir_keeps_record_when_dir_offline(tmp_path):
+    """目录暂时不存在（外接盘没挂）-> 本轮不生效，但**不删记录**，盘回来照旧生效。
+
+    与「上次使用」的自愈差异：那条是运行期缓存，失效即丢无所谓；
+    这条是用户意图，删掉等于把用户设过的东西悄悄清空。
+    """
+    import server
+
+    server.DEFAULT_OUTPUT_DIR_FILE = str(tmp_path / ".default_output_dir")
+    offline = tmp_path / "not_mounted" / "out"
+    (tmp_path / ".default_output_dir").write_text(str(offline), encoding="utf-8")
+
+    assert server.load_default_output_dir() is None  # 目录不在，本轮不生效
+    assert (tmp_path / ".default_output_dir").exists()  # 记录仍在
+
+    offline.mkdir(parents=True)  # 盘回来了
+    assert server.load_default_output_dir() == str(offline)
+
+
+def test_default_output_dir_wins_over_last_used(monkeypatch, tmp_path):
+    """优先级：显式默认 > 上次使用 > 按窗口分区。
+
+    这是「跑一张旧卡片就把默认路径带跑」的回归防线：只要设过默认，
+    生成写进 .last_output_dir 的路径就不能再影响它。
+    """
+    import server
+
+    explicit = tmp_path / "explicit"
+    last = tmp_path / "last"
+    explicit.mkdir()
+    last.mkdir()
+    server.DEFAULT_OUTPUT_DIR_FILE = str(tmp_path / ".default_output_dir")
+    server.save_default_output_dir(str(explicit))
+    monkeypatch.setattr(server, "load_last_output_dir", lambda: str(last))
+
+    path, source = server.resolve_default_output_dir(3)
+    assert (path, source) == (str(explicit), "explicit")
+
+    # 没有显式默认时退回上次使用
+    server.save_default_output_dir("")
+    path, source = server.resolve_default_output_dir(3)
+    assert (path, source) == (str(last), "last")
+
+    # 两者都没有才按窗口分区
+    monkeypatch.setattr(server, "load_last_output_dir", lambda: None)
+    path, source = server.resolve_default_output_dir(3)
+    assert source == "window"
+    assert path.endswith("win3")
+
+
+def test_get_config_reports_output_default_source(monkeypatch, tmp_path):
+    """接口下发来源标记：界面上要能区分「你手动设的」与「自动跟上次用的」"""
+    import server
+
+    explicit = tmp_path / "explicit"
+    explicit.mkdir()
+    server.DEFAULT_OUTPUT_DIR_FILE = str(tmp_path / ".default_output_dir")
+    server.save_default_output_dir(str(explicit))
+
+    cfg = server.get_config(None)
+    assert cfg["defaultOutputDir"] == str(explicit)
+    assert cfg["defaultOutputDirSource"] == "explicit"
+    assert cfg["savedDefaultOutputDir"] == str(explicit)
+
+
+def test_set_default_output_dir_rejects_relative_path(tmp_path):
+    """相对路径直接 400：本地服务没有「当前目录」语义，相对路径会落到进程 cwd 里"""
+    import pytest
+    from fastapi import HTTPException
+
+    import server
+
+    server.DEFAULT_OUTPUT_DIR_FILE = str(tmp_path / ".default_output_dir")
+    with pytest.raises(HTTPException) as exc:
+        server.set_default_output_dir(path="relative/out", win=0)
+    assert exc.value.status_code == 400
+    assert exc.value.detail["error"] == "invalid_value"
+
+
+def test_set_default_output_dir_creates_and_reports(tmp_path):
+    """选一个新目录 -> 目录被创建（makedirs）并成为默认；返回新的生效值与来源"""
+    import server
+
+    server.DEFAULT_OUTPUT_DIR_FILE = str(tmp_path / ".default_output_dir")
+    picked = tmp_path / "brand_new" / "out"
+
+    result = server.set_default_output_dir(path=str(picked), win=2)
+
+    assert result["ok"] is True
+    assert picked.is_dir()
+    assert result["defaultOutputDir"] == str(picked)
+    assert result["defaultOutputDirSource"] == "explicit"
+    assert result["savedDefaultOutputDir"] == str(picked)
+
+    # 清除后再查：回到自动（这里没有任何记录 -> window）
+    cleared = server.set_default_output_dir(path="", win=2)
+    assert cleared["savedDefaultOutputDir"] is None
+    assert cleared["defaultOutputDirSource"] == "window"
+
+
 def test_next_window_increments_and_shares_counter():
     """连续调用 -> 编号递增；与 config 无参调用共用同一计数器（脚本开窗不撞号）"""
     from server import get_config, next_window

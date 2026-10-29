@@ -250,6 +250,13 @@ interface CanvasPageProps {
   config: AppConfig;
   /** 当前模型是否认「质量」档位（豆包 Seedream 不认 → 提示词节点不渲染那一栏）。默认 true。 */
   qualityEffective?: boolean;
+  /** 新建提示词卡片用的默认输出路径（服务端权威，显式默认 > 上次使用 > 按窗口分区）。
+   *  缺省回退 `config.defaultOutputDir`（既有调用方/测试不必都改）。 */
+  defaultOutputDir?: string;
+  /** 该默认值是不是用户手动设的（`explicit`）—— 决定工具栏按钮显示「已设定」还是「自动」 */
+  defaultOutputDirIsExplicit?: boolean;
+  /** 点「默认输出路径」：由上层弹系统文件夹选择器并写回服务端（画布不自己拼路径） */
+  onSetDefaultOutputDir?: (() => void) | undefined;
   /** 待整图导入画布的提交 id（经典结果导入触发；导入完成后回调清空） */
   importSubmissionId?: string | null;
   onSubmissionImported?: () => void;
@@ -258,6 +265,9 @@ interface CanvasPageProps {
 export function CanvasPage({
   config,
   qualityEffective = true,
+  defaultOutputDir,
+  defaultOutputDirIsExplicit = false,
+  onSetDefaultOutputDir,
   importSubmissionId,
   onSubmissionImported,
 }: CanvasPageProps) {
@@ -1287,9 +1297,10 @@ export function CanvasPage({
     () => ({
       size: config.sizes[0]?.value ?? "1024x1024",
       quality: defaultQuality,
-      outputDir: config.defaultOutputDir,
+      // 实时默认（不是 config 里那份页面加载快照）：设完默认后立刻新建卡片就该用它
+      outputDir: defaultOutputDir ?? config.defaultOutputDir,
     }),
-    [config, defaultQuality],
+    [config, defaultQuality, defaultOutputDir],
   );
 
   /** 文件拖放落画布：上传画布注册表 → 以落点为起点建节点（files 已过滤、落点已夹紧，由 hook 传入）。
@@ -1352,14 +1363,18 @@ export function CanvasPage({
         // 铺排（按卡片真实尺寸、每行 3 张）在 buildPromptNodes 内部完成
         ...buildPromptNodes(
           cards,
-          { sizes: config.sizes, defaultQuality, defaultOutputDir: config.defaultOutputDir },
+          {
+            sizes: config.sizes,
+            defaultQuality,
+            defaultOutputDir: defaultOutputDir ?? config.defaultOutputDir,
+          },
           origin,
         ).map((node, i) => withEnterAnim(node, nds.length + i)),
       ]);
       setShowImportModal(false);
       pushLog(`已从粘贴导入建卡 ${cards.length} 张提示词卡片`);
     },
-    [config, defaultQuality, getCreatePosition, pushLog, recordHistory, setNodes],
+    [config, defaultQuality, defaultOutputDir, getCreatePosition, pushLog, recordHistory, setNodes],
   );
 
   /** 新建图片组节点（聚合多图后连到提示词统一管理；视口中心定位 + 入场动画；也可拖出到画布任意位置） */
@@ -2196,10 +2211,26 @@ export function CanvasPage({
             新建图片组
           </ToolbarButton>
         </div>
+        {/* 右侧按「文件 → 信息 → 设置 → 编辑 → 执行」排：同类的挨着，主行动（全部运行）压最右。
+            默认输出路径是**设置**不是画布动作，所以放在「生成历史」之后、「撤销/恢复」之前，
+            不插进自动连线/全部运行那两个执行动作中间 —— 点了它只是改一个以后生效的值。 */}
         <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2">
           <ToolbarButton onClick={() => void handleSave()}>保存工作流</ToolbarButton>
           <ToolbarButton onClick={() => void handleLoad()}>加载工作流</ToolbarButton>
           <ToolbarButton onClick={() => setShowHistory(true)}>生成历史</ToolbarButton>
+          <ToolbarButton
+            onClick={() => onSetDefaultOutputDir?.()}
+            disabled={!onSetDefaultOutputDir}
+            title={
+              `新建提示词卡片默认保存到：${defaultOutputDir ?? config.defaultOutputDir}\n` +
+              (defaultOutputDirIsExplicit
+                ? "（已手动设定，跑图不会改它）点这里重新选一个目录。"
+                : "（当前跟随「上次生成落在哪」，任何一次生成都会把它带走）点这里手动选一个目录，就能把它定住。") +
+              "\n只影响以后新建的卡片；已建的卡片仍可在卡片上单独改，或全选后用右上角「设置输出路径」批量改。"
+            }
+          >
+            默认输出路径
+          </ToolbarButton>
           <ToolbarButton onClick={handleUndo} disabled={!historyRef.current.canUndo()}>撤销</ToolbarButton>
           <ToolbarButton onClick={handleRestore} disabled={!historyRef.current.canRestore()}>恢复</ToolbarButton>
           <ToolbarButton onClick={handleAutoConnect}>自动连线</ToolbarButton>

@@ -147,8 +147,14 @@ export function getHealthDetails(): Promise<{
 }
 
 /** 弹出系统文件夹选择器，返回选中的路径（取消则返回原路径） */
-export async function selectFolder(current: string): Promise<{ path: string }> {
-  return requestJson<{ path: string }>("/api/select-folder", {
+/** 弹出系统文件夹选择器；取消时返回原路径（且 `canceled: true`）。
+ *
+ *  调用方要区分「用户选了同一个目录」与「用户取消」时必须看 `canceled` ——
+ *  只看 path 相等会把取消当成确认（例如「设定默认输出路径」会被取消动作改写）。 */
+export async function selectFolder(
+  current: string,
+): Promise<{ path: string; canceled?: boolean }> {
+  return requestJson<{ path: string; canceled?: boolean }>("/api/select-folder", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ current }),
@@ -183,12 +189,38 @@ export async function deleteRef(path: string): Promise<void> {
   });
 }
 
-/** 记住输出路径：用户一改路径即上报，服务重启后默认沿用（失败不影响界面） */
+/** 记住输出路径：用户一改路径即上报，服务重启后默认沿用（失败不影响界面）。
+ *
+ *  **这不是「默认输出路径」**：它记的是「上次用过的」，生成成功也会写它，
+ *  所以会被跑来跑去的历史卡片带着漂移。要定住请用 setDefaultOutputDir。 */
 export async function rememberOutputDir(path: string): Promise<void> {
   await requestJson("/api/output-dir", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ path }),
+  });
+}
+
+/** 设定「新建提示词卡片的默认输出路径」（工具栏按钮手动选目录后调用）。
+ *
+ *  与 rememberOutputDir 的区别：这条是**用户意图**，只有再设一次才会变，
+ *  生成链路永远不写它。传空串 = 清除设定，回到「上次使用 → 按窗口分区」。
+ *
+ *  @param win 传当前窗口号，服务端据此算清除设定后的回退目录
+ *  @returns 新的生效默认路径与来源（显式设定 / 上次使用 / 按窗口分区） */
+export async function setDefaultOutputDir(
+  path: string,
+  win?: number,
+): Promise<{
+  ok: boolean;
+  savedDefaultOutputDir: string | null;
+  defaultOutputDir: string;
+  defaultOutputDirSource: "explicit" | "last" | "window";
+}> {
+  return requestJson("/api/output-dir/default", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(win ? { path, win } : { path }),
   });
 }
 

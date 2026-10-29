@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { deleteProvider, generationHistory, getConfig, getHealthDetails, isHttpError, openFolder, rememberOutputDir, writeConfig } from "./api";
+import { deleteProvider, generationHistory, getConfig, getHealthDetails, isHttpError, openFolder, rememberOutputDir, selectFolder, setDefaultOutputDir, writeConfig } from "./api";
 import { useGenerationTask } from "./useGenerationTask";
 import { Palette, Plug } from "lucide-react";
 import { accentForWindow, accentFromHue, hueForWindow, readAccentHue, saveAccentHue } from "./accent";
@@ -1011,6 +1011,18 @@ useEffect(() => {
   const [size, setSize] = useState("");
   const [quality, setQuality] = useState("high");
   const [outputDir, setOutputDir] = useState("");
+  /** 新建卡片的**默认**输出路径（服务端权威：显式默认 > 上次使用 > 按窗口分区）。
+   *
+   *  与上面的 `outputDir` 刻意分开：`outputDir` 是经典表单这一次要用的路径、可被随手改；
+   *  这里只在用户点「默认输出路径」手动选目录时变。早先两者共用同一个「上次用过」的值，
+   *  于是任何一次生成都能把默认带走 —— 那正是「默认路径会自己变」的来源。 */
+  const [outputDefault, setOutputDefault] = useState<{
+    path: string;
+    source: "explicit" | "last" | "window";
+    saved: string | null;
+  }>({ path: "", source: "window", saved: null });
+  /** 经典表单的输出路径是否被用户手动改过：改过之后不再跟着「默认」自动走 */
+  const outputDirTouchedRef = useRef(false);
   /** 生成任务：submit 返回 taskId，订阅回调按 activeTaskId 驱动状态 */
   const generationTask = useGenerationTask();
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
@@ -1049,6 +1061,11 @@ useEffect(() => {
         document.title = cfg.windowId > 0 ? `Imagora · 窗口 #${cfg.windowId}` : "Imagora";
         setSize(cfg.sizes[0]?.value ?? "");
         setOutputDir(cfg.defaultOutputDir);
+        setOutputDefault({
+          path: cfg.defaultOutputDir,
+          source: cfg.defaultOutputDirSource ?? "last",
+          saved: cfg.savedDefaultOutputDir ?? null,
+        });
         // 继承上一窗口的状态（仅「＋ 新窗口」按钮写入；命令行打开无此键，保持全新）
         const inherited = readInheritedState();
         if (inherited) {
@@ -1059,7 +1076,11 @@ useEffect(() => {
           if (inherited.quality && cfg.qualities.includes(inherited.quality)) {
             setQuality(inherited.quality);
           }
-          if (inherited.outputDir) setOutputDir(inherited.outputDir);
+          if (inherited.outputDir) {
+            setOutputDir(inherited.outputDir);
+            // 继承来的路径算「本窗口已定过」：不再被默认值覆盖
+            outputDirTouchedRef.current = true;
+          }
           // 参考图本体已在服务端，只还原元信息，直接渲染 URL
           if (inherited.refs.length) {
             setRefs(
@@ -1253,6 +1274,8 @@ useEffect(() => {
   /** 输出路径变更：本地更新 + 防抖上报服务端记住（挂载/继承的默认值不走这里，避免覆盖记录） */
   const handleOutputDirChange = (path: string) => {
     setOutputDir(path);
+    // 用户自己改过：此后默认值再变也不覆盖它（否则设完默认会把正在用的路径顶掉）
+    outputDirTouchedRef.current = true;
     if (outputDirTimerRef.current) {
       window.clearTimeout(outputDirTimerRef.current);
     }
@@ -1261,6 +1284,37 @@ useEffect(() => {
         // 尽力而为：记录失败不影响界面
       });
     }, 300);
+  };
+
+  /** 「默认输出路径」按钮：弹系统文件夹选择器让用户手动选，选中即成为新建卡片的默认。
+   *
+   *  这是**唯一**能改默认路径的用户动作：生成链路永远不写它，所以设过之后跑任何旧卡片
+   *  都不会再把它带走（早先默认值 = 「上次生成落在哪」，会被历史卡片顶掉）。
+   *  取消选择器（`canceled`）时什么都不做 —— 只看 path 相等会把取消当成确认。
+   */
+  const handleSetDefaultOutputDir = async () => {
+    let picked: string;
+    try {
+      const result = await selectFolder(outputDefault.path);
+      if (result.canceled || !result.path) return;
+      picked = result.path;
+    } catch (err) {
+      setLogs([`打开文件夹选择器失败：${errMessage(err)}`]);
+      return;
+    }
+    try {
+      const saved = await setDefaultOutputDir(picked, windowId ?? undefined);
+      setOutputDefault({
+        path: saved.defaultOutputDir,
+        source: saved.defaultOutputDirSource,
+        saved: saved.savedDefaultOutputDir,
+      });
+      // 经典表单没被手动改过就跟上 —— 设完默认还要自己去表单里再改一遍是没道理的
+      if (!outputDirTouchedRef.current) setOutputDir(saved.defaultOutputDir);
+      setLogs([`默认输出路径已设为 ${saved.defaultOutputDir}（只影响以后新建的卡片）`]);
+    } catch (err) {
+      setLogs([`设定默认输出路径失败：${errMessage(err)}`]);
+    }
   };
 
   /** 新窗口：参考图已存服务端，只把元信息 + 参数写入 sessionStorage 后开窗（提示词不保留）。
@@ -1394,6 +1448,9 @@ useEffect(() => {
           <CanvasPage
             config={effectiveConfig}
             qualityEffective={qualityEffective}
+            defaultOutputDir={outputDefault.path || effectiveConfig.defaultOutputDir}
+            defaultOutputDirIsExplicit={outputDefault.source === "explicit"}
+            onSetDefaultOutputDir={() => void handleSetDefaultOutputDir()}
             importSubmissionId={pendingSubmissionImport}
             onSubmissionImported={() => setPendingSubmissionImport(null)}
           />

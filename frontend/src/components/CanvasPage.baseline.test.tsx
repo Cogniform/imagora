@@ -890,6 +890,47 @@ describe("节点增删", () => {
     expect(screen.getByText("已新建提示词卡片")).toBeTruthy();
   });
 
+  /**
+   * 默认输出路径：新建卡片取**实时**默认（prop），不是 config 里那份页面加载快照。
+   * 这是「设完默认再新建卡片仍是老路径」的回归防线 —— 之前 CanvasPage 直接用
+   * `config.defaultOutputDir`，设完默认要刷新页面才生效。
+   */
+  it("新建提示词卡片用传入的实时默认路径，而不是 config 快照", () => {
+    renderPage({ defaultOutputDir: "E:\\实时默认" });
+    createPromptCard();
+
+    const node = lastRf().nodes.find((n: { type: string }) => n.type === "prompt");
+    // 写进节点 data 的是「当前默认」的快照：先建卡、后改默认不会追溯已建卡片
+    // （卡片上仍可用自带输入框单独改，渲染那半边见 CanvasNodes.test.tsx）
+    expect(node.data.outputDir).toBe("E:\\实时默认");
+  });
+
+  it("工具栏「默认输出路径」：标题常驻不变，点了回调上层去弹选择器", () => {
+    const onSetDefaultOutputDir = vi.fn();
+    renderPage({ defaultOutputDir: "D:\\自动跟随", onSetDefaultOutputDir });
+
+    const button = screen.getByRole("button", { name: "默认输出路径" });
+    // 按钮文字**不带状态后缀**（不加「（自动）」之类）：状态差异只写进 title，
+    // 否则同一排按钮里会有一个宽度随状态跳动。
+    expect(button.textContent).toBe("默认输出路径");
+    expect(button.getAttribute("title")).toContain("D:\\自动跟随");
+    expect(button.getAttribute("title")).toContain("任何一次生成都会把它带走");
+
+    fireEvent.click(button);
+    expect(onSetDefaultOutputDir).toHaveBeenCalledTimes(1);
+  });
+
+  it("工具栏「默认输出路径」：已手动设定时提示改口径，文字仍不变", () => {
+    renderPage({
+      defaultOutputDir: "D:\\产品图",
+      defaultOutputDirIsExplicit: true,
+      onSetDefaultOutputDir: vi.fn(),
+    });
+
+    const button = screen.getByRole("button", { name: "默认输出路径" });
+    expect(button.textContent).toBe("默认输出路径");
+    expect(button.getAttribute("title")).toContain("跑图不会改它");
+  });
 
   it("新建图片组：出现一个图片组节点并记录日志", () => {
     renderPage();
