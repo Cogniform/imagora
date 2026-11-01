@@ -154,7 +154,9 @@ export function ZoomModal({
 }: {
   /** 可直接显示的完整图片 URL：画布与经典表单统一传注册表派生的 url（组件不再关心路径拼接） */
   imageUrl: string;
-  name: string;
+  /** 顶部身份条文案（文件名 / 简短说明）；**不给就不渲染那条，只留右上角关闭**。
+   *  生产历史就是这么用的：列表里已有完整提示词，顶部再截断重复一遍没有信息量 */
+  name?: string | undefined;
   /** 本机绝对路径：给了才显示「复制路径」（外链 / blob: 占位图没有可复制路径） */
   copyPath?: string | undefined;
   onClose: () => void;
@@ -425,20 +427,27 @@ export function ZoomModal({
           }}
         />
       </div>
-      {/* 顶部信息条：左侧文件名（超长省略，悬停给完整路径）、右侧关闭。
+      {/* 顶部信息条：左侧身份（文件名 / 简短说明，超长省略，悬停给完整路径）、右侧关闭。
           旧版把文件名塞进底部控制条的第一行，于是「一列三个居中的东西」（名字 / 缩放 / 操作 /
           提示语）挤成一个灰方块，既没有主次也分不清哪行是状态、哪行是按钮。现在按职责分两处：
-          身份信息在上、操作在下，中间整块留给图片。 */}
+          身份信息在上、操作在下，中间整块留给图片。
+          **身份条是可选的**：调用方没给 name 就整条不渲染（只剩关闭按钮）——生产历史就是这种，
+          列表里已经有完整提示词，顶部再截断重复一遍既没信息量也看不全。 */}
       <div
         data-zoom-controls
         className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-3 p-3"
       >
-        <div
-          className="pointer-events-auto flex h-7 max-w-[62vw] items-center truncate rounded-lg bg-black/40 px-2.5 text-xs text-white/85 shadow-lg"
-          title={copyPath || name}
-        >
-          {name}
-        </div>
+        {name ? (
+          <div
+            className="pointer-events-auto flex h-7 max-w-[62vw] items-center truncate rounded-lg bg-black/40 px-2.5 text-xs text-white/85 shadow-lg"
+            title={copyPath || name}
+          >
+            {name}
+          </div>
+        ) : (
+          // 占位保持「关闭按钮贴右」的布局，不因为少了左侧而让按钮漂到中间
+          <div aria-hidden="true" />
+        )}
         <button
           type="button"
           aria-label="关闭预览"

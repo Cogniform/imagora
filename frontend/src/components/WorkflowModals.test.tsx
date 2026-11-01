@@ -228,6 +228,15 @@ describe("ZoomModal 控制坞排版", () => {
     expect(dock.className).toContain("items-center");
   });
 
+  it("没给 name：顶部身份条整条省掉，只剩关闭按钮（生产历史就是这样用的）", () => {
+    render(<ZoomModal imageUrl="https://example.com/a.png" onClose={vi.fn()} />);
+    const top = document.querySelector("[data-zoom-controls]") as HTMLElement;
+    // 身份条原本挂着 title=(文件路径|name)；省掉之后这条上只剩关闭按钮的 title
+    const titles = Array.from(top.querySelectorAll("[title]")).map((el) => el.getAttribute("title"));
+    expect(titles).toEqual(["关闭（Esc）"]);
+    expect(screen.getByRole("button", { name: "关闭预览" })).toBeTruthy();
+  });
+
   it("长说明不常驻：提示语退到 title，界面上没有那一行灰字", () => {
     render(<ZoomModal imageUrl="https://example.com/a.png" name="测试图" onClose={vi.fn()} />);
     expect(screen.queryByText(/滚轮缩放 · 放大后拖拽平移/)).toBeNull();
