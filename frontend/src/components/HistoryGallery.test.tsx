@@ -113,6 +113,18 @@ describe("HistoryGallery 列表视图", () => {
     expect(screen.getByText("参考图缺失")).toBeTruthy();
   });
 
+  it("双击结果图放大：预览顶部不再重复显示提示词（列表里已有完整的）", async () => {
+    renderList([item({ prompt: "一只猫在窗台上晒太阳" })]);
+    await screen.findByText("复制提示词");
+
+    fireEvent.doubleClick(screen.getByAltText("一只猫在窗台上晒太阳"));
+
+    // 预览已打开（有控制坞的动作按钮）
+    expect(await screen.findByRole("button", { name: "复制图片" })).toBeTruthy();
+    // 提示词在整页只出现一次 —— 就是列表里那条；预览顶部不再截断重放一遍
+    expect(screen.getAllByText("一只猫在窗台上晒太阳")).toHaveLength(1);
+  });
+
   it("结果图缺失：error 显示生成失败、其余显示文件已移动", async () => {
     renderList([
       item({ url: "", status: "error", prompt: "失败记录" }),

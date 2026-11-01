@@ -300,8 +300,8 @@ export function HistoryGallery({
                         onDoubleClick={() =>
                           openZoom({
                             url: item.url ?? "",
-                            name: item.prompt || "生成结果",
-                            // 历史记录的 path 就是本机绝对路径，直接给弹窗做「复制路径」
+                            // 不传 name：预览顶部那条身份信息在这里没用 —— 列表里已有完整提示词，
+                            // 再截断显示一遍既重复、又因为截断根本看不全（用户反馈）
                             ...(item.path ? { path: item.path } : {}),
                           })
                         }

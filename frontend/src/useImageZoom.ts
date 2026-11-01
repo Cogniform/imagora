@@ -16,7 +16,9 @@ import { useCallback, useState } from "react";
 
 export interface ZoomTarget {
   url: string;
-  name: string;
+  /** 顶部身份条的文案（文件名 / 简短说明）；**不给就不渲染那条** ——
+   *  生产历史不要它：列表里已有完整提示词，再截断显示一遍既重复又看不全 */
+  name?: string | undefined;
   /** 图片在本机的绝对路径（预览里「复制路径」用）；未知时不传，那个按钮就不出现 */
   path?: string | undefined;
 }
