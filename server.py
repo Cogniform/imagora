@@ -16,6 +16,7 @@ API:
   POST /api/select-folder             弹出系统文件夹选择器
   POST /api/open-folder               资源管理器打开文件夹（置前）
   GET  /api/image?path=               读取图片文件
+  POST /api/clipboard/image           把图片写进系统剪贴板（同步，返回即可粘贴）
   POST /api/canvas/upload             画布图片上传（复制进 output/.assets/）
   POST /api/canvas/import             输出目录导入画布（目录递归/单文件）
   GET  /api/canvas/images             画布图片全量
@@ -48,6 +49,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from core import (
     canvas,
+    clipboard,
     config,
     config_guard,
     config_write,
@@ -1739,6 +1741,33 @@ def get_image(path: str):
     if not os.path.isfile(abs_path):
         return JSONResponse({"error": "文件不存在"}, status_code=404)
     return FileResponse(abs_path)
+
+
+@app.post("/api/clipboard/image")
+def clipboard_image(body: dict):
+    """把图片写进**系统剪贴板**（同步：返回即意味着别的程序已经能粘到）。
+
+    为什么由后端写、而不是页面里 `navigator.clipboard.write()`：
+    浏览器写图片是异步投递 —— Promise resolve 时系统剪贴板里还没有位图，要
+    100~300ms 后才读得到（大图更久，偶发整次丢弃），页面失活时还会被挂起。
+    于是"提示已复制"比"真的可粘"早，用户切到微信立刻 Ctrl+V 拿到的是空的。
+    Win32 `SetClipboardData` 没有这层异步，返回即落地。
+
+    不做来源校验：`Content-Type: application/json` 会触发跨站预检，第三方页面
+    的请求根本到不了这里（同 /api/open-folder 的口径）。
+    """
+    path = str(body.get("path", "")).strip()
+    abs_path = os.path.abspath(path) if path else ""
+    if not abs_path or not os.path.isfile(abs_path):
+        raise HTTPException(status_code=404, detail="文件不存在")
+    try:
+        # 串行化：剪贴板是全局 OS 资源，多窗口同时写会互相顶掉
+        with _UI_LOCK:
+            clipboard.put_image_on_clipboard(abs_path)
+    except clipboard.ClipboardError as exc:
+        # 501/503 都只表示"这条路走不通"，前端据此静默退回浏览器 API
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {"ok": True}
 
 
 # StaticFiles 判定 Content-Type 走标准库 mimetypes，而 Windows 上 mimetypes 会读

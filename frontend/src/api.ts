@@ -170,6 +170,20 @@ export async function openFolder(path: string): Promise<{ ok: boolean }> {
   });
 }
 
+/** 让**本机服务端**把图片写进系统剪贴板（同步：返回即已可粘贴）。
+ *
+ *  浏览器自己的 `navigator.clipboard.write()` 写图片是异步投递——Promise resolve
+ *  到系统剪贴板真的可读之间还有 100~300ms（大图更久、页面失活还会被挂起），于是
+ *  「已复制」比「能粘贴」早一截。服务端 `SetClipboardData` 没有这层异步。
+ *  不可用时（非 Windows / 旧服务端 / 依赖缺失）抛错，由调用方退回浏览器路径。 */
+export async function copyImageToSystemClipboard(path: string): Promise<void> {
+  await requestJson("/api/clipboard/image", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path }),
+  });
+}
+
 /** 参考图落盘服务端（添加进上传区时即调），返回带 path/url/size/ext 的元信息 */
 export async function uploadRefs(files: File[]): Promise<RefItem[]> {
   const formData = new FormData();

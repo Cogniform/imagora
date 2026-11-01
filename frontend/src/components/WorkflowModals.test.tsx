@@ -113,7 +113,7 @@ describe("ZoomModal 复制入口", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
-  it("复制图片：调用图片复制能力并提示已复制", async () => {
+  it("复制图片：调用图片复制能力（带上本机路径）并提示已复制", async () => {
     vi.mocked(copyImageToClipboard).mockResolvedValue(undefined);
     render(
       <ZoomModal
@@ -127,9 +127,41 @@ describe("ZoomModal 复制入口", () => {
     fireEvent.click(screen.getByRole("button", { name: "复制图片" }));
 
     await waitFor(() =>
-      expect(copyImageToClipboard).toHaveBeenCalledWith("https://example.com/a.png"),
+      expect(copyImageToClipboard).toHaveBeenCalledWith({
+        url: "https://example.com/a.png",
+        path: "D:\\out\\a.png",
+      }),
     );
     expect(await screen.findByText("已复制图片")).toBeTruthy();
+  });
+
+  it("复制中不抢先说成功：等写入真的完成才换成「已复制图片」", async () => {
+    let finish: (() => void) | undefined;
+    vi.mocked(copyImageToClipboard).mockImplementation(
+      () => new Promise<void>((resolve) => (finish = resolve)),
+    );
+    render(
+      <ZoomModal
+        imageUrl="https://example.com/a.png"
+        name="测试图"
+        copyPath={COPY_PATH}
+        onClose={vi.fn()}
+      />,
+    );
+    const button = screen.getByRole("button", { name: "复制图片" });
+
+    fireEvent.click(button);
+
+    // 落地之前只允许"复制中…"：这正是修「提示已复制、切过去粘不出来」的核心
+    expect(await screen.findByText("复制中…")).toBeTruthy();
+    expect(screen.queryByText("已复制图片")).toBeNull();
+    // 进行中禁用按钮，防连点并发写剪贴板（谁最后落地不确定）
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+
+    finish?.();
+
+    expect(await screen.findByText("已复制图片")).toBeTruthy();
+    expect((button as HTMLButtonElement).disabled).toBe(false);
   });
 
   it("剪贴板不可用：给出失败提示而不是静默", async () => {

@@ -5,7 +5,7 @@ FastAPI 路由级 + 纯逻辑测试，**不调真实上游 API、不花钱**。�
 ## 本地常用命令（在项目根目录执行）
 
 ```powershell
-# 后端全量（475 用例）
+# 后端全量（482 用例）
 .\.venv\Scripts\python.exe -m pytest
 # 按模块筛选
 .\.venv\Scripts\python.exe -m pytest tests/test_core_config.py tests/test_server_helpers.py
@@ -23,7 +23,7 @@ cd frontend; npm test
 - **测试数字是 AGENTS 仪表盘数据源**：增/删测试用例必须同步 AGENTS「当前仪表盘」；数字意外变化（非新增导致）必须报告维护者
 - **别按变量名读断言**：`test_core_api.py` 里的 `calls["n"] == 3` 是**重试次数**计数器，与生成张数无关。看名字以为"多张已覆盖"过一次误判（CLI `--n` 的真覆盖在 `test_main_cli.py`，见 issue #34）
 
-## 文件索引（后端 pytest，共 475）——每个 test_*.py 测什么
+## 文件索引（后端 pytest，共 482）——每个 test_*.py 测什么
 
 | 文件 | 用例 | 覆盖 |
 | --- | --- | --- |
@@ -44,6 +44,8 @@ cd frontend; npm test
 | [`test_core_migrate.py`](test_core_migrate.py) | 19 | 注册表 detect/升级/重建/回填/迁目录 / 工作流升级 / CLI 端到端 |
 | [`test_core_tasks.py`](test_core_tasks.py) | 11 | 任务状态机 / 并发上限 / 取消 / 快照 / TTL 清理 |
 | [`test_core_pathtrust.py`](test_core_pathtrust.py) | 2 | 路径白名单（match_roots 双根/单根/跨盘） |
+| [`test_core_clipboard.py`](test_core_clipboard.py) | 4 | CF_DIB 字节布局（40 字节头 / 24 位 BGR / **自下而上** / 4 字节行对齐）＋非 Windows 抛 `ClipboardError`（前端据此回退浏览器路径） |
+| [`test_server_clipboard.py`](test_server_clipboard.py) | 3 | `POST /api/clipboard/image`：成功交给 core 只写一次 / 文件不存在 404 / 后端拒绝（非 Windows、被别的程序占着）503 + 人话 |
 | [`test_server_helpers.py`](test_server_helpers.py) | 33 | 窗口分配 / 安全路径白名单 / upload-ref / delete-ref / generate 同步性 / history 注册表解析 + inputRefs/inputRefMissing / **/api/history 分页 hasMore** / _persist_submission 含 temp_bases / 导入与展示同源（注册表副本 + 账本 output 原路径双收，含画布回流回归）/ **静态产物 MIME 钉死（不受 Windows 注册表 `.js` 被写成 text/plain 影响）** / **输出路径两件事（显式默认读写与清除、目录离线保留记录、`resolve_default_output_dir` 优先级「显式 > 上次 > 窗口」、`/api/output-dir/default` 拒绝相对路径且自动建目录）** |
 | [`test_server_canvas.py`](test_server_canvas.py) | 18 | canvas 路由 / workflow 往返（v2）/ missing 收集 / ref_paths 放行 |
 | [`test_server_tasks.py`](test_server_tasks.py) | 10 | generate 提交即返回 / multipart 临时文件清理 + temp 参考图注册账本 / **参考图提交时注册（源文件删后账本仍完整）** / 保存消息为绝对路径 / 路径校验 / 任务路由 |
@@ -52,7 +54,7 @@ cd frontend; npm test
 | [`test_main_process.py`](test_main_process.py) | 4 | 端口探测 / 祖先链回溯（Windows） |
 | [`test_main_cli.py`](test_main_cli.py) | 31 | CLI gen 子命令全链路（校验/输出解析/文生图+图生图+多参考/失败/--no-asset/比例档位）/ **`--n` 逐张请求（每次 `n=1`、各存各的账、部分失败保留已成功、默认单张行为不变）** / config 输出 |
 
-## 文件索引（前端 vitest，共 1061，位于 frontend/src/）
+## 文件索引（前端 vitest，共 1066，位于 frontend/src/）
 
 | 文件 | 用例 | 覆盖 |
 | --- | --- | --- |
@@ -71,6 +73,7 @@ cd frontend; npm test
 | [`useGenerationTask.test.ts`](../frontend/src/useGenerationTask.test.ts) | 8 | hook 稳定成员引用 + **超预算确认（409→确认→带 allowOverBudget 重提、取消则抛出、同实例只问一次、非 409 不触发确认）** |
 | [`useImageZoom.test.ts`](../frontend/src/useImageZoom.test.ts) | 4 | 预览开关：**全程不开新标签页**（单击不再跳转）/ 打开与关闭 / 不再暴露单击开窗入口 |
 | [`useImageEditorViewport.test.ts`](../frontend/src/useImageEditorViewport.test.ts) | 28 | 图片编辑器视口 hook：`fitImageToViewport` 缩放上限 1、`imageEditorContentSize` 保证居中可算、以指针为锚点的两段式缩放（先记锚点再 `useLayoutEffect` 反算 scrollLeft/scrollTop）、滚轮按 `passive:false` 注册且不冒泡、空格/中键拖拽判定、缩放边界（`canZoomIn`/`canZoomOut` 带 0.001 容差）、`ResizeObserver` 缺失守卫。**测试必须桩 `clientWidth`/`clientHeight`/`getBoundingClientRect`/`scrollLeft`**（jsdom 恒 0 且不可写），且 afterEach 先卸载实例再还原原型桩（否则多实例抢同一个 window 监听、假通过） |
+| [`imageCopy.test.ts`](../frontend/src/imageCopy.test.ts) | 4 | 复制走哪条路：有本机路径 → 服务端同步写（**不经浏览器剪贴板**）/ 服务端不可用 → 静默回退浏览器 API / 无路径 → 直接浏览器 / 两条都不通 → 抛可操作提示（B 层真机能力与 canvas 转码不在 jsdom 覆盖） |
 | [`imagePath.test.ts`](../frontend/src/imagePath.test.ts) | 5 | 从 `/api/image?path=…` 反解本机绝对路径；外链 / `blob:` / `data:` / 无查询串一律空串（调用方靠它决定「复制路径」按钮出不出） |
 | [`logPath.test.ts`](../frontend/src/logPath.test.ts) | 6 | 日志路径词条解析（绝对/相对、正反斜杠、多路径、扩展名大小写） |
 | [`generationPending.test.ts`](../frontend/src/generationPending.test.ts) | 11 | 渐近进度曲线单调递增并逼近 98% 但永不越过（最后 2% 留给真实完成）、首秒即从 10% 起步、非法入参（NaN / ±Infinity / 负数）按 0s 处理绝不产出 `NaN%`、文案每 2s 轮播并循环 |
@@ -102,7 +105,7 @@ cd frontend; npm test
 | [`Select.test.tsx`](../frontend/src/components/Select.test.tsx) | 28 | 自定义下拉：listbox 语义 / 键盘导航 / 点外部关闭 / **展开列表挂到 body（不被滚动容器裁切）** / **自由输入（`allowCustom`：精确命中走正常选中、校验不过时 Enter 什么都不做、清单为空也能展开、自定义行放在 listbox 之外）** |
 | [`popupLayer.test.ts`](../frontend/src/popupLayer.test.ts) | 5 | 浮层计数：push/pop 配对、嵌套多层、**多余 pop 不弄成负数**（否则弹窗再也关不掉）/ reset |
 | [`ResultPanel.test.tsx`](../frontend/src/components/ResultPanel.test.tsx) | 7 | 结果区 5 态面板 / 切换交叉淡化（旧层保留至淡出移除） |
-| [`WorkflowModals.test.tsx`](../frontend/src/components/WorkflowModals.test.tsx) | 13 | ZoomModal Portal 点击隔离（点图片/空白不误关外层宿主遮罩）/ 复制入口（复制图片、复制路径只在有 path 时出现、失败给可读提示、不误关弹窗)/ **控制坞排版（顶部关闭按钮、单行三组、长说明退到 title 不常驻、复制反馈是绝对定位浮标不挤布局）** / 缩放读数（按原图算百分比；按钮叫「实际大小」而非 1:1） |
+| [`WorkflowModals.test.tsx`](../frontend/src/components/WorkflowModals.test.tsx) | 14 | ZoomModal Portal 点击隔离（点图片/空白不误关外层宿主遮罩）/ 复制入口（复制图片、复制路径只在有 path 时出现、失败给可读提示、不误关弹窗、**带着本机路径调用**、**先「复制中…」落地后才「已复制图片」且进行中禁用按钮**)/ **控制坞排版（顶部关闭按钮、单行三组、长说明退到 title 不常驻、复制反馈是绝对定位浮标不挤布局）** / 缩放读数（按原图算百分比；按钮叫「实际大小」而非 1:1） |
 | [`HistoryGallery.test.tsx`](../frontend/src/components/HistoryGallery.test.tsx) | 14 | 列表行渲染 / 参考图缺失琥珀提示 / 失败文案 / 提示词截断浮层（仅截断弹、跟随、离开消失） / **分页（首屏第 0 页、点加载更多按 offset 追加、搜索与状态筛选重置第 0 页、滚动接近底部自动追加、远离底部不触发）** / **成本看板指标、每行按钮与成败无关（复制 / 打开目录 / 导入画布）、参考图丢失只给条数提示且无重跑入口、保存预算回读** |
 | [`promptImportFormat.test.ts`](../frontend/src/promptImportFormat.test.ts) | 23 | 导入格式解析容错 / 尺寸映射 / 建卡 / **`importCardPositions` 按卡片真实尺寸铺排**（旧实现用 30px 栅格而卡片宽 380，整批导入会完全叠住；现按 420×326 间距、每行 3 张） |
 | [`cost.test.ts`](../frontend/src/cost.test.ts) | 6 | 金额/比例/耗时格式化（非法值回退 -）/ 预算摘要（不限与设限两种、兼容预检结果的 settings 形态）/ 看板主指标行顺序与文案 |
