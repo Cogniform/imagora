@@ -162,11 +162,18 @@ export function ZoomModal({
   const [view, setView] = useState<PreviewView>({ zoom: 1, pan: { x: 0, y: 0 } });
   /** 拖拽平移进行中（指针捕获期间持续更新；驱动光标样式与过渡开关） */
   const [dragging, setDragging] = useState(false);
-  /** 复制反馈：null = 没在反馈；"copied" / "failed" + 一句原因 */
-  const [copyState, setCopyState] = useState<{ kind: "copied" | "failed"; text: string } | null>(
-    null,
-  );
+  /** 复制反馈三态：**"已复制"只在写真的落地后才出现**（"复制中…"期间不消失）。
+   *  背景：浏览器写图片是异步投递，Promise resolve 早于"能粘"，早先按 resolve 就
+   *  报成功，于是用户切到微信立刻 Ctrl+V 是空的（见 ARCHITECTURE 8.3）。 */
+  const [copyState, setCopyState] = useState<{
+    kind: "copying" | "copied" | "failed";
+    text: string;
+  } | null>(null);
   const copyTimerRef = useRef<number | null>(null);
+  /** 在飞行标记：连点会并发发起多次写，最后一次赢不确定（服务端那条还会互相顶掉剪贴板） */
+  const copyingRef = useRef(false);
+  /** 复制进行中（按钮禁用，浮标停在"复制中…"） */
+  const copying = copyState?.kind === "copying";
   /** 图片自然尺寸（onLoad 后获得，供「适应窗口」与真实百分比计算） */
   const naturalRef = useRef<{ width: number; height: number } | null>(null);
   /** 同一份自然尺寸的**状态**副本：百分比读数要跟着它重渲染（ref 变了不会触发渲染） */
@@ -288,31 +295,35 @@ export function ZoomModal({
     [],
   );
 
-  const showCopyState = (kind: "copied" | "failed", text: string) => {
+  const showCopyState = (kind: "copying" | "copied" | "failed", text: string) => {
     setCopyState({ kind, text });
     if (copyTimerRef.current) window.clearTimeout(copyTimerRef.current);
-    copyTimerRef.current = window.setTimeout(() => setCopyState(null), 1200);
+    // "复制中…"不自己消失：它的结束由随后到达的 copied / failed 决定
+    copyTimerRef.current =
+      kind === "copying" ? null : window.setTimeout(() => setCopyState(null), 1200);
   };
 
-  /** 复制图片本体：走 canvas 转 PNG 后写剪贴板（失败给出可读原因，不静默） */
-  const handleCopyImage = async () => {
+  /** 统一入口：防连点 + 三态反馈（"已复制"= 写真的落地了，不是"请求发出了"） */
+  const runCopy = async (action: () => Promise<void>, done: string) => {
+    if (copyingRef.current) return;
+    copyingRef.current = true;
+    showCopyState("copying", "复制中…");
     try {
-      await copyImageToClipboard(imageUrl);
-      showCopyState("copied", "已复制图片");
+      await action();
+      showCopyState("copied", done);
     } catch (err) {
       showCopyState("failed", err instanceof Error ? err.message : "复制失败");
+    } finally {
+      copyingRef.current = false;
     }
   };
+
+  /** 复制图片本体：优先本机服务端同步写（有路径时），否则浏览器路径 */
+  const handleCopyImage = () =>
+    runCopy(() => copyImageToClipboard({ url: imageUrl, path: copyPath }), "已复制图片");
 
   /** 复制文件路径（本机绝对路径；没有可复制路径时按钮本就不渲染） */
-  const handleCopyPath = async () => {
-    try {
-      await copyTextToClipboard(copyPath ?? "");
-      showCopyState("copied", "已复制路径");
-    } catch (err) {
-      showCopyState("failed", err instanceof Error ? err.message : "复制失败");
-    }
-  };
+  const handleCopyPath = () => runCopy(() => copyTextToClipboard(copyPath ?? ""), "已复制路径");
 
   const onPointerDown = (event: PointerEvent) => {
     // 未放大：不拦截，冒泡给 overlay 判定（点空白关闭 / 点图片本体不关）
@@ -504,16 +515,23 @@ export function ZoomModal({
 
           {/* 组 3：动作。图片单击不再跳新页面（旧行为），复制/打开都是显式按钮；
               反馈做成坞上方的浮标（绝对定位），不进布局 —— 反馈一变宽窄就会让鼠标底下的
-              按钮挪位置（早先改按钮文字也踩过同一个坑）。 */}
+              按钮挪位置（早先改按钮文字也踩过同一个坑）。
+              复制进行中把两颗复制按钮禁掉：连点会并发写剪贴板，最后落地的哪一张不确定。 */}
           <div className="flex items-center gap-1">
-            <button type="button" className={DOCK_BUTTON} onClick={() => void handleCopyImage()}>
+            <button
+              type="button"
+              className={`${DOCK_BUTTON} disabled:opacity-50`}
+              disabled={copying}
+              onClick={() => void handleCopyImage()}
+            >
               复制图片
             </button>
             {copyPath && (
               <button
                 type="button"
-                className={DOCK_BUTTON}
+                className={`${DOCK_BUTTON} disabled:opacity-50`}
                 title={copyPath}
+                disabled={copying}
                 onClick={() => void handleCopyPath()}
               >
                 复制路径
@@ -529,7 +547,11 @@ export function ZoomModal({
               role="status"
               aria-live="polite"
               className={`pointer-events-none absolute -top-9 left-1/2 max-w-[60vw] -translate-x-1/2 truncate rounded-md px-2 py-1 text-[11px] shadow-lg ${
-                copyState.kind === "copied" ? "bg-emerald-600/90 text-white" : "bg-amber-600/90 text-white"
+                copyState.kind === "failed"
+                  ? "bg-amber-600/90 text-white"
+                  : copyState.kind === "copied"
+                    ? "bg-emerald-600/90 text-white"
+                    : "bg-black/40 text-white/90"
               }`}
             >
               {copyState.text}

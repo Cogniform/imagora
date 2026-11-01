@@ -1,17 +1,34 @@
 /**
  * 图片写进剪贴板（预览弹窗的「复制图片」用）。
  *
- * 两个现实约束决定了实现形态：
- * ① 浏览器只接受 **PNG** 的 `ClipboardItem`（Chrome/Safari 都是），而生成结果可能是
- *    jpeg / webp，所以非 PNG 一律先经 canvas 转成 PNG；
- * ② 必须在**用户手势**里调用，且要安全上下文（`127.0.0.1` / `localhost` 算安全）。
+ * **两条路，优先走服务端**（2026-11-01 实测后改；背景见 ARCHITECTURE 8.3）：
+ * ① 服务端同步写 —— 有本机绝对路径时调 `POST /api/clipboard/image`，后端直接
+ *    `SetClipboardData(CF_DIB)`，**接口返回即代表别的程序已经能粘到**；
+ * ② 浏览器 API —— 没有路径（外链 / blob 占位图）或服务端这条走不通时退回
+ *    `navigator.clipboard.write()`。它有三个现实约束：只接受 **PNG** 的
+ *    `ClipboardItem`（生成结果可能是 jpeg / webp，非 PNG 一律先经 canvas 转码）、
+ *    必须在**用户手势**里调用、要安全上下文（`127.0.0.1` / `localhost` 算安全）。
+ *
+ * 为什么优先服务端：浏览器写图片是**异步投递**，Promise resolve 时系统剪贴板里
+ * 还没有位图，要 100~300ms 后才读得到（大图更久，偶发整次丢弃），页面失活时还会
+ * 被挂起 —— 表现就是「提示已复制、切到微信立刻 Ctrl+V 是空的」。服务端那条没有
+ * 这层异步，也因此"复制成功"的提示对用户才作数。
  *
  * 失败一律抛错，由调用方给用户一句人话 —— 静默失败会让人以为图已经复制了。
- * 本模块不做单测：canvas 在 jsdom 里没有 `getContext("2d")`（见 README：不装 canvas 包），
- * 与 `imageOps.ts` 的 B 层同属「只由类型与真机验证兜底」的一层。
+ * 本模块不做 canvas 层的单测：jsdom 里没有 `getContext("2d")`（见 README：不装
+ * canvas 包）；`imageCopy.test.ts` 只锁「走哪条路 / 怎么回退」这层决策。
  */
 
-/** 把任意图片 URL 读成 PNG Blob */
+import { copyImageToSystemClipboard } from "./api";
+
+/** 复制目标：URL 用来退回浏览器路径，本机绝对路径用来走服务端同步写 */
+export interface ImageCopySource {
+  url: string;
+  /** 本机绝对路径；不给（外链 / blob / data URL）就只走浏览器路径 */
+  path?: string | undefined;
+}
+
+/** 把任意图片 URL 读成 PNG Blob（浏览器路径专用） */
 async function readAsPngBlob(url: string): Promise<Blob> {
   const response = await fetch(url);
   if (!response.ok) throw new Error(`读取图片失败（HTTP ${response.status}）`);
@@ -37,13 +54,26 @@ async function readAsPngBlob(url: string): Promise<Blob> {
   }
 }
 
-/** 把图片复制到系统剪贴板；失败抛 Error（调用方负责提示） */
-export async function copyImageToClipboard(url: string): Promise<void> {
+/** 浏览器路径：读图 → 转码 → `clipboard.write`；失败抛 Error */
+async function copyImageViaBrowser(url: string): Promise<void> {
   if (typeof ClipboardItem === "undefined" || !navigator.clipboard?.write) {
     throw new Error("当前浏览器不支持复制图片，请改用「复制路径」");
   }
   const png = await readAsPngBlob(url);
   await navigator.clipboard.write([new ClipboardItem({ "image/png": png })]);
+}
+
+/** 把图片复制到系统剪贴板；失败抛 Error（调用方负责提示） */
+export async function copyImageToClipboard(source: ImageCopySource): Promise<void> {
+  if (source.path) {
+    try {
+      await copyImageToSystemClipboard(source.path);
+      return;
+    } catch {
+      // 旧服务端（405）/ 非 Windows / 依赖缺失：功能不能因此消失，退回浏览器路径
+    }
+  }
+  await copyImageViaBrowser(source.url);
 }
 
 /** 复制一段文本（路径 / 提示词）；剪贴板不可用时抛错，让调用方给出提示 */
