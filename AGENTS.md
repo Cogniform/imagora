@@ -40,14 +40,15 @@
 - 改**本机来源层**（`providers.local.json` / 「添加第三方供应商」）→ 查 [core/README.md](core/README.md) 的 provider_store.py 节 → 跑 `pytest tests/test_core_provider_store.py tests/test_server_config_providers.py` → 前端跑 `npm test`（`ProviderModal.test.tsx`）→ **三条不许破的边界**：密钥只进 `.env` 不进本机来源文件、新建来源默认不切换、校验失败必须不落盘
 - 改**输出路径**（默认 / 上次使用 / 每卡路径）→ 机制与边界只在 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) 8.5「输出路径分两件事」→ 后端 `pytest tests/test_server_helpers.py`（`resolve_default_output_dir` 优先级、`/api/output-dir/default` 校验）→ 前端 `npm test`（`CanvasPage.baseline.test.tsx` 的默认路径用例）
 - 改**图片预览 / 单击双击** → 查 [frontend/README.md](frontend/README.md) 的 `useImageZoom.ts` / `ZoomModal` 条目 → 跑 `npm test`（`useImageZoom.test.ts` 锁定「单击不开新标签页」+ `WorkflowModals.test.tsx` 的复制入口）→ 契约见 ARCHITECTURE 8.3 预览弹窗
+- 改**复制图片 / 剪贴板**（「已复制」提示、写入路径）→ 查 [core/README.md](core/README.md) 的 clipboard.py 节 → 跑 `pytest tests/test_core_clipboard.py tests/test_server_clipboard.py` → 前端 `npm test`（`imageCopy.test.ts` + `WorkflowModals.test.tsx`）→ **浏览器 `clipboard.write()` 的 resolve 早于「能粘」，不得据此报成功**，防错条见 ARCHITECTURE 9.4 第 14 条
 - 改测试隔离 / 报「测试打到了上游」→ 查 [tests/README.md](tests/README.md) 的隔离节 → 防错条见 ARCHITECTURE 9.5（任务池 worker 会在 monkeypatch 撤销后真调上游）
 - 改 [scripts/migrate.py](scripts/migrate.py) 或存储格式 → 查 [scripts/README.md](scripts/README.md) → 跑 `pytest tests/test_core_migrate.py` → **必须先 Handoff 确认（硬边界）**
 - 改测试文件 → 查 [tests/README.md](tests/README.md) → 按模块筛选跑 → 增/删用例后更新本文档「仪表盘」数字
 
 ## 仪表盘（最近验证快照，2026-10-29，main）
 
-- 后端 pytest：**475 passed**（命令与逐文件覆盖见 [tests/README.md](tests/README.md)）
-- 前端 vitest：**1061 passed**；tsc + vite build 成功；lint / ruff 零告警（命令见 [frontend/README.md](frontend/README.md)、[tests/README.md](tests/README.md)）
+- 后端 pytest：**482 passed**（命令与逐文件覆盖见 [tests/README.md](tests/README.md)）
+- 前端 vitest：**1066 passed**；tsc + vite build 成功；lint / ruff 零告警（命令见 [frontend/README.md](frontend/README.md)、[tests/README.md](tests/README.md)）
 - E2E [verify_canvas.py](frontend/e2e/verify_canvas.py)：**105/105 PASS**；[verify_provider.py](frontend/e2e/verify_provider.py)：**38/38 PASS**（前置：起 7860 服务，见 [frontend/README.md](frontend/README.md)；两条都可用 `--base` 打隔离实例，verify_provider 另需 `--app-root` 对齐服务进程的应用根，否则断言的是仓库里那份真实 `providers.local.json`）
 - 迁移（v1→v2 / .canvas→.assets / 账本回填）已完成，日常无需执行（见 [scripts/README.md](scripts/README.md)）
 

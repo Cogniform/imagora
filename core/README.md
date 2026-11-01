@@ -119,6 +119,14 @@ FastAPI 路由（`server.py`）与 CLI（`main.py`）共用的业务层。**不�
 - 被谁依赖：`registry.py`（登记时探测元数据）
 - 改后必测：`tests/test_core_imageinfo.py`
 
+### [clipboard.py](clipboard.py)
+- 职责：把图片写进**系统剪贴板**（Windows，Win32 `SetClipboardData(CF_DIB)`，**同步**：返回即别的程序已能粘到）
+- 关键导出：`put_image_on_clipboard()`、`dib_bytes()`（纯函数：BITMAPINFOHEADER + 24 位 BGR + 自下而上 + 4 字节行对齐）、`supported()`、`ClipboardError`
+- 被谁依赖：`server.py`（`POST /api/clipboard/image`，路由侧用 `_UI_LOCK` 串行化）
+- 改后必测：`tests/test_core_clipboard.py` + `tests/test_server_clipboard.py`
+- 注意：为什么绕开浏览器——`navigator.clipboard.write()` 写图片是异步投递，resolve 早于「能粘」100~300ms（页面失活更久、偶发整次丢弃），曾表现为「提示已复制、切到微信粘不出来」。**只有服务端这条路才敢把"已复制"当结论**。背景见 [../docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md) 9.4 第 14 条
+- 注意：`SetClipboardData` 成功后句柄所有权移交系统，**不能再 `GlobalFree`**；`OpenClipboard` 被别的程序占着时返回 0（GetLastError=5），要短暂重试而不是当失败
+
 ### [pathtrust.py](pathtrust.py)
 - 职责：路径白名单校验（`match_roots`，双根/跨盘安全）
 - 关键导出：`match_roots()`
