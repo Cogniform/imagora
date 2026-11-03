@@ -83,12 +83,7 @@ const TSX_EXEMPT: Array<[file: string, token: string, reason: string]> = [
     "bg-white",
     "拖拽把手旋钮（16px 圆点）：控件零件不是容器，中性白才能在任意底色的卡片上显出对比",
   ],
-  ["components/WorkflowModals.tsx", "bg-black/60", "放大预览遮罩：与弹窗遮罩同类，中性压暗"],
-  [
-    "components/WorkflowModals.tsx",
-    "bg-black/40",
-    "放大预览底部控制条：压在图片上，中性深底才能保证任何图上都可读",
-  ],
+  ["components/WorkflowModals.tsx", "bg-black/40", "放大预览底部控制条：压在图片上，中性深底才能保证任何图上都可读"],
   [
     "components/WorkflowModals.tsx",
     "bg-white/10",
