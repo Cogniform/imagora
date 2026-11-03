@@ -5,7 +5,7 @@ FastAPI 路由级 + 纯逻辑测试，**不调真实上游 API、不花钱**。�
 ## 本地常用命令（在项目根目录执行）
 
 ```powershell
-# 后端全量（482 用例）
+# 后端全量（485 用例）
 .\.venv\Scripts\python.exe -m pytest
 # 按模块筛选
 .\.venv\Scripts\python.exe -m pytest tests/test_core_config.py tests/test_server_helpers.py
@@ -23,7 +23,7 @@ cd frontend; npm test
 - **测试数字是 AGENTS 仪表盘数据源**：增/删测试用例必须同步 AGENTS「当前仪表盘」；数字意外变化（非新增导致）必须报告维护者
 - **别按变量名读断言**：`test_core_api.py` 里的 `calls["n"] == 3` 是**重试次数**计数器，与生成张数无关。看名字以为"多张已覆盖"过一次误判（CLI `--n` 的真覆盖在 `test_main_cli.py`，见 issue #34）
 
-## 文件索引（后端 pytest，共 482）——每个 test_*.py 测什么
+## 文件索引（后端 pytest，共 485）——每个 test_*.py 测什么
 
 | 文件 | 用例 | 覆盖 |
 | --- | --- | --- |
@@ -44,7 +44,7 @@ cd frontend; npm test
 | [`test_core_migrate.py`](test_core_migrate.py) | 19 | 注册表 detect/升级/重建/回填/迁目录 / 工作流升级 / CLI 端到端 |
 | [`test_core_tasks.py`](test_core_tasks.py) | 11 | 任务状态机 / 并发上限 / 取消 / 快照 / TTL 清理 |
 | [`test_core_pathtrust.py`](test_core_pathtrust.py) | 2 | 路径白名单（match_roots 双根/单根/跨盘） |
-| [`test_core_clipboard.py`](test_core_clipboard.py) | 4 | CF_DIB 字节布局（40 字节头 / 24 位 BGR / **自下而上** / 4 字节行对齐）＋非 Windows 抛 `ClipboardError`（前端据此回退浏览器路径） |
+| [`test_core_clipboard.py`](test_core_clipboard.py) | 7 | CF_DIB 字节布局（40 字节头 / 24 位 BGR / **自下而上** / 4 字节行对齐 / **透明合成白底而非丢 alpha**）＋ PNG 载荷（源是 PNG 原字节直传且 alpha 完好、jpg 等转 PNG）＋ 非 Windows 抛 `ClipboardError`（前端据此回退浏览器路径） |
 | [`test_server_clipboard.py`](test_server_clipboard.py) | 3 | `POST /api/clipboard/image`：成功交给 core 只写一次 / 文件不存在 404 / 后端拒绝（非 Windows、被别的程序占着）503 + 人话 |
 | [`test_server_helpers.py`](test_server_helpers.py) | 33 | 窗口分配 / 安全路径白名单 / upload-ref / delete-ref / generate 同步性 / history 注册表解析 + inputRefs/inputRefMissing / **/api/history 分页 hasMore** / _persist_submission 含 temp_bases / 导入与展示同源（注册表副本 + 账本 output 原路径双收，含画布回流回归）/ **静态产物 MIME 钉死（不受 Windows 注册表 `.js` 被写成 text/plain 影响）** / **输出路径两件事（显式默认读写与清除、目录离线保留记录、`resolve_default_output_dir` 优先级「显式 > 上次 > 窗口」、`/api/output-dir/default` 拒绝相对路径且自动建目录）** |
 | [`test_server_canvas.py`](test_server_canvas.py) | 18 | canvas 路由 / workflow 往返（v2）/ missing 收集 / ref_paths 放行 |
