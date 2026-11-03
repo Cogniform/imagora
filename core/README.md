@@ -120,11 +120,12 @@ FastAPI 路由（`server.py`）与 CLI（`main.py`）共用的业务层。**不�
 - 改后必测：`tests/test_core_imageinfo.py`
 
 ### [clipboard.py](clipboard.py)
-- 职责：把图片写进**系统剪贴板**（Windows，Win32 `SetClipboardData(CF_DIB)`，**同步**：返回即别的程序已能粘到）
-- 关键导出：`put_image_on_clipboard()`、`dib_bytes()`（纯函数：BITMAPINFOHEADER + 24 位 BGR + 自下而上 + 4 字节行对齐）、`supported()`、`ClipboardError`
+- 职责：把图片写进**系统剪贴板**（Windows，Win32 `SetClipboardData`，**同步**：返回即别的程序已能粘到）；**同时写两种格式**：`CF_DIB`（24 位，给微信/画图/老软件）+ 注册格式 `PNG`（原字节，保留 alpha，给 Photoshop/Office/浏览器）
+- 关键导出：`put_image_on_clipboard()`、`dib_bytes()`（纯函数：BITMAPINFOHEADER + 24 位 BGR + 自下而上 + 4 字节行对齐 + **透明合成白底**）、`png_bytes()`（PNG 载荷：源是 PNG 用原字节、其它转 PNG）、`flatten_on_white()`、`supported()`、`ClipboardError`
 - 被谁依赖：`server.py`（`POST /api/clipboard/image`，路由侧用 `_UI_LOCK` 串行化）
 - 改后必测：`tests/test_core_clipboard.py` + `tests/test_server_clipboard.py`
 - 注意：为什么绕开浏览器——`navigator.clipboard.write()` 写图片是异步投递，resolve 早于「能粘」100~300ms（页面失活更久、偶发整次丢弃），曾表现为「提示已复制、切到微信粘不出来」。**只有服务端这条路才敢把"已复制"当结论**。背景见 [../docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md) 9.4 第 14 条
+- 注意：**透明背景别只写 DIB**。24 位 DIB 没有 alpha，只写它（2026-11-01 的第一版）会把透明背景的 PNG 粘成黑块——透明像素的 RGB 通常是 0，`convert("RGB")` 等于把 alpha 扔掉。正确做法是 DIB 合成到白底 + 另写一份 `PNG` 格式带 alpha（浏览器 `clipboard.write()` 也是这个组合）
 - 注意：`SetClipboardData` 成功后句柄所有权移交系统，**不能再 `GlobalFree`**；`OpenClipboard` 被别的程序占着时返回 0（GetLastError=5），要短暂重试而不是当失败
 
 ### [pathtrust.py](pathtrust.py)
