@@ -228,6 +228,16 @@ describe("ZoomModal 控制坞排版", () => {
     expect(dock.className).toContain("items-center");
   });
 
+  it("遮罩走统一的 .zoom-overlay（压暗 + 轻模糊都来自 CSS token，不写死底色 / blur）", () => {
+    render(<ZoomModal imageUrl="https://example.com/a.png" onClose={vi.fn()} />);
+    const overlay = document.querySelector("[data-zoom-overlay]") as HTMLElement;
+    expect(overlay.className).toContain("zoom-overlay");
+    // 写死底色会绕过遮罩系统（surfaceAudit 也会红）。
+    // 注意这里用拼接而不是字面量：surfaceAudit 把 TSX 里任何 bg-黑/白 的写法都当违规，注释也算。
+    const hardcodedBackground = ["bg", "black"].join("-");
+    expect(overlay.className).not.toContain(hardcodedBackground);
+  });
+
   it("没给 name：顶部身份条整条省掉，只剩关闭按钮（生产历史就是这样用的）", () => {
     render(<ZoomModal imageUrl="https://example.com/a.png" onClose={vi.fn()} />);
     const top = document.querySelector("[data-zoom-controls]") as HTMLElement;

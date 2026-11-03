@@ -386,7 +386,10 @@ export function ZoomModal({
     <div
       ref={wrapRef}
       data-zoom-overlay
-      className="fixed inset-0 z-50 select-none bg-black/60"
+      /* 遮罩底色与轻模糊都来自 .zoom-overlay（--scrim-bg + --scrim-blur-soft）：
+         压暗之外再把背景文字糊到"看不清"，免得和浮在上面的图抢注意力。
+         不在这里写 bg-* 或 blur()：那会绕过表面系统，surfaceAudit 也会红。 */
+      className="zoom-overlay fixed inset-0 z-50 select-none"
       onPointerDown={onOverlayPointerDown}
       onClick={(event) => event.stopPropagation()}
     >

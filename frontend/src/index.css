@@ -199,6 +199,9 @@ html {
   --scrim-bg: rgba(20, 26, 31, 0.62);
   --scrim-bg-nested: rgba(20, 26, 31, 0.44);
   --scrim-blur: blur(10px) saturate(0.9);
+  /* 放大预览专用的**轻一档**模糊：预览是"看这张图"，背景只需退到"看不清字"，
+   * 用弹窗那档 10px 会把页面糊成一片、也看不出图是从哪儿放大的。 */
+  --scrim-blur-soft: blur(4px) saturate(0.96);
 }
 
 /* —— 表面角色类 ——
@@ -712,6 +715,15 @@ html[data-canvas-bounds="off"] .studio-canvas .react-flow__renderer {
   backdrop-filter: var(--scrim-blur);
 }
 .modal-shell--nested { z-index: 60; background: var(--scrim-bg-nested) !important; }
+
+/* 放大预览遮罩：与弹窗同一套 --scrim-bg，模糊走轻一档的 --scrim-blur-soft。
+ * 以前这里是 TSX 里的 `bg-black/60`（纯压暗、无模糊）——背景里的文字和卡片全都清晰可见，
+ * 和浮在上面的图抢注意力。改成 token 之后也顺手让"所有遮罩同源"这条规矩不留例外。 */
+.zoom-overlay {
+  background: var(--scrim-bg) !important;
+  -webkit-backdrop-filter: var(--scrim-blur-soft);
+  backdrop-filter: var(--scrim-blur-soft);
+}
 .studio-modal,
 .modal-panel {
   width: min(100%, 42rem);

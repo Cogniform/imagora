@@ -8,7 +8,7 @@ React 19 + TypeScript + Vite + Tailwind v4 + React Flow（`@xyflow/react`）。�
 npm install
 npm run dev        # 开发模式（热更新；需后端已启动，见下）
 npm run build      # tsc --noEmit + vite build → dist/（git 忽略，由后端服务托管）
-npm test           # vitest run（1068 用例）
+npm test           # vitest run（1069 用例）
 npm run lint       # eslint
 npx tsc --noEmit   # 类型检查
 ```
@@ -78,13 +78,14 @@ $env:IMAGORA_APP_ROOT = $h
 | --- | --- | --- |
 | 尺寸阶梯 | `--h-ctl` · `--h-field` · `--h-cta` | 顶栏控件 28 · 表单控件 38 · 主行动 46 |
 | 圆角阶梯 | `--r-pill` · `--r-card` · `--r-control` | 胶囊 · 容器 16 · 控件 10 |
-| 表面 | `--surface-base` · `--surface-card` · `--surface-panel` · `--surface-float` · `--surface-inset` · `--surface-plain` · `--surface-blur` · `--scrim-*` | **全部由 [surface.ts](src/surface.ts) 算好后注入**，它是容器底色的唯一产地。两个正交的轴：**掺色 `tint`**（这个面是什么色，按角色分配）与**不透明度 `alpha`**（用户的「通透度」滑杆）。老实现的坑：token 写 `hsl(hue 30% 98.4% / a)`，算出来离纯白只有 **2/255**，数学上不可见 —— 看到的「跟色」全来自 alpha 低、页面底色透上来，于是任何需要不透明的面（弹窗、列表行）颜色就消失（同屏出现「左卡是粉的、右台面是白的」）。现改为解出真实 RGB，`tint 0.10` ≈ 离白 **15/255**。两条硬约束（模糊绝不随通透度增长、CSS 里不写「函数内嵌 var()」）见 [../docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md) 9.4 第 7、8 条 |
+| 表面 | `--surface-base` · `--surface-card` · `--surface-panel` · `--surface-float` · `--surface-inset` · `--surface-plain` · `--surface-blur` · `--scrim-*`（`--scrim-bg` / `--scrim-bg-nested` / `--scrim-blur` / `--scrim-blur-soft`） | **全部由 [surface.ts](src/surface.ts) 算好后注入**，它是容器底色的唯一产地。两个正交的轴：**掺色 `tint`**（这个面是什么色，按角色分配）与**不透明度 `alpha`**（用户的「通透度」滑杆）。老实现的坑：token 写 `hsl(hue 30% 98.4% / a)`，算出来离纯白只有 **2/255**，数学上不可见 —— 看到的「跟色」全来自 alpha 低、页面底色透上来，于是任何需要不透明的面（弹窗、列表行）颜色就消失（同屏出现「左卡是粉的、右台面是白的」）。现改为解出真实 RGB，`tint 0.10` ≈ 离白 **15/255**。两条硬约束（模糊绝不随通透度增长、CSS 里不写「函数内嵌 var()」）见 [../docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md) 9.4 第 7、8 条 |
 | 表面分层 | 六档角色（见 [surface.ts](src/surface.ts) 的 `ROLES` / `SURFACE_ROLE_DOC`）：`base` 骨架 → `card` 大面衬底 → `panel` 台面 → `float` 浮层 → `inset` 内嵌；`plain` **中性**（画布主体，看图台面，刻意不跟随主体色） | **新容器先按角色选档**：骨架（顶栏 / 工具栏）`base`，经典三张输入卡 `card`，输出区 / 弹窗外壳 / 生成历史外壳 `panel`，下拉 / 列表行 / 节点卡 / 缩略图 / 最近提示词 `float`，输入框 `inset`。TSX 里挂 `.surface-*` 角色类（**别写 Tailwind 的 `bg-white`** —— 它生成 `background-color`，接不了渐变 token，且写死就不再跟随）。**嵌套不变量：内层不许比外层更透**（否则壁纸从容器中间透出一个洞），默认通透度下 卡片 0.47 < 台面 0.85 < 浮层 0.94。判据与护栏：[surfaceAudit.test.ts](src/surfaceAudit.test.ts) 解析 `index.css` **与全部 `.tsx`**，任何未登记的写死底色 / 硬编码 `blur()` 直接红（豁免要写理由，白名单按「文件+类名」精确匹配，不做全局放行） |
 | 通用滑杆 | `.range-field` | 外观弹窗的参数滑杆（通透度用它；与主体色滑杆同形，轨道保持中性） |
 | 角落装饰 | `.corner-deco` · `.corner-rings` · `.corner-note` | 编号 / 弧环 / 镜像小字 |
 | 最近提示词 | `.recent-prompt` | 结果区空态一键复用的提示词行：单行截断，完整内容走 title 悬停 |
 | 行内角标 | `.chip`（`--sm` `--dot` `--brand` `--quiet` `--danger`） | 顶栏 28 · 小号 18 |
 | 分段控件 | `.tabs`（模态页签） · `.mode-switch`（顶栏模式） | 同源视觉，尺寸走 `--h-ctl` |
+| 遮罩 | `.modal-shell` / `.studio-modal-overlay`（弹窗） · `.history-overlay` · `.zoom-overlay`（放大预览） | 压暗 + 模糊走 `--scrim-bg` / `--scrim-blur`（**唯一允许使用模糊的地方**，容器一律 `--surface-blur: none`）。放大预览用轻一档的 `--scrim-blur-soft`（4px，只要背景文字"看不清"即可；弹窗那档 10px 会把页面糊成一片） |
 | 模态内容区 | `.modal-body` | 面板是 `max-height` + `overflow:hidden` 的 **flex 列**，内容区靠 `flex: 1 1 auto` + `min-height: 0` 才能被压到内容高度以下并自滚；`scrollbar-gutter: stable` 预留滚动条位、不横向位移。**别改回块级布局**：块级下内容区高度不受约束，`scrollHeight === clientHeight` 永远不触发滚动，超出部分被面板静默裁掉（实测 1100×620：panelClientH 531 / panelScrollH 716 / canScroll false）。原文写的 `--panel-h` 与 `[data-growing]` 早已不存在，2026-10-03 更正 |
 | 只读值表 | `.spec-list` + `__row` / `__key` / `__val` / `__src` | 「值 + 来源」两行式排版 |
 | 背景材质 | `html[data-bg="…"]` + `.bg-swatches` / `.bg-swatch`（`--accent` `--plain`） | 整页背景材质预设；材质只在 `--bg-color` / `--bg-image` / `--bg-size` 三个变量里声明一次，`html[data-bg]` 与选择器色块**共用同一组声明**；铺法是 `repeat`（纹理通道），**大图不许走这里**（会平铺出接缝）；页面底色只能用 `--accent-hue`（`--color-brand` 在 `.imagora-app` 上，body 读不到） |
@@ -366,7 +367,7 @@ $env:IMAGORA_APP_ROOT = $h
 - [`ImageSplitDialog.tsx`](src/components/ImageSplitDialog.tsx) — 切分对话框：五个预设（2×2 / 2×3 / 3×2 / 3×3 / 4×4）+ 行列手填（即时夹到 1~8）、网格预览（在图片上铺 `grid` 格子而不是画 canvas）、文件名预览、1×1 时禁用确认（等于不切）。几何与导出在 [imageSplit.ts](src/imageSplit.ts)
 - [`ImageCropDialog.tsx`](src/components/ImageCropDialog.tsx) — 裁剪对话框（`ModalShell` + [useImageEditorViewport.ts](src/useImageEditorViewport.ts) 做视口 + [imageOps.ts](src/imageOps.ts) 做几何）：八向手柄拖拽、比例预设（自由 / 1:1 / 4:3 / 3:4 / 16:9 / 9:16）、实时像素读数、确认后回传 dataUrl 给上层落库。**遮罩用 `boxShadow: 0 0 0 9999px` 而不是四块 div** —— 四块只能盖住 stage 层（图片宽度），盖不满视口留白，且 spread 型阴影不参与布局
 - [`ImageUpscaleDialog.tsx`](src/components/ImageUpscaleDialog.tsx) — 放大对话框：目标长边预设（1024 / 2048 / 3072 / 4096，默认原长边 ×2 夹在区间内）+ 自定义、算法选择（high / bilinear / nearest）、换算文案（`原 1024×768 → 2048×1536（2.0×）· 显示比例 4:3`）。目标小于原图长边时只提示不禁用（缩小也是合法诉求）。**处理期间用户仍可取消**，卸载后用 `aliveRef` 拦住迟到的结果，避免窗都关了 `onConfirm` 还被调一次
-- [`WorkflowModals.tsx`](src/components/WorkflowModals.tsx) — 保存/加载/导入弹窗 + **`ZoomModal` 全屏预览**（createPortal 到 body，画布 / 经典表单 / 生产历史共用；Portal 根截停 click 冒泡，防误关外层宿主遮罩）。**控制层分两处**：顶部一条放身份信息（`name` 缺省则整条不渲染、只留关闭按钮——生产历史不传，列表里已有完整提示词）+ 关闭按钮；底部**单行控制坞**三组（`缩小 · 读数 · 放大` → 分隔线 → `适应窗口 / 实际大小` → 分隔线 → `复制图片 / 复制路径 / 新标签打开`，`copyPath` 缺省则不出路径按钮）。长操作说明只在坞的 `title` 里，不常驻；复制反馈是坞上方的绝对定位浮标（不进布局，避免反馈一变宽窄就让鼠标底下的按钮挪位置）。**复制反馈三态**：`复制中…` → `已复制` / `失败`，进行中禁用两颗复制按钮——"已复制"只在写真的落地后才出现（浏览器 `clipboard.write()` 的 resolve 早于"能粘"，见 9.4 第 14 条）
+- [`WorkflowModals.tsx`](src/components/WorkflowModals.tsx) — 保存/加载/导入弹窗 + **`ZoomModal` 全屏预览**（createPortal 到 body，画布 / 经典表单 / 生产历史共用；Portal 根截停 click 冒泡，防误关外层宿主遮罩；遮罩挂 `.zoom-overlay`——压暗 + 4px 轻模糊都来自 `--scrim-*` token，背景文字退到"看不清"）。**控制层分两处**：顶部一条放身份信息（`name` 缺省则整条不渲染、只留关闭按钮——生产历史不传，列表里已有完整提示词）+ 关闭按钮；底部**单行控制坞**三组（`缩小 · 读数 · 放大` → 分隔线 → `适应窗口 / 实际大小` → 分隔线 → `复制图片 / 复制路径 / 新标签打开`，`copyPath` 缺省则不出路径按钮）。长操作说明只在坞的 `title` 里，不常驻；复制反馈是坞上方的绝对定位浮标（不进布局，避免反馈一变宽窄就让鼠标底下的按钮挪位置）。**复制反馈三态**：`复制中…` → `已复制` / `失败`，进行中禁用两颗复制按钮——"已复制"只在写真的落地后才出现（浏览器 `clipboard.write()` 的 resolve 早于"能粘"，见 9.4 第 14 条）
 - [`ResultPanel.tsx`](src/components/ResultPanel.tsx) — 经典表单结果区 5 态容器：主图形层 absolute 居中钉死 + 副信息层底部独立生长（行增减不挤动主图形）；切换交叉淡化（swap-in/swap-out，旧层保留 200ms）；排队/生成中/失败/已取消/透传 Gallery；生成中图标本体按自身颜色呼吸光（`icon-breathe`）
 - [`Gallery.tsx`](src/components/Gallery.tsx) — 经典表单结果图（双击放大预览，走 [useImageZoom.ts](src/useImageZoom.ts)；被 ResultPanel 透传）
 - [`LogLine.tsx`](src/components/LogLine.tsx) — 日志单行：文本里的本机绝对路径拆成可点击复制词条（CopyChip），其余保持文本；行动画 log-line
