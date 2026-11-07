@@ -675,6 +675,15 @@ html[data-canvas-bounds="off"] .studio-canvas .react-flow__renderer {
   background: var(--surface-float) !important;
   box-shadow: 0 12px 26px rgba(33,44,53,.12), inset 0 1px rgba(255,255,255,.9) !important;
 }
+/* 节点右侧 hover 操作栏（CanvasNodes.tsx 的 NodeActions）：描边取与节点卡同一档中性细线。
+ *
+ * 为什么不让组件自己写颜色类：原来是 Tailwind 的 `border-white/40` —— 白色 40% 只在深色底
+ * 上才读得出来，而本仓画布是浅底（还可能是浅色壁纸），它等于「没有边」，浮层边界只剩一颗
+ * `shadow-sm` 在撑，落在浅色图上就糊成一片。统一到节点卡同一个值之后，「表面细线」在画布上
+ * 只有一种读法，也让这条线只有一个改动点（想调就改这里，别回到组件里写死颜色）。 */
+.studio-canvas .node-actions {
+  border-color: rgba(32,43,51,.13);
+}
 .studio-canvas .node-pop.node-selected {
   border-color: var(--color-brand) !important;
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-brand) 16%, transparent), 0 14px 30px rgba(33,44,53,.16) !important;

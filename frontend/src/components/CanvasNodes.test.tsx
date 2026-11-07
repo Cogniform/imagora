@@ -118,13 +118,25 @@ describe("ImageNode", () => {
     expect(rail.className).toContain("shadow-sm");
     expect(rail.className).not.toMatch(/\bbg-(white|black)\b/);
 
+    // 描边归 `.node-actions`（index.css 里与 `.node-pop` 同值的中性细线）：
+    // 老写法是 Tailwind 的 border-<white>/40 —— 白色 40% 在浅底画布上等于没有边。
+    expect(rail.className).toContain("node-actions");
+    expect(rail.className).not.toContain("border-white");
+
     // 图标按钮收敛到 .btn-icon + .btn-icon--sm 尺寸档，不再手写 !px-1.5 !py-0.5 text-[10px] 魔法值。
+    // 图标本体同时钉住「与 DSH 插件版同一套笔画」：内联 Icon = 24 viewBox / 1.7 线宽 / currentColor，
+    // 换回图标库或改线宽都会红（形状本身在 Icon.tsx，不在这里锁）。
     const cropButton = screen.getByRole("button", { name: "裁剪图片" });
     expect(cropButton.className).toContain("btn-icon");
     expect(cropButton.className).toContain("btn-icon--sm");
     expect(cropButton.className).not.toContain("text-[10px]");
     expect(cropButton.className).not.toContain("!px-1.5");
     expect(cropButton.className).not.toContain("!py-0.5");
+    const cropIcon = cropButton.querySelector("svg");
+    expect(cropIcon?.getAttribute("viewBox")).toBe("0 0 24 24");
+    expect(cropIcon?.getAttribute("stroke-width")).toBe("1.7");
+    expect(cropIcon?.getAttribute("stroke")).toBe("currentColor");
+    expect(cropIcon?.getAttribute("aria-hidden")).toBe("true");
 
     // 引用计数徽标跟 .btn-xs 对齐到 11px 档，不再是 10px。
     expect(screen.getByText("引用 2 处").className).toContain("text-[11px]");
