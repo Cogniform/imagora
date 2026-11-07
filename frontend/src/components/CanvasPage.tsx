@@ -173,9 +173,11 @@ function ToolbarButton({
       className={`btn-ghost btn-sm relative ${draggable ? "btn-draggable" : ""} ${disabled ? "opacity-50" : ""}`}
     >
       {children}
-      {/* 可拖出暗示：悬浮时右侧浮现拖拽图标（样式在 index.css .btn-draggable） */}
+      {/* 可拖出暗示：悬浮时右侧浮现六点把手（位置与按钮右内边距都在 index.css .btn-draggable：
+          把手要在按钮右缘**内侧**，否则被 .btn-ghost 的 overflow-hidden 裁成半枚圆；
+          这里有意的没有 `-right-1` —— 那是"右缘外 4px"的老写法，正是被裁的那版） */}
       {draggable && (
-        <span className="btn-drag-grip pointer-events-none absolute -right-1 top-0 bottom-0 my-auto flex h-4 w-4 items-center justify-center rounded-full border border-brand/30 bg-white shadow-sm">
+        <span className="btn-drag-grip pointer-events-none absolute top-0 bottom-0 my-auto flex h-4 w-4 items-center justify-center rounded-full border border-brand/30 bg-white shadow-sm">
           <GripVertical size={10} strokeWidth={2.5} className="text-brand" />
         </span>
       )}

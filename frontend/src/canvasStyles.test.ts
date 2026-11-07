@@ -57,3 +57,30 @@ describe("画布控制坞", () => {
     expect(page).toContain('position="top-left"');
   });
 });
+
+describe("可拖出按钮的六点把手", () => {
+  const page = readFileSync(new URL("./components/CanvasPage.tsx", import.meta.url), "utf8");
+
+  /**
+   * 把手必须落在按钮右缘**内侧**。
+   *
+   * `.btn-ghost` 的 `@apply` 里有 `overflow-hidden`（涟漪 `::before` 要靠它在圆角内裁切），
+   * 而老写法把把手挂在按钮右缘外 4px（JSX 上的 `-right-1`），那 4px 落在裁剪区外 ——
+   * 真机实测（1600 宽）：按钮右缘 350.64、把手右缘 354.64，**越界 +4px**，屏幕上只剩半枚圆，
+   * 读起来像「贴了个豁口」而不是一枚完整的把手。
+   *
+   * 现在两条数值收在 index.css（互相关联，拆到 JSX 就没人能一眼验算）：
+   * 右内边距 22px 给把手腾位 + 把手 `right: 3px` 落在裁剪区内 ⇒ 文字与把手之间还剩 3px。
+   * 判据是「把手右缘 − 按钮右缘」的符号：负数才算真的在里面。
+   */
+  it("把手在按钮右缘内侧（右内边距 22px + right 3px）", () => {
+    expect(css).toMatch(/\.btn-draggable\s*\{[^}]*padding-right:\s*22px/);
+    expect(css).toMatch(/\.btn-draggable \.btn-drag-grip\s*\{[^}]*right:\s*3px/);
+
+    // 别再退回「右缘外」：JSX 的那一行里不许出现 -right-1（只查真正的 className 行，
+    // 不查注释 —— 注释里要写清这条坑，按文本全篇匹配会误伤自己）
+    const gripLine = page.split("\n").find((line) => line.includes("btn-drag-grip"));
+    expect(gripLine, "CanvasPage.tsx 里找不到六点把手那一行").toBeTruthy();
+    expect(gripLine).not.toContain("-right-1");
+  });
+});
