@@ -54,7 +54,7 @@ cd frontend; npm test
 | [`test_main_process.py`](test_main_process.py) | 4 | 端口探测 / 祖先链回溯（Windows） |
 | [`test_main_cli.py`](test_main_cli.py) | 31 | CLI gen 子命令全链路（校验/输出解析/文生图+图生图+多参考/失败/--no-asset/比例档位）/ **`--n` 逐张请求（每次 `n=1`、各存各的账、部分失败保留已成功、默认单张行为不变）** / config 输出 |
 
-## 文件索引（前端 vitest，共 1069，位于 frontend/src/）
+## 文件索引（前端 vitest，共 1070，位于 frontend/src/）
 
 | 文件 | 用例 | 覆盖 |
 | --- | --- | --- |
@@ -68,7 +68,7 @@ cd frontend; npm test
 | [`canvasDrop.test.ts`](../frontend/src/canvasDrop.test.ts) | 14 | 拖拽意图解析 / 文件识别 / 数量统计 / 示意文案 / isInsideRect |
 | [`previewZoom.test.ts`](../frontend/src/previewZoom.test.ts) | 9 | 缩放范围 / 平移夹紧 / **倍率↔真实像素换算**（`zoom=1` 不等于原图 1:1：布局先被缩到 68% 时读数必须是 68%；「实际大小」的倍率 = 1/布局缩放比，且被 `ZOOM_MAX` 夹住） |
 | [`canvasHistory.test.ts`](../frontend/src/canvasHistory.test.ts) | 5 | 撤销 / 恢复 / 新分支清空 |
-| [`canvasStyles.test.ts`](../frontend/src/canvasStyles.test.ts) | 7 | 动效 CSS 选择器约束 / **控制坞每行带中文标签**（纯图标认不出）/ 行宽钉死不撑宽 / 小地图在左上角 |
+| [`canvasStyles.test.ts`](../frontend/src/canvasStyles.test.ts) | 8 | 动效 CSS 选择器约束 / **控制坞每行带中文标签**（纯图标认不出）/ 行宽钉死不撑宽 / 小地图在左上角 / **可拖出按钮的六点把手落在按钮右缘内侧**（右内边距 22px + `right: 3px`，JSX 里不许再出现 `-right-1`——那是被 `overflow-hidden` 裁成半枚圆的老写法） |
 | [`recovery.test.ts`](../frontend/src/recovery.test.ts) | 4 | 快照剥离动画类 / 运行期字段清除 |
 | [`useGenerationTask.test.ts`](../frontend/src/useGenerationTask.test.ts) | 8 | hook 稳定成员引用 + **超预算确认（409→确认→带 allowOverBudget 重提、取消则抛出、同实例只问一次、非 409 不触发确认）** |
 | [`useImageZoom.test.ts`](../frontend/src/useImageZoom.test.ts) | 4 | 预览开关：**全程不开新标签页**（单击不再跳转）/ 打开与关闭 / 不再暴露单击开窗入口 |
