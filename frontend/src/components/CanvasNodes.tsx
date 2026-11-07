@@ -1,6 +1,5 @@
 import { memo, useEffect, useState, type ReactNode } from "react";
 import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
-import { Brush, Crop, Eye, Maximize2, RefreshCw, Scissors, Trash2 } from "lucide-react";
 import type { CanvasGroupNodeData, CanvasImageNodeData, CanvasPromptNodeData } from "../types";
 import { ratioFromSizeLabel } from "../aspectIcon";
 import { mergeCustomOption } from "../customValue";
@@ -8,6 +7,7 @@ import { generatingLabel } from "../format";
 import { AspectIcon } from "./AspectIcon";
 import { FolderPicker } from "./FolderPicker";
 import { GenerationPending } from "./GenerationPending";
+import { Icon } from "./Icon";
 import { Select, type SelectOption } from "./Select";
 
 /**
@@ -42,12 +42,18 @@ function sizeOptionIcon(option: SelectOption): ReactNode {
  *    顺序上也安全：鼠标直接移到按钮区域时容器仍是 `pointer-events-none`，点击穿透到画布，
  *    正是想要的行为；只有先悬停节点、容器放开之后，移入按钮才接得上 hover。
  *
+ * 3) **描边颜色没有语义**：老写法是 Tailwind 的 `border-white/40` —— 白色 40% 只在深色底上
+ *    才看得出来，而我们的画布是浅底，它等于几乎没有边，浮层边界全靠那颗 `shadow-sm` 硬撑。
+ *    现在归到 `.node-actions`（描边 `rgba(32,43,51,.13)`，与 `.studio-canvas .node-pop` 的
+ *    节点卡描边同值）：同一种「表面细线」在节点卡与操作栏上只有一种读法。
+ *    想改这条线就改 index.css 里那一处，别在这里写死颜色类。
+ *
  * 竖排而非横排：横排会在 380px 宽的提示词卡上方压住邻居节点，竖排只占右侧一条窄带。 */
 function NodeActions({ children, testId }: { children: ReactNode; testId?: string }) {
   return (
     <div
       data-testid={testId}
-      className="absolute left-full top-2 z-30 flex flex-col gap-1 surface-float rounded-lg border border-white/40 p-1 pl-2 shadow-sm opacity-0 pointer-events-none transition-opacity group-hover:pointer-events-auto group-hover:opacity-100"
+      className="absolute left-full top-2 z-30 flex flex-col gap-1 surface-float node-actions rounded-lg border p-1 pl-2 shadow-sm opacity-0 pointer-events-none transition-opacity group-hover:pointer-events-auto group-hover:opacity-100"
     >
       {children}
     </div>
@@ -215,25 +221,25 @@ export const ImageNode = memo(function ImageNode({
       {/* 图片专用操作区：悬停时在右侧显示，不遮挡图片。 */}
       <NodeActions testId="image-action-rail">
         <ActionButton label="预览大图" onClick={() => onZoom(id)}>
-          <Eye aria-hidden="true" size={14} />
+          <Icon name="eye" />
         </ActionButton>
         <ActionButton label="裁剪图片" onClick={() => onCrop(id)}>
-          <Crop aria-hidden="true" size={14} />
+          <Icon name="crop" />
         </ActionButton>
         <ActionButton label="放大图片" onClick={() => onUpscale(id)}>
-          <Maximize2 aria-hidden="true" size={14} />
+          <Icon name="expand" />
         </ActionButton>
         <ActionButton label="切分图片" onClick={() => onSplit(id)}>
-          <Scissors aria-hidden="true" size={14} />
+          <Icon name="grid" />
         </ActionButton>
         <ActionButton label="蒙版重绘" onClick={() => onMask(id)}>
-          <Brush aria-hidden="true" size={14} />
+          <Icon name="wand" />
         </ActionButton>
         <ActionButton label="替换图片" onClick={() => onReplace(id)}>
-          <RefreshCw aria-hidden="true" size={14} />
+          <Icon name="image" />
         </ActionButton>
         <ActionButton label="删除图片" onClick={() => onDelete(id)} danger>
-          <Trash2 aria-hidden="true" size={14} />
+          <Icon name="trash" />
         </ActionButton>
       </NodeActions>
       {thumb}
@@ -334,7 +340,7 @@ export const GroupNode = memo(function GroupNode({
         <div className="relative rounded-lg border border-brand/15 bg-brand/5 !p-4">
           <NodeActions>
             <ActionButton label="删除图片组" onClick={() => onDelete(id)} danger>
-              <Trash2 aria-hidden="true" size={14} />
+              <Icon name="trash" />
             </ActionButton>
           </NodeActions>
           {body}
@@ -505,7 +511,7 @@ export const PromptNode = memo(function PromptNode({
       <NodeActions>
         <StatusLight data={data} />
         <ActionButton label="删除" onClick={() => onDelete(id)} danger>
-          <Trash2 aria-hidden="true" size={14} />
+          <Icon name="trash" />
         </ActionButton>
       </NodeActions>
       {/* 标题只做定位标签：完整提示词就在下方 textarea 里可见可编辑，
