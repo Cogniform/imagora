@@ -1583,15 +1583,33 @@ html[data-canvas-bounds="off"] .studio-canvas .react-flow__renderer {
 
 /* ============ 可拖出按钮（工具栏：新建提示词卡片 / 新建图片组） ============
  * 悬浮时暗示"可以拖到画布"：grab 光标 + 品牌色呼吸光晕 + 右侧拖拽图标淡入上浮。
- * 与拖拽落点示意同源（都表示"拖出去放到画布"），视觉上同用品牌色。 */
+ * 与拖拽落点示意同源（都表示"拖出去放到画布"），视觉上同用品牌色。
+ *
+ * 六点把手的位置与按钮内边距也归这里（不在 JSX 上挂 `-right-1` 那一类工具类）：
+ * 这枚把手要「在按钮右缘内侧、且文字尾巴与它之间留一点空」，是两条**互相关联**的数值
+ * （内边距决定文字停在哪，right 决定把手停在哪），拆到 JSX 就没人能一眼验算。
+ *
+ * 数值怎么来的（把手 16px 宽，按钮右内边距 22px，把手 right:3px）：
+ *   · 把手左缘距按钮右缘 = 3 + 16 = 19px；文字内容区右缘距按钮右缘 = 22px
+ *     ⇒ 文字与把手之间还剩 22 − 19 = 3px 空隙（维护者要的"右侧留一点空隙"）。
+ *   · 把手右缘落在按钮右缘**内侧** 3px。
+ *
+ * 为什么不能再放回右缘外（老写法 `-right-1` = 右缘外 4px）：`.btn-ghost` 的 `@apply` 里有
+ * `overflow-hidden`（涟漪 `::before` 要靠它在圆角内裁切），溢出的部分会被裁掉 —— 实测
+ * 1600 宽下按钮右缘 350.64、把手右缘 354.64，越界 +4px，屏幕上只剩半枚圆，像贴了个豁口。
+ * 放回右缘外之前，先确认 overflow 不再裁它。 */
 .btn-draggable {
   cursor: grab;
+  /* 给六点把手腾出位置：不加这条，把手只能压在文字尾巴上（12px 内边距装不下 16px 的圆） */
+  padding-right: 22px;
 }
 .btn-draggable:hover:not(:disabled) {
   animation: drag-hint-glow 1.8s ease-in-out infinite;
 }
 .btn-draggable .btn-drag-grip {
   opacity: 0;
+  /* 右缘内侧 3px：完整落在 `.btn-ghost` 的 overflow 裁剪区内 */
+  right: 3px;
 }
 .btn-draggable:hover .btn-drag-grip {
   animation: drag-grip-in 0.25s cubic-bezier(0.22, 1, 0.36, 1) both;
