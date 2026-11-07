@@ -56,6 +56,20 @@ describe("画布控制坞", () => {
   it("小地图放左上角（右下角留给日志轮播）", () => {
     expect(page).toContain('position="top-left"');
   });
+
+  /**
+   * 控件坞每行本身就是一颗 React Flow 的 `.react-flow__controls-button`，于是内置样式
+   * `.react-flow__controls-button svg { width:100%; max-width:12px; max-height:12px; fill: currentColor }`
+   * 会套到我们的内联图标上：`fill: currentColor` 压掉 `fill="none"`（presentation attribute
+   * 打不过作者样式）→ 线条被填成实心块；`max-width: 12px` → 14px 缩一号。
+   * 实测（Chromium computed style，1600 宽）：fill = rgb(82,96,111)、渲染 12×12。
+   * 这两条覆盖是「与插件版同一套清晰线条」的前提，删掉就退回实心块。
+   */
+  it("控件坞图标是描边线条（压掉 React Flow 内置的 fill / 12px 上限）", () => {
+    expect(css).toMatch(/\.react-flow__controls \.dock-row svg\s*\{[^}]*fill:\s*none/);
+    expect(css).toMatch(/\.react-flow__controls \.dock-row svg\s*\{[^}]*max-width:\s*none/);
+    expect(css).toMatch(/\.react-flow__controls \.dock-row svg\s*\{[^}]*width:\s*14px/);
+  });
 });
 
 describe("可拖出按钮的六点把手", () => {
