@@ -542,6 +542,24 @@ html[data-wallpaper="on"] select {
   letter-spacing: 0.02em;
   white-space: nowrap;
 }
+/* 控件坞图标必须显式压掉 React Flow 的内置 svg 规则，否则内联图标会被**填成实心块**。
+ *
+ * `.react-flow__controls-button svg` 里带两条：`fill: currentColor` 与
+ * `max-width/max-height: 12px`。因为这一列每行就是一颗 `.react-flow__controls-button`
+ * （`.dock-row` 覆盖它的外观），我们内联图标正好落在它的选择器范围内：
+ *   ① `fill: currentColor` 把 `fill="none"` 顶掉 —— svg 上的 `fill` 只是 presentation
+ *      attribute，优先级低于任何作者样式，于是靠 stroke 画的线条被填成实心色块；
+ *   ② `max-width: 12px` 把 14px 的图标缩一号。
+ * 实测（Chromium computed style，1600 宽）：fill 实际是 rgb(82,96,111)、渲染 12×12 ——
+ * 与插件版「分明的线条」差的就是这两条。改这两条之前先想清楚：图标一共只有 14px，
+ * 一旦被填实就再也看不出形状了。 */
+.studio-canvas .react-flow__controls .dock-row svg {
+  fill: none;
+  width: 14px;
+  height: 14px;
+  max-width: none;
+  max-height: none;
+}
 /* 开关态（吸附 / 小地图 / 锁定）：主体色 + 加粗，一眼看出「这个现在是开着的」。
  * 不靠图标换形状表达状态 —— 那正是原来两个方块图标认不出来的原因。 */
 .studio-canvas .react-flow__controls .dock-row.is-on {
