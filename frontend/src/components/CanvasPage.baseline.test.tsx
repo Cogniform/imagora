@@ -1502,6 +1502,14 @@ describe("画布偏好", () => {
     expect(h.zoomIn).toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "缩小画布" }));
     expect(h.zoomOut).toHaveBeenCalled();
+
+    // 控件坞的图标与 DSH 插件版统一成一套内联图标（24 viewBox / 1.7 线宽 / currentColor）。
+    // 只锁笔画契约、不锁具体图形：形状在 components/Icon.tsx，改形状要两个仓库一起改。
+    // 注意 label 是语义来源，图标换了但「放大画布」这类无障碍名字一个都不能动。
+    const zoomInIcon = screen.getByRole("button", { name: "放大画布" }).querySelector("svg");
+    expect(zoomInIcon?.getAttribute("viewBox")).toBe("0 0 24 24");
+    expect(zoomInIcon?.getAttribute("stroke-width")).toBe("1.7");
+    expect(zoomInIcon?.getAttribute("stroke")).toBe("currentColor");
   });
 
   it("小地图显隐偏好读写并挂载/卸载 MiniMap", () => {

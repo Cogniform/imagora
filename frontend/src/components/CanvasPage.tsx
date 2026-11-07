@@ -29,20 +29,7 @@ import {
   type ReactFlowInstance,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-// `Map` 图标必须起别名：直接叫 Map 会遮蔽全局 Map 类型，React Flow 的泛型推断
-// （useNodesState / NodeChange<...>）会当场崩掉，报一串与 UI 毫无关系的类型错误。
-import {
-  CircleHelp,
-  Crosshair,
-  GripVertical,
-  Lock,
-  LockOpen,
-  Magnet,
-  Map as MapIcon,
-  Maximize,
-  ZoomIn,
-  ZoomOut,
-} from "lucide-react";
+import { GripVertical } from "lucide-react";
 
 import {
   canvasUpload,
@@ -105,6 +92,10 @@ import {
 import { layoutPromptResults, layoutSelection, nodeSize } from "../layout";
 import { focusViewportForNode, nodeBounds, revealViewport, type NodeBox } from "../canvasGeometry";
 import { GroupNode, ImageNode, PromptNode } from "./CanvasNodes";
+// 控件坞那九行的图标走本仓内联的 ./Icon（与 DSH 插件版同源，见该文件顶部：为什么换、
+// 形状从哪来、改形状要两个仓库一起改）。名字走字符串键，顺带绕开了「import 一个叫 Map
+// 的组件会遮蔽全局 Map 类型、把 React Flow 的泛型推断搞崩」那条老坑。
+import { Icon } from "./Icon";
 import { HistoryGallery } from "./HistoryGallery";
 import { SnapGuides } from "./SnapGuides";
 import { ImageCropDialog } from "./ImageCropDialog";
@@ -2382,21 +2373,21 @@ export function CanvasPage({
               <span className="dock-row__label dock-row__value">{zoomPercent}%</span>
             </div>
             <DockRow
-              icon={<ZoomIn aria-hidden="true" size={14} />}
+              icon={<Icon name="zoomIn" />}
               label="放大"
               title="放大画布（滚轮同样可以缩放）"
               ariaLabel="放大画布"
               onClick={() => void rfInstanceRef.current?.zoomIn({ duration: 180 })}
             />
             <DockRow
-              icon={<ZoomOut aria-hidden="true" size={14} />}
+              icon={<Icon name="zoomOut" />}
               label="缩小"
               title="缩小画布（滚轮同样可以缩放）"
               ariaLabel="缩小画布"
               onClick={() => void rfInstanceRef.current?.zoomOut({ duration: 180 })}
             />
             <DockRow
-              icon={<Maximize aria-hidden="true" size={14} />}
+              icon={<Icon name="maximize" />}
               label="适应"
               title="适应视图：把所有节点缩放到一屏可见"
               ariaLabel="适应视图"
@@ -2404,7 +2395,7 @@ export function CanvasPage({
             />
             {/* 聚焦：有选中就聚焦选中，没选中就聚焦全图。取代 fitView 的「全塞进屏幕」 */}
             <DockRow
-              icon={<Crosshair aria-hidden="true" size={14} />}
+              icon={<Icon name="focus" />}
               label="聚焦"
               title="聚焦（有选中时只看选中的，否则看全图）"
               ariaLabel="聚焦所选节点"
@@ -2412,7 +2403,7 @@ export function CanvasPage({
             />
             {/* 吸附开关：默认开，关掉后拖拽完全自由（偏好落 localStorage） */}
             <DockRow
-              icon={<Magnet aria-hidden="true" size={14} />}
+              icon={<Icon name="magnet" />}
               label="吸附"
               title={snapEnabled ? "关闭拖拽吸附" : "开启拖拽吸附"}
               ariaLabel={snapEnabled ? "关闭拖拽吸附" : "开启拖拽吸附"}
@@ -2421,7 +2412,7 @@ export function CanvasPage({
             />
             {/* 小地图开关：同一栈里，避免再往画布上叠一块常驻 UI */}
             <DockRow
-              icon={<MapIcon aria-hidden="true" size={14} />}
+              icon={<Icon name="map" />}
               label="地图"
               title={minimapVisible ? "隐藏小地图" : "显示小地图"}
               ariaLabel={minimapVisible ? "隐藏小地图" : "显示小地图"}
@@ -2432,11 +2423,7 @@ export function CanvasPage({
                 但滚轮缩放照旧 —— 看图时防止手一抖把布局拖乱。 */}
             <DockRow
               icon={
-                canvasLocked ? (
-                  <Lock aria-hidden="true" size={14} />
-                ) : (
-                  <LockOpen aria-hidden="true" size={14} />
-                )
+                canvasLocked ? <Icon name="lock" /> : <Icon name="unlock" />
               }
               label={canvasLocked ? "已锁" : "锁定"}
               title={
@@ -2450,7 +2437,7 @@ export function CanvasPage({
             />
             {/* 操作帮助与缩放/适应视图同一栈：不再单占工具栏下方一整行 */}
             <DockRow
-              icon={<CircleHelp aria-hidden="true" size={14} />}
+              icon={<Icon name="help" />}
               label="帮助"
               title="操作帮助与快捷键"
               ariaLabel="操作帮助与快捷键"
