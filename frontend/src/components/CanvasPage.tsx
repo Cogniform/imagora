@@ -428,6 +428,7 @@ export function CanvasPage({
     cancel: cancelGenerationTask,
     submit: submitGenerationTask,
     subscribe: subscribeGenerationTask,
+    reattach: reattachTask,
   } = generationTask;
   /** 提示词节点 → taskId（提交成功时登记，终态订阅回调解除；防重复提交 + 删除节点时取消定位） */
   const nodeTaskRef = useRef(new Map<string, string>());
@@ -520,8 +521,34 @@ export function CanvasPage({
       setEdges(restoredEdges);
       refreshHistoryControls();
       fitCanvasToContent();
+      // 认领回来：节点 data 里的 taskId 说明那次生成还在服务端跑（或已经跑完）。
+      // 画布重新挂载后内存映射已清空，这里按快照里的线索重新登记与轮询 ——
+      // 否则卡片显示「就绪」，任务白跑一次钱也白花。
+      for (const node of restoredNodes) {
+        if (node.type !== "prompt") continue;
+        const taskId = node.data.taskId;
+        if (!taskId) continue;
+        nodeTaskRef.current.set(node.id, taskId);
+        taskNodeRef.current.set(taskId, node.id);
+        void reattachTask(taskId)
+          .then((status) => {
+            if (status === "queued" || status === "running") {
+              pushLog(`已重新接上还在这张卡上跑的任务（${status === "queued" ? "排队中" : "生成中"}）`);
+              return;
+            }
+            // 终态交给订阅回调收尾（结果图回流）；这里只是不再挂线索
+            nodeTaskRef.current.delete(node.id);
+          })
+          .catch(() => {
+            // 任务已不在服务端（重启 / 过期）：清掉线索，回归可重跑
+            nodeTaskRef.current.delete(node.id);
+            taskNodeRef.current.delete(taskId);
+            setNodes((nds) => updatePromptNode(nds, node.id, { status: "idle", taskId: undefined }));
+            pushLog("上一个任务已失效（服务重启或过期），卡片可重新运行");
+          });
+      }
     },
-    [fitCanvasToContent, refreshHistoryControls, setEdges, setNodes],
+    [fitCanvasToContent, refreshHistoryControls, setEdges, setNodes, pushLog, reattachTask],
   );
 
   useCanvasRecovery({
@@ -1571,6 +1598,9 @@ export function CanvasPage({
         });
         nodeTaskRef.current.set(nodeId, taskId);
         taskNodeRef.current.set(taskId, nodeId);
+        // taskId 进节点 data：切标签页 / 刷新会让画布组件卸载，内存映射随之清空，
+        // 靠这个字段才能在回来时重新认领（见 restoreCanvas 的认领块）
+        setNodes((nds) => updatePromptNode(nds, nodeId, { taskId }));
       } catch (err) {
         nodeTaskRef.current.delete(nodeId);
         setNodes((nds) => updatePromptNode(nds, nodeId, { status: "failed", message: errMessage(err) }));
@@ -1622,7 +1652,7 @@ export function CanvasPage({
         // 终态：解除映射（只处理一次），状态先落 done，回流完成后补张数
         nodeTaskRef.current.delete(nodeId);
         taskNodeRef.current.delete(taskId);
-        setNodes((nds) => updatePromptNode(nds, nodeId, { status: "done", message: undefined, cancelRequested: undefined }));
+        setNodes((nds) => updatePromptNode(nds, nodeId, { status: "done", message: undefined, cancelRequested: undefined, taskId: undefined }));
         void reflowResults(nodeId, view).then((count) => {
           if (count > 0) setNodes((nds) => updatePromptNode(nds, nodeId, { resultCount: count }));
         });
@@ -1635,6 +1665,7 @@ export function CanvasPage({
             startedAtMs: undefined,
             message: view.error ?? "生成失败",
             cancelRequested: undefined,
+            taskId: undefined,
           }),
         );
         pushLog(`节点 ${nodeId} 失败：${view.error ?? "未知错误"}`);
@@ -1647,6 +1678,7 @@ export function CanvasPage({
             startedAtMs: undefined,
             message: undefined,
             cancelRequested: undefined,
+            taskId: undefined,
           }),
         );
         pushLog(`节点 ${nodeId}：任务已取消`);

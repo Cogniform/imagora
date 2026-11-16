@@ -48,6 +48,11 @@ export interface UseGenerationTaskResult {
   cancel: (taskId: string) => Promise<void>;
   /** 读取某任务最新视图（含本地 elapsed） */
   get: (taskId: string) => GenerationTaskView | undefined;
+  /**
+   * 重新认领一个画布重新挂载前就提交过的任务（按节点 data 里的 taskId 恢复轮询）。
+   * 任务已不在服务端时抛错，调用方据此清掉线索、让卡片回归 idle。
+   */
+  reattach: (taskId: string) => Promise<GenerationTaskStatus>;
   /** 当前所有已注册任务（含已终态；「全部运行」按钮的运行中判定用） */
   tasks: GenerationTaskView[];
   /** 订阅任务变化（任意状态更新 / elapsed 每秒刷新），返回取消订阅函数 */
@@ -196,6 +201,34 @@ export function useGenerationTask(): UseGenerationTaskResult {
 
   const get = useCallback((taskId: string) => tasksRef.current.get(taskId), []);
 
+  /**
+   * 重新认领一个「画布重新挂载前就提交过」的任务。
+   *
+   * 场景：卡片提交后切走标签页 / 刷新，画布组件卸载，内存里的 taskId 映射随之消失，
+   * 而任务还在服务端跑。调用方从节点 data 里的 taskId 恢复线索后调这里：
+   * 先按当前状态立刻 emit 一次（卡片不必等第一轮轮询就回到 queued/running），
+   * 再挂回轮询。非终态才轮询；终态交给订阅者按正常收尾处理。
+   *
+   * 与 `submit` 的差别只有一点：不重新发请求，也不会重算预算。
+   */
+  const reattach = useCallback(
+    async (taskId: string): Promise<GenerationTaskStatus> => {
+      stopPoll(taskId);
+      const snap = await fetchTask(taskId);
+      const view: GenerationTaskView = {
+        taskId,
+        status: snap.status,
+        elapsed: tasksRef.current.get(taskId)?.elapsed ?? 0,
+        ...(snap.cancelRequested ? { cancelRequested: true } : {}),
+      };
+      tasksRef.current.set(taskId, view);
+      emit(taskId, view);
+      if (!TERMINAL_STATUSES.includes(snap.status)) poll(taskId);
+      return snap.status;
+    },
+    [emit, poll, stopPoll],
+  );
+
   const subscribe = useCallback((listener: (taskId: string, view: GenerationTaskView) => void) => {
     listenersRef.current.add(listener);
     return () => {
@@ -219,6 +252,7 @@ export function useGenerationTask(): UseGenerationTaskResult {
     submit,
     cancel,
     get,
+    reattach,
     tasks: Array.from(tasksRef.current.values()),
     subscribe,
   };
