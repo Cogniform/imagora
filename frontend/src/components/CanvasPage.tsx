@@ -940,10 +940,15 @@ export function CanvasPage({
       const wf = await workflowLoad(name);
       // 缺 size/quality 的旧卡片补成「配置里的第一档」，与新建卡片同源
       // （见下面新建卡片的 config.sizes[0] ?? "1024x1024"）
-      const { nodes: loadedNodes, edges: loadedEdges } = workflowToCanvas(wf.nodes, wf.edges, wf.missing, {
-        size: config.sizes[0]?.value,
-        quality: config.qualities[0],
-      });
+      const { nodes: loadedNodes, edges: loadedEdges, dropped } = workflowToCanvas(
+        wf.nodes,
+        wf.edges,
+        wf.missing,
+        {
+          size: config.sizes[0]?.value,
+          quality: config.qualities[0],
+        },
+      );
       historyRef.current.clear();
       setNodes(loadedNodes);
       setEdges(loadedEdges);
@@ -951,6 +956,10 @@ export function CanvasPage({
       fitCanvasToContent();
       setShowLoadModal(false);
       pushLog(`已加载「${name}」${wf.missing.length ? `，${wf.missing.length} 张图片缺失` : ""}`);
+      // 跳过的节点必须说出来：少了卡却没有提示，用户只会以为是自己误删了
+      if (dropped.length) {
+        pushLog(`${dropped.length} 个节点数据不完整，已跳过（${dropped[0]?.reason ?? "未知"}）`);
+      }
     } catch (err) {
       pushLog(`加载失败：${errMessage(err)}`);
     }
