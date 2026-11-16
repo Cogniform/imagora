@@ -605,7 +605,7 @@
           ]
         },
         {
-          "id": "gpt‑image‑2",
+          "id": "gpt-image-2",
           "label": "GPT Image 2",
           "note": "1K/2K，中转站仅登记别名，实际调用会报错",
           "output_formats": [
@@ -683,7 +683,7 @@
           ]
         },
         {
-          "id": "gpt‑image‑2.5",
+          "id": "gpt-image-2.5",
           "label": "GPT Image 2.5",
           "note": "1K/2K，中转站仅登记别名，实际调用会报错",
           "output_formats": [
