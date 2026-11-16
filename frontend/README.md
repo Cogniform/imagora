@@ -8,7 +8,7 @@ React 19 + TypeScript + Vite + Tailwind v4 + React Flow（`@xyflow/react`）。�
 npm install
 npm run dev        # 开发模式（热更新；需后端已启动，见下）
 npm run build      # tsc --noEmit + vite build → dist/（git 忽略，由后端服务托管）
-npm test           # vitest run（1072 用例）
+npm test           # vitest run（1054 用例）
 npm run lint       # eslint
 npx tsc --noEmit   # 类型检查
 ```
@@ -98,7 +98,6 @@ $env:IMAGORA_APP_ROOT = $h
 | 画布图标 | [Icon.tsx](src/components/Icon.tsx) · `.node-actions` | 画布图标语言的**唯一出处**：控制坞九行 + 节点右侧操作栏七个按钮都从这里取（24 viewBox、`strokeWidth 1.7`、round cap/join、`currentColor`）。`PATHS` 与 DSH 插件版 `dsh-imagora-desk` 的 `src/client/icons.tsx` 逐字同源 —— **改形状 = 两个仓库同时改**，只改单边立刻分叉；新增画布图标加进这个文件，别再为它引图标库。`.node-actions` 是 hover 操作栏的描边（`rgba(32,43,51,.13)`，与节点卡 `.node-pop` 同值），替掉原来的 `border-white/40`：白 40% 只在深色底上读得出来，浅底画布上等于没有边。`lucide-react` 仍被顶栏 / 可拖出按钮的把手 / 结果区状态图标使用，**别删依赖** |
 | 画布控件 | `.dock-row--readout` · `.dock-row__value` · `.studio-canvas .react-flow__minimap` | 缩放读数只显示百分比、不可拖（滑杆已移除：滚轮与放大/缩小/适应够用）。小地图底色走 `--surface-float`，默认关、位置在**左上角**（右下角留给日志轮播） |
 | 下拉浮层 | `.select-list` · `--search` · `--empty` · `--group__title` · `--group__rows` · `--trigger` | 通用下拉（[Select.tsx](src/components/Select.tsx)）：浮层 `createPortal` 到 body 后坐标由 TSX 现算内联给，这里只管外观。底色走 `--surface-float`，与弹窗同一档。搜索框在**列表内部顶部**、不替换触发器。组标题 `position: sticky; top: 0`，底色同样只能取 `--surface-float`（表面系统要求底色唯一产地是 [surface.ts](src/surface.ts)，不能为它单独写不透明色）——代价是粘顶时下方选项会按通透度透上来一点，属既有设计不是缺陷 |
-| 生成中占位卡 | `.generation-pending` + `__label` / `__track` / `__bar` | 等待结果的细进度条（画布提示词节点）。**进度只由 `transform: scaleX()` 驱动，绝不给 `width` 加 transition**——width 运动会每帧重排布局，在缩放中的画布上尤其卡；`prefers-reduced-motion: reduce` 时去掉过渡。卡内两层中性色都从 `--color-brand` 掺出来（`color-mix` 加深），因为掺色 token 本身是浅底，直接拿它画细线 / 进度条会看不见 |
 | 对齐线 | `.snap-guide` | 拖拽吸附时的辅助线（[CanvasPage.tsx](src/components/CanvasPage.tsx) 画在 React Flow 的 `ViewportPortal` 层里，位置由 TSX 用视口坐标算，随平移缩放自动跟随；这里只给视觉不给尺寸）。颜色取 `--color-brand` 不取中性灰（点阵背景上灰线看不清），`opacity: 0.55` 免得盖过节点。**`pointer-events: none` 必须写死**——它横跨整个视口，可点的话会挡住所有节点拖拽与点击 |
 | 连线描边 | `--edge-stroke-idle` · `--edge-stroke-hovered` · `--edge-stroke-selected` | 连线的**唯一取色处**（[edgeStyle.ts](src/edgeStyle.ts) 以 `var(--edge-stroke-*)` 字符串内联到 `<path>`，TS 里不写死颜色，换主体色时连线跟着走）。四态 idle / hovered / selected / dimmed 由 `edgeVisualState()` 判优先级（`selected > hovered > dimmed > idle`），`edgeStyle()` 出宽度/透明度/动画。`index.css` 里 `.react-flow__edge-path` 只留**无内联样式时的兜底**（工作流加载首帧、JS 未接管）；**不要再写 `:hover` 的 stroke** —— 内联优先级更高，那条规则永远不生效，只会误导人去改它。过渡（stroke / stroke-width / opacity 各 120ms）写在这里，因为内联只设值不设 transition，颜色不进过渡就会硬切 |
 | 组节点叠卡 | 无公共类（写在 [CanvasNodes.tsx](src/components/CanvasNodes.tsx) 的内联 `style` 里） | 图片组节点背后错位的几张卡，表达「这是一批、里面有 N 张」。纯 CSS（`translate` + `rotate` + 内联 `color-mix` 底色），零状态、零布局计算；层数夹到 `Math.min(n-1, 3)` 张（一个 40 张图的组会渲染 39 层，每层都是独立合成层，缩放时掉帧；夹到 3 张后「3 张以上」在视觉上是同一个意思，精度由数字补）。**z 序靠 DOM 顺序不靠 `z-index`**：叠卡写在 body 之前，后绘制的 body 自然压在上面；父元素没有 `z-index` 就没有层叠上下文，写负 `z-index` 反而会被父元素背景盖住 |
@@ -155,11 +154,6 @@ $env:IMAGORA_APP_ROOT = $h
 
 ### [format.ts](src/format.ts)
 - 职责：显示格式化（`formatBytes` / `generatingLabel` / `errMessage`）
-
-### [generationPending.ts](src/generationPending.ts)
-- 职责：生成中占位卡的**渐近进度曲线 + 文案轮播**（`pendingProgress` / `pendingProgressScale` / `pendingMessage` / `pendingLabel`；常量 `PENDING_PROGRESS_START = 10` / `PENDING_PROGRESS_CAP = 98` / `PENDING_PROGRESS_TAU = 28` / `PENDING_MESSAGE_SECONDS = 2` / `PENDING_MESSAGES`）
-- 被谁依赖：`components/GenerationPending.tsx`（画布提示词卡 running 时的占位区）
-- 注意：**是「假进度」不是真进度**——生图接口不回报百分比（排队/推理/回传三段只有头尾可观测），老实显示 `0% → 0% → 100%` 会让人以为卡死。曲线渐近逼近 98% 且永不越过（最后 2% 留给真实完成事件），首秒就从 10% 起步（从 0 起爬会让人怀疑「是不是没开始」）。纯函数：无 `Date.now`、无随机数，同一 tick 恒定同值，非法入参（NaN / ±Infinity / 负数）按 0s 处理绝不产出 `NaN%`。文案轮播间隔与参考实现 basketikun/infinite-canvas（MIT）的 `Math.floor(tick / 2)` 同口径
 
 ### [imageOps.ts](src/imageOps.ts)
 - 职责：裁剪 / 放大的**几何纯函数 + canvas I/O**。A 层纯几何（`CropRect` 归一化 0~1、`clampCrop` / `moveCrop` / `resizeCrop` / `fitCropToRatio` / `centeredSquareCrop` / `resolveUpscaleSize` / `gcdRatio`，常量 `CROP_MIN_SIZE = 0.06` / `MAX_UPSCALE_LONG_EDGE = 4096`）；B 层 canvas I/O（`loadImage` / `readImageSize` / `cropDataUrl` / `upscaleDataUrl`）
@@ -384,7 +378,6 @@ $env:IMAGORA_APP_ROOT = $h
 - [`FolderPicker.tsx`](src/components/FolderPicker.tsx) — 目录选择
 - [`Select.tsx`](src/components/Select.tsx) — 通用下拉框（`options` / `value` / `onChange`，`searchable` 缺省按选项数自动判定 + `emptyLabel` + `option.group` 分组）。**展开列表 createPortal 到 body**：此前就地 absolute 定位会被弹窗的 `overflow:hidden` / `overflow-y:auto` 裁掉，表现为「下拉展开后底部几项看不见」。坐标按触发器 `getBoundingClientRect` 现算，展开期间监听 scroll / resize / `ResizeObserver` 重算（后者覆盖「窗口没变但触发器被挤窄」），下方空间不足自动翻到上方并据此限高。搜索框在**列表内部**顶部（不替换触发器，避免「已选值」与「搜索词」抢同一块区域），**缺省按选项数自动出现**（≥ 4 项才给，见 `SELECT_SEARCH_THRESHOLD`；调用方可传 `true` / `false` 显式覆盖——三五项一眼扫完，多一行输入框只是噪音），过滤走 `rankByName`。完整键盘导航（↑↓ Home End Enter Esc Space）、`aria-activedescendant` / `aria-selected` / `aria-controls`，展开时 `pushPopup()` 让 Esc 先收下拉再关弹窗（见 [popupLayer.ts](src/popupLayer.ts)）。无障碍属性由 `Field` 经 `cloneElement` 注入后**转发到触发器按钮**——按钮才是 `label` 的控件。可选 `allowCustom` + `onCreateCustom` 允许输入清单外的值（**只在搜索框真的出现时生效**——手填靠的就是那个输入入口，自动判定没给搜索框时手填不会凭空可用）；精确命中已有项时走正常 `onChange`，校验不过时 Enter **什么都不做**（不回落选中模糊命中的那一行，否则用户打的 ID 会被悄悄换掉）；自定义行放在 `<ul role="listbox">` **之外**（ARIA 要求 listbox 只含 option/group）
 - [`Field.tsx`](src/components/Field.tsx) — 表单字段壳（`id` / `label` / `hint` / `error` / `action` / `children`）：`hint` 与 `error` **共用同一个消息槽位** `<p id="{id}-message">`，invalid 时 error 顶掉 hint，任何时刻至多一行提示；`aria-describedby` 只在有内容时拼 id（无内容传 `undefined` 而非空串）、`aria-invalid` 用条件展开（`exactOptionalPropertyTypes` 下不能写 `= {undefined}`）。控件本体由调用方渲染，`Field` 用 `cloneElement` 注入 aria（非单个元素时降级为原样渲染）。移植自 DeepSeek Harness（MIT）的 `SettingsValueField`
-- [`GenerationPending.tsx`](src/components/GenerationPending.tsx) — 生成中占位卡（画布提示词卡 running 时占住结果位）：一行文案（`生成中 8s · 正在构图…`）+ 渐近进度条，曲线与文案由 [generationPending.ts](src/generationPending.ts) 给出。`elapsed` 不传则自己每秒走表、传了就以父组件为准（两套时钟会互相打架）；进度条只动 `transform: scaleX()`，不给 `width` 做动画（宽度动画会触发布局）。**父组件必须在开始生成时再挂载它**（`{running && <GenerationPending/>}`）——常驻挂载会让秒数从页面打开就跑。结构移植自 basketikun/infinite-canvas（MIT），但底色一律走 `var(--surface-*)` token
 
 ### 根文件
 

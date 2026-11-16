@@ -1437,55 +1437,6 @@ html[data-canvas-bounds="off"] .studio-canvas .react-flow__renderer {
   to { opacity: 0; transform: translateY(-6px); }
 }
 
-/* ============ 生成中占位卡（画布提示词节点 / 任何等待结果的位置） ============
- * 1. 底色走表面角色 token，不写死颜色（surfaceAudit.test.ts 会拦）；
- * 2. 进度条宽度**只由 transform: scaleX() 驱动**：不给 width 加 transition——
- *    width 运动会每帧重排布局，在缩放中的画布上尤其卡；scaleX 走 GPU 合成，零重排；
- * 3. 卡内两层中性色都从 --color-brand 掺出来：掺色 token 本身是浅底，
- *    直接拿它画细线/进度条会「看不见」，所以一律 color-mix 加深。 */
-.generation-pending {
-  --pending-ink: color-mix(in srgb, var(--color-brand) 62%, transparent);
-  --pending-line: color-mix(in srgb, var(--color-brand) 16%, transparent);
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  padding: 9px 11px;
-  border-radius: 10px;
-  /* 用 inset 描边画出「内嵌、未出结果」的凹陷感，不加阴影（画布上阴影会打架） */
-  box-shadow: inset 0 0 0 1px var(--pending-line);
-}
-.generation-pending__label {
-  font-size: 12px;
-  line-height: 1.4;
-  color: var(--pending-ink);
-  font-variant-numeric: tabular-nums;
-  /* 文案长度会随秒数和轮播变化，单行省略防止整张卡片高度抖动 */
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-.generation-pending__track {
-  height: 3px;
-  border-radius: var(--r-pill);
-  overflow: hidden;
-  background: var(--pending-line);
-}
-.generation-pending__bar {
-  height: 100%;
-  width: 100%;
-  border-radius: inherit;
-  background: var(--color-brand);
-  /* 起点在左端：scaleX 从 left 原点横向展开 */
-  transform-origin: 0 50%;
-  transform: scaleX(0);
-  /* 慢速线性过渡，把每秒一跳的刻度磨成连续爬升；只动 transform，不触发布局 */
-  transition: transform 900ms linear;
-}
-/* 系统开了「减少动态效果」：去掉横向伸长动画，直接跳到当前宽度（仍能看出在动） */
-@media (prefers-reduced-motion: reduce) {
-  .generation-pending__bar { transition: none; }
-}
-
 /* 系统关闭动画时全部降级为瞬时切换 */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
