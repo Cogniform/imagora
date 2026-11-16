@@ -34,43 +34,7 @@ export function saveMinimapVisible(visible: boolean): void {
   }
 }
 
-/**
- * 画布缩放的可显示行程（百分比，整数）。
- *
- * 下限 5 与 ReactFlow 的 minZoom={0.05} 对齐；上限 200 与 maxZoom={2} 对齐。
- * 刻意不做成函数参数 —— 它们必须和 CanvasPage 里的 ReactFlow props 同步，
- * 参数化会让两处数字各自漂移（读数写着 400% 而视口早就到底了，是最难查的一类 bug）。
- */
-export const CANVAS_ZOOM_MIN_PERCENT = 5;
-export const CANVAS_ZOOM_MAX_PERCENT = 200;
+/* 缩放读数的归一化（`zoomToPercent` / `clampZoomPercent` / 行程常量）已移到
+ * `zoom.ts` —— 那些数字必须与 ReactFlow 的 minZoom/maxZoom、fitView 参数同源，
+ * 归到「缩放唯一真值表」里才不会被改漏。这里只留小地图开关。 */
 
-/**
- * 缩放倍数 → 显示用百分比（整数，夹进行程）。
- *
- * 读数是**纯派生显示**：视口变了就重算，没有用户输入，因此不需要反向换算，
- * 也不需要持久化（滑杆时代那套 `sliderPercentToZoom` / `read/saveZoomSliderPercent`
- * 随滑杆一起删掉了）。
- *
- * 非法输入（NaN / Infinity / ≤0）一律夹到下限，不抛错 —— 视口在首帧可能是 0，
- * 抛错会让整个画布白屏，代价远大于显示一个不精确的数字。
- */
-export function zoomToPercent(zoom: number): number {
-  if (Number.isNaN(zoom) || zoom <= 0) return CANVAS_ZOOM_MIN_PERCENT;
-  return clampZoomPercent(zoom * 100);
-}
-
-/**
- * 把任意数字夹进行程并取整。
- *
- * NaN 走下限（读数必须是个数）；±Infinity 按方向夹到端点 ——
- * 视口算出 Infinity 通常是「节点还没测量」，夹到端点比夹到下限更接近用户预期。
- */
-export function clampZoomPercent(percent: number): number {
-  if (Number.isNaN(percent)) return CANVAS_ZOOM_MIN_PERCENT;
-  if (percent === Number.POSITIVE_INFINITY) return CANVAS_ZOOM_MAX_PERCENT;
-  if (percent === Number.NEGATIVE_INFINITY) return CANVAS_ZOOM_MIN_PERCENT;
-  return Math.min(
-    CANVAS_ZOOM_MAX_PERCENT,
-    Math.max(CANVAS_ZOOM_MIN_PERCENT, Math.round(percent)),
-  );
-}
