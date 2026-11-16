@@ -1360,25 +1360,31 @@ def run_generation(task: GenerationTask) -> None:
         else:
             messages.append(f"图生图 · 参考图 {len(bases)} 张" if img2img else "文生图")
         if img2img:
-            generate_image(
-                prompt=task.prompt,
-                images=bases or None,
-                size=task.size,
-                quality=task.quality,
-                model=config.DEFAULT_MODEL,
-                output_format="png",
-                output_path=dest,
-                mask_data_url=task.mask_data_url,
+            dest = (
+                generate_image(
+                    prompt=task.prompt,
+                    images=bases or None,
+                    size=task.size,
+                    quality=task.quality,
+                    model=config.DEFAULT_MODEL,
+                    output_format="png",
+                    output_path=dest,
+                    mask_data_url=task.mask_data_url,
+                )
+                or dest
             )
         else:
-            generate_image(
-                prompt=task.prompt,
-                image_path=None,
-                size=task.size,
-                quality=task.quality,
-                model=config.DEFAULT_MODEL,
-                output_format="png",
-                output_path=dest,
+            dest = (
+                generate_image(
+                    prompt=task.prompt,
+                    image_path=None,
+                    size=task.size,
+                    quality=task.quality,
+                    model=config.DEFAULT_MODEL,
+                    output_format="png",
+                    output_path=dest,
+                )
+                or dest
             )
         results.append(
             {

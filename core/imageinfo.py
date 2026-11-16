@@ -73,6 +73,35 @@ def _webp_dimensions(head: bytes) -> dict | None:
     return None
 
 
+def detect_format(path: str) -> str:
+    """只按文件头判定格式，返回 'png' / 'jpeg' / 'gif' / 'webp' / 'bmp'；认不出返回 ''。
+
+    与 `image_dimensions()` 的分工：那个要宽高，只读前 64 字节 —— **JPEG 的 APP0/EXIF
+    段经常长于 64 字节**，SOF 落在窗口外时它返回 None（尺寸未知）。但"这是不是 JPEG"
+    在头两个字节就定了，不该跟着一起失败。
+
+    实测（2026-11-16，Images 2.6 / chatgpt2api）：静态图回的是 JPEG（`ff d8 ff e0`），
+    而调用方按 `.png` 落盘 —— 落盘名与实际字节不符，`/api/image` 会发出错的
+    Content-Type。这个函数就是给落盘前校正扩展名用的。
+    """
+    try:
+        with open(path, "rb") as f:
+            head = f.read(12)
+    except OSError:
+        return ""
+    if head.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    if head.startswith(b"\xff\xd8\xff"):
+        return "jpeg"
+    if head.startswith((b"GIF87a", b"GIF89a")):
+        return "gif"
+    if head.startswith(b"RIFF") and head[8:12] == b"WEBP":
+        return "webp"
+    if head.startswith(b"BM"):
+        return "bmp"
+    return ""
+
+
 def image_dimensions(path: str) -> dict | None:
     """返回 {width, height, format}（format 为小写扩展名）；无法解析返回 None。
 

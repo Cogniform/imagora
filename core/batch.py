@@ -105,13 +105,16 @@ def run_batch_generation(config_path, module_filter=None, dry_run=False):
             progress.update(task, description=f"生成中 [{job['id']}] {job['name']}")
             job_started_at = time.time()
             try:
-                generate_image(
-                    prompt=job["prompt"],
-                    image_path=image_path,
-                    size=config["size"],
-                    quality=DEFAULT_QUALITY,
-                    output_format="png",
-                    output_path=output_path,
+                output_path = (
+                    generate_image(
+                        prompt=job["prompt"],
+                        image_path=image_path,
+                        size=config["size"],
+                        quality=DEFAULT_QUALITY,
+                        output_format="png",
+                        output_path=output_path,
+                    )
+                    or output_path
                 )
                 job_ok = True
                 progress.console.print(
