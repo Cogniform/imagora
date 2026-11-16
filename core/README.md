@@ -59,9 +59,10 @@ FastAPI 路由（`server.py`）与 CLI（`main.py`）共用的业务层。**不�
 
 ### [api.py](api.py)
 - 职责：上游生图 API 封装（全项目唯一外部网络调用点）
-- 关键导出：`generate_image()`、`list_models()`（探测某地址的可用模型清单，`GET {base}/models`）、`format_error()`、`resolve_size_with_ratio()`、`build_default_output_path()`、`write_file_with_retry()`
+- 关键导出：`generate_image()`、`list_models()`（探测某地址的可用模型清单，`GET {base}/models`）、`format_error()`、`align_output_extension()`（按文件头校正落盘扩展名，见下条）、`resolve_size_with_ratio()`、`build_default_output_path()`、`write_file_with_retry()`
 - 被谁依赖：`server.py`（/api/generate）、`main.py`（gen 子命令）
 - 改后必测：`tests/test_core_api.py` + `tests/test_main_cli.py`
+- 注意：**`generate_image()` 返回最终落盘路径**，调用方必须用它而不是自己预设的 `dest`。上游同一个模型可能回静态 PNG，也可能回**多帧动画 GIF**（提示词里点明帧数时），`align_output_extension()` 会按文件头把 `.png` 改成 `.gif` 再返回；不接返回值就会拿到一个已不存在的路径。认不出文件头（测试桩的假字节 / 损坏）时原样返回，不改名
 - 注意：单测已 mock 上游，不花钱；改接口签名要同步 `server.py` 与 `main.py` 两处调用；落盘统一走 `write_file_with_retry`（Windows 杀软/云同步瞬时锁，只重试 PermissionError，见 [../docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md) 9.6）
 - 注意：**蒙版局部重绘**（`mask_path` / `mask_data_url`，后者优先被前者覆盖）。语义按 OpenAI `images/edits` 约定：**透明像素 = 要重绘的区域，不透明像素 = 保持原样**（前端 `MaskBrushDialog` 产出的正是这个格式）。有 mask 就必须走 edits 接口，所以 mask 没有底图时直接报 `mask 需要至少一张底图（image_path / images）`——OpenAI 契约里 mask 不能单独存在。`mask_data_url` 在函数内解析成临时文件、`try/finally` 保证返回前删除；**绝不能把 data URL 原样塞进 multipart**（上游必 400）
 
