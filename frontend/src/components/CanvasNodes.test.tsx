@@ -404,7 +404,7 @@ describe("PromptNode", () => {
   });
 });
 
-describe("PromptNode 生成中占位卡", () => {
+describe("PromptNode 生成中状态（没有占位卡）", () => {
   function renderPrompt(data: Partial<ComponentProps<typeof PromptNode>["data"]>, lod?: boolean) {
     const props = nodeProps<typeof PromptNode>({
       id: "prompt-1",
@@ -429,42 +429,44 @@ describe("PromptNode 生成中占位卡", () => {
     return props;
   }
 
-  it("running：占位卡出现，秒数以 startedAtMs 为锚点（不从头数）", () => {
-    // 锚点设在 8 秒前：卡片一旦自己从 0 走表，就会显示「生成中 0s」而不是 8s
-    const startedAtMs = Date.now() - 8000;
-    // 秒数由内部计时器每秒重算，断言用容差正则而不是固定字面量（用例执行耗时会带来 ±1s 漂移）
-    renderPrompt({ status: "running", startedAtMs });
+  it("running：秒数只在运行按钮上，卡里没有第二套读数", () => {
+    // 锚点设在 8 秒前；容差 ±1s 应对用例执行耗时
+    renderPrompt({ status: "running", startedAtMs: Date.now() - 8000 });
 
-    const card = screen.getByTestId(`prompt-pending-${startedAtMs}`);
-    expect(card.getAttribute("role")).toBe("status");
-    // 关键断言：秒数来自锚点（8s）而不是从 0 数起；文案后半句由纯函数轮播，此处不锁死
-    expect(card.getAttribute("aria-label")).toMatch(/^生成中 (8|9)s · .+…$/);
-    expect(card.getAttribute("aria-label")).not.toContain("生成中 0s");
-    expect(screen.getByTestId("generation-pending-bar").style.transform.startsWith("scaleX(")).toBe(true);
+    expect(screen.getByRole("button", { name: /^生成中 (8|9)s$/ })).toBeTruthy();
+    // 曾经这里还有一张「渐近假进度 + 文案轮播」的占位卡。它只能从挂载那刻起算，
+    // 切走标签页回来必然归零、与按钮上的数字当场对不上，而按钮已经把状态说全了。
+    expect(document.querySelector(".generation-pending")).toBeNull();
   });
 
-  it("idle / queued / done / failed：都不渲染占位卡", () => {
-    for (const status of ["idle", "queued", "done", "failed"] as const) {
+  it("idle / queued / done / failed：运行按钮回到对应文案，且任何状态下都没有占位卡", () => {
+    const cases = [
+      ["idle", "运行"],
+      ["queued", "排队中..."],
+      ["done", "运行"],
+      ["failed", "运行"],
+    ] as const;
+    for (const [status, label] of cases) {
       cleanup();
       renderPrompt({ status });
-      expect(screen.queryByTestId("generation-pending"), status).toBeNull();
+      expect(screen.getByRole("button", { name: label }), status).toBeTruthy();
       expect(document.querySelector(".generation-pending"), status).toBeNull();
     }
   });
 
-  it("lod 抽象模式：运行中也显示占位卡，且不渲染表单", () => {
-    renderPrompt({ status: "running", startedAtMs: Date.now(), title: "主图" }, true);
+  it("lod 抽象模式：状态大字仍显示真实耗时，占位卡同样不存在", () => {
+    renderPrompt({ status: "running", startedAtMs: Date.now() - 8000, title: "主图" }, true);
 
-    expect(document.querySelector(".generation-pending")).toBeTruthy();
+    expect(screen.getByText(/^生成中 (8|9)s$/)).toBeTruthy();
+    expect(document.querySelector(".generation-pending")).toBeNull();
     expect(screen.queryByRole("textbox")).toBeNull();
     expect(screen.queryByRole("button", { name: "运行" })).toBeNull();
   });
 
-  it("离线的旧工作流缺 startedAtMs 时不崩，退化为一秒一跳的自计时卡", () => {
+  it("缺 startedAtMs 的旧工作流不崩：按钮按 0s 显示", () => {
     renderPrompt({ status: "running" });
 
-    const card = screen.getByTestId("prompt-pending-live");
-    expect(card.getAttribute("aria-label")).toBe("生成中 0s · 正在理解提示词…");
+    expect(screen.getByRole("button", { name: "生成中 0s" })).toBeTruthy();
   });
 });
 

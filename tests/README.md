@@ -54,7 +54,7 @@ cd frontend; npm test
 | [`test_main_process.py`](test_main_process.py) | 4 | 端口探测 / 祖先链回溯（Windows） |
 | [`test_main_cli.py`](test_main_cli.py) | 31 | CLI gen 子命令全链路（校验/输出解析/文生图+图生图+多参考/失败/--no-asset/比例档位）/ **`--n` 逐张请求（每次 `n=1`、各存各的账、部分失败保留已成功、默认单张行为不变）** / config 输出 |
 
-## 文件索引（前端 vitest，共 1072，位于 frontend/src/）
+## 文件索引（前端 vitest，共 1054，位于 frontend/src/）
 
 | 文件 | 用例 | 覆盖 |
 | --- | --- | --- |
@@ -76,7 +76,6 @@ cd frontend; npm test
 | [`imageCopy.test.ts`](../frontend/src/imageCopy.test.ts) | 4 | 复制走哪条路：有本机路径 → 服务端同步写（**不经浏览器剪贴板**）/ 服务端不可用 → 静默回退浏览器 API / 无路径 → 直接浏览器 / 两条都不通 → 抛可操作提示（B 层真机能力与 canvas 转码不在 jsdom 覆盖） |
 | [`imagePath.test.ts`](../frontend/src/imagePath.test.ts) | 5 | 从 `/api/image?path=…` 反解本机绝对路径；外链 / `blob:` / `data:` / 无查询串一律空串（调用方靠它决定「复制路径」按钮出不出） |
 | [`logPath.test.ts`](../frontend/src/logPath.test.ts) | 6 | 日志路径词条解析（绝对/相对、正反斜杠、多路径、扩展名大小写） |
-| [`generationPending.test.ts`](../frontend/src/generationPending.test.ts) | 11 | 渐近进度曲线单调递增并逼近 98% 但永不越过（最后 2% 留给真实完成）、首秒即从 10% 起步、非法入参（NaN / ±Infinity / 负数）按 0s 处理绝不产出 `NaN%`、文案每 2s 轮播并循环 |
 | [`imageOps.test.ts`](../frontend/src/imageOps.test.ts) | 49 | 裁剪/放大几何：`clampCrop` 最小尺寸与越界回收、`moveCrop` 与 `resizeCrop` 八向手柄、`fitCropToRatio` 保持中心收缩到能放下的最大尺寸（像素比与归一化比的换算必须乘框宽高比）、`resolveUpscaleSize` 长边上限与非法入参、`gcdRatio` 约分（含不可约分尺寸）、`centeredSquareCrop` 默认框。**B 层 canvas I/O 不测**（jsdom 的 `getContext("2d")` 返回 null） |
 | [`dataUrlFile.test.ts`](../frontend/src/dataUrlFile.test.ts) | 16 | dataUrl → `File` 转换（base64 与百分号编码两种载荷；非法输入**抛错而不是返回空 File**，0 字节上传会在画布多出永远加载失败的红框节点）、派生文件名（前缀 + 原名清洗 + 时间戳 + 扩展名，长度精确断言） |
 | [`aspectIcon.test.ts`](../frontend/src/aspectIcon.test.ts) | 12 | 比例图标几何：`aspectIconSize` 长边固定 24、短边按比例算且不低于 10（再矮就看不出是矩形）、横竖两个分支都只动短边、非法比例（NaN / 0 / 负数 / Infinity）回落正方形；`ratioFromSizeLabel` 三层解析（括号内 `a:b` → 裸 `a:b` → `WxH` 宽高比），**括号里只有中文方位词（如 `1024x1792 (竖版长图)`）必须退回宽高比**，否则这两项没有图标 |
@@ -95,7 +94,6 @@ cd frontend; npm test
 | [`CanvasNodes.test.tsx`](../frontend/src/components/CanvasNodes.test.tsx) | 33 | 节点操作栏（含**蒙版重绘**入口）/ **提示词卡取消入口**（排队·生成中出现、`cancelRequested` 变「取消中…」并禁用、就绪/终态不出现）/ 双击行为 / 组卡去重提示渲染 / **蒙版角标只在带蒙版时出现，点一下即清除** / **`ImageNode` 与 `GroupNode` 的 memo 浅比较**（父组件重渲染但 props 全等时函数体不执行，用 getter 计数取证） |
 | [`CanvasPage.baseline.test.tsx`](../frontend/src/components/CanvasPage.baseline.test.tsx) | 63 | **CanvasPage 拆分护栏**（唯一渲染整页的文件）：`@xyflow/react` 走自建桩、真实渲染 `nodeTypes[type]`，钉住「拆了就崩」的接线——`nodeTypes` 身份在节点坐标变化时不变（否则全节点重挂）、14 个 deps 的回调身份、`modalOpen` 十条来源全为 true（拖放互斥）、撤销/重做与 Ctrl+A/Ctrl+S、吸附接线（`applySnapToChanges` 只拦 position）、右键菜单四项、保存/加载、任务状态机的 status 流转、**取消入口（issue #33）**（单卡取消→不立刻复位 / 终态清标记 / 视图说没在取消就退回可点（本机意图由 hook 合成）/ 工具栏「取消全部 (n)」只取消在跑任务）、画布偏好读写、counts 统计随节点增删刷新 |
 | [`Field.test.tsx`](../frontend/src/components/Field.test.tsx) | 8 | 字段壳：label 与控件经 id 关联、`hint` 与 `error` **共用同一个消息槽位**（invalid 时 error 顶掉 hint、任何时刻至多一行）、`aria-describedby` 无内容时不写空串、`aria-invalid` 条件展开、`action` 插槽渲染 |
-| [`GenerationPending.test.tsx`](../frontend/src/components/GenerationPending.test.tsx) | 7 | 生成中占位卡：`role="status"` + `aria-live` 语义、受控 `elapsed` 优先于自走表、进度条只改 `transform: scaleX()`（不给 width 做动画）、文案随秒数轮播 |
 | [`ImageCropDialog.test.tsx`](../frontend/src/components/ImageCropDialog.test.tsx) | 7 | 裁剪对话框：比例预设按钮（`aria-pressed`）、八向手柄拖拽的位移换算（先除 stage 宽高再交给 `resizeCrop`）、遮罩用 `boxShadow` spread 覆盖整块视口、确认回传 dataUrl、取消关闭。测试用 `vi.mock("../imageOps", …)` 部分替身（`vi.importActual` 展开真身、只换 `readImageSize` / `cropDataUrl` 两个 canvas I/O 函数），几何纯函数全走真实实现 |
 | [`ImageUpscaleDialog.test.tsx`](../frontend/src/components/ImageUpscaleDialog.test.tsx) | 9 | 放大对话框：目标长边预设与自定义、默认值（原长边 ×2 且夹在 [1024, 4096]）、换算文案（`原 1024×768 → 2048×1536（2.0×）· 显示比例 4:3`）、busy 时按钮文案变化**必须按 `data-testid` 查不能按文本**（文案会变导致按名查丢）、卸载后迟到的放大结果不再回调 `onConfirm` |
 | [`MaskBrushDialog.test.tsx`](../frontend/src/components/MaskBrushDialog.test.tsx) | 13 | 蒙版笔刷对话框：涂改笔画累积 / 橡皮擦 / 笔刷粗细滑杆 / 清除 / **空蒙版时确认按钮禁用并给提示**（空蒙版等于整图重绘，花钱白干）/ 确认回传与原图同尺寸的 PNG data URL。jsdom 的 `getContext("2d")` 返回 null、`toDataURL` 抛 not implemented，故桩 `toDataURL` |
