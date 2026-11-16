@@ -37,19 +37,19 @@ describe("cost 展示纯函数", () => {
     expect(formatSeconds(null)).toBe("-");
   });
 
-  it("budgetSummary：未设日预算时明确写不限；设了就显示余额", () => {
-    expect(budgetSummary({ spentToday: 0.15, dailyLimit: 0, remaining: 0 })).toBe("今日 0.15 元 · 未设日预算（不限）");
+  it("budgetSummary：未设每日上限时明确写不限；设了就显示余额", () => {
+    expect(budgetSummary({ spentToday: 0.15, dailyLimit: 0, remaining: 0 })).toBe("今日 0.15 元 · 未设每日上限（不限）");
     expect(budgetSummary({ spentToday: 0.15, dailyLimit: 10, remaining: 9.85 })).toBe(
-      "今日 0.15 元 / 日预算 10.00 元 · 余额 9.85 元",
+      "今日 0.15 元 / 每日上限 10.00 元 · 余额 9.85 元",
     );
   });
 
-  it("budgetSummary：兼容预算预检结果（dailyLimit 在 settings 里）", () => {
+  it("budgetSummary：兼容上限预检结果（dailyLimit 在 settings 里）", () => {
     expect(budgetSummary({ spentToday: 0.15, remaining: 9.85, settings: { dailyLimit: 10 } })).toBe(
-      "今日 0.15 元 / 日预算 10.00 元 · 余额 9.85 元",
+      "今日 0.15 元 / 每日上限 10.00 元 · 余额 9.85 元",
     );
     expect(budgetSummary({ spentToday: 0.15, remaining: 0, settings: { dailyLimit: 0 } })).toBe(
-      "今日 0.15 元 · 未设日预算（不限）",
+      "今日 0.15 元 · 未设每日上限（不限）",
     );
   });
 

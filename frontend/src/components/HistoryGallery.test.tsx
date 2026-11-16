@@ -316,7 +316,7 @@ describe("HistoryGallery 成本看板与重跑失败项", () => {
     expect(screen.queryByText("重跑")).toBeNull();
   });
 
-  it("保存预算：调用 /api/budget 并回读看板", async () => {
+  it("保存上限：调用 /api/budget 并回读看板", async () => {
     vi.mocked(saveBudget).mockResolvedValue({ ok: true, dailyLimit: 5, singleRunLimit: 1 });
     renderList([item({ prompt: "任意记录" })]);
     await screen.findByText("任意记录");
@@ -324,9 +324,9 @@ describe("HistoryGallery 成本看板与重跑失败项", () => {
     const inputs = screen.getByTestId("cost-board").querySelectorAll("input[type=number]");
     fireEvent.change(indexed(inputs, 0), { target: { value: "5" } });
     fireEvent.change(indexed(inputs, 1), { target: { value: "1" } });
-    fireEvent.click(screen.getByText("保存预算"));
+    fireEvent.click(screen.getByText("保存上限"));
 
-    await screen.findByText("预算已保存");
+    await screen.findByText("上限已保存");
     expect(saveBudget).toHaveBeenCalledWith({ dailyLimit: 5, singleRunLimit: 1 });
     expect(vi.mocked(generationStats).mock.calls.length).toBeGreaterThan(1); // 保存后回读看板
   });

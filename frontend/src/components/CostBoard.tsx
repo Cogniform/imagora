@@ -57,7 +57,7 @@ export function CostBoard({
       await onSaveBudget(draft);
       // 保存成功：交还控制权，下一次 stats 回读的值可以覆盖草稿
       dirtyRef.current = false;
-      setSavedTip("预算已保存");
+      setSavedTip("上限已保存");
     } catch (err) {
       setSavedTip(err instanceof Error ? err.message : "保存失败");
     } finally {
@@ -87,14 +87,14 @@ export function CostBoard({
             </div>
             <div className="compact-controls flex shrink-0 flex-wrap items-center gap-2 border-neutral-200 pl-0 sm:border-l sm:pl-4">
               <label className="flex items-center gap-1">
-                <span className="text-[11px] text-neutral-400">日预算</span>
+                <span className="text-[11px] text-neutral-400">每日上限</span>
                 <input
                   type="number"
                   min={0}
                   step={0.01}
                   value={draft.dailyLimit}
                   onChange={(event) => edit({ dailyLimit: Number(event.target.value) })}
-                  title="当日累计费用上限（元），0 = 不限；超限提交前会要求确认"
+                  title="每日累计花费上限（元），0 = 不限；超限提交前会要求确认"
                   className="field-control !w-20 text-right"
                 />
               </label>
@@ -106,12 +106,12 @@ export function CostBoard({
                   step={0.01}
                   value={draft.singleRunLimit}
                   onChange={(event) => edit({ singleRunLimit: Number(event.target.value) })}
-                  title="单次提交（含批量重跑）预估上限（元），0 = 不限"
+                  title="单次提交（含批量重跑）预估花费上限（元），0 = 不限"
                   className="field-control !w-20 text-right"
                 />
               </label>
               <button type="button" className="btn-ghost" disabled={saving} onClick={() => void handleSave()}>
-                {saving ? "保存中..." : "保存预算"}
+                {saving ? "保存中..." : "保存上限"}
               </button>
               <button type="button" className="btn-ghost" disabled={loading} onClick={onRefresh}>
                 刷新

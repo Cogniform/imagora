@@ -1,7 +1,7 @@
 import type { HistoryStats } from "./api";
 
 /**
- * 成本展示纯函数（看板 / 预算摘要共用，不依赖 React）。
+ * 成本展示纯函数（看板 / 上限摘要共用，不依赖 React）。
  * 费用口径由后端决定（core/config.py 的 size_options），这里只负责显示。
  */
 
@@ -26,7 +26,7 @@ export function formatSeconds(value: number | null | undefined): string {
   return `${minutes}m${String(seconds).padStart(2, "0")}s`;
 }
 
-/** 预算一行摘要：今日已花 / 日预算 / 余额；未设日预算时明确写"不限"。
+/** 上限一行摘要：今日已花 / 每日上限 / 余额；未设每日上限时明确写"不限"。
  *  兼容两种来源：BudgetInfo（dailyLimit 在顶层）与 BudgetCheck（dailyLimit 在 settings 里） */
 export function budgetSummary(info: {
   spentToday: number;
@@ -36,8 +36,8 @@ export function budgetSummary(info: {
 }): string {
   const dailyLimit = info.dailyLimit ?? info.settings?.dailyLimit ?? 0;
   const spent = `今日 ${formatMoney(info.spentToday)}`;
-  if (!dailyLimit || dailyLimit <= 0) return `${spent} · 未设日预算（不限）`;
-  return `${spent} / 日预算 ${formatMoney(dailyLimit)} · 余额 ${formatMoney(info.remaining)}`;
+  if (!dailyLimit || dailyLimit <= 0) return `${spent} · 未设每日上限（不限）`;
+  return `${spent} / 每日上限 ${formatMoney(dailyLimit)} · 余额 ${formatMoney(info.remaining)}`;
 }
 
 /** 看板主指标行（label/value 对；组件只负责排版） */
