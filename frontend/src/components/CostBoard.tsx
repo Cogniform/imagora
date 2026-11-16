@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { BudgetSettings, HistoryStats } from "../api";
 import { statRows } from "../cost";
@@ -29,18 +29,23 @@ export function CostBoard({
    * 下面那句同步的本意是「用户没编辑时显示后端已保存的值」，但只看 `stats` 变化
    * 会把**用户刚敲进去的字**盖掉：stats 是一次网络请求，它晚到时（慢一点、
    * 或者保存后回读）就会把输入框重置回旧值 —— 用户看到的是「我打进去的 5 没了」。
-   * 加了这道闸，只有用户没碰过才接受服务端的值。 */
-  const [dirty, setDirty] = useState(false);
+   *
+   * 用 **ref** 而不是 state，是因为这里要挡的是「已经在排队、还没跑的那次 effect」：
+   * 那个 effect 的闭包里读到的是**它被创建时**的状态。若用 state，用户在这次 effect
+   * 落地之前敲了字，闭包里 `dirty` 仍是 false，同步照样执行、照样把字盖掉 ——
+   * 表现为同一份测试时红时绿（实测单文件连跑 8 次红 1 次）。
+   * ref 是同步可见的，写入即生效，不存在这个窗口。 */
+  const dirtyRef = useRef(false);
 
   // stats 变化时同步草稿（用户未编辑时的默认值：后端已保存的预算）
   useEffect(() => {
-    if (!stats || dirty) return;
+    if (!stats || dirtyRef.current) return;
     setDraft({ dailyLimit: stats.budget.dailyLimit, singleRunLimit: stats.budget.singleRunLimit });
-  }, [stats, dirty]);
+  }, [stats]);
 
   /** 编辑：记下「用户动过」，并清掉上一次的保存提示 */
   const edit = (patch: Partial<BudgetSettings>) => {
-    setDirty(true);
+    dirtyRef.current = true;
     setSavedTip("");
     setDraft((prev) => ({ ...prev, ...patch }));
   };
@@ -51,7 +56,7 @@ export function CostBoard({
     try {
       await onSaveBudget(draft);
       // 保存成功：交还控制权，下一次 stats 回读的值可以覆盖草稿
-      setDirty(false);
+      dirtyRef.current = false;
       setSavedTip("预算已保存");
     } catch (err) {
       setSavedTip(err instanceof Error ? err.message : "保存失败");

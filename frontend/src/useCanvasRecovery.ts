@@ -48,6 +48,10 @@ export function useCanvasRecovery({
         });
         onRestore(restored.nodes, restored.edges);
         onLog("已恢复最近一次画布存档");
+        // 跳过的节点要说出来，否则用户只会以为卡是自己丢的
+        if (restored.dropped.length) {
+          onLog(`${restored.dropped.length} 个节点数据不完整，已跳过（${restored.dropped[0]?.reason ?? "未知"}）`);
+        }
       })
       .catch((err) => {
         if (active) onLog(`读取恢复存档失败：${errMessage(err)}`);

@@ -125,6 +125,100 @@ describe("workflow defaults", () => {
   });
 });
 
+/* 比「缺字段」更狠的一种：节点**本身**不成立。
+   真实案例：output/workflows/manual.json 里只有一个 `{ "id": "manual" }` ——
+   没有 type、没有 position、没有 data。React Flow 读 `node.position.x` 时直接抛错，
+   两边都没有错误边界，于是整页白屏。
+   这种补不了（补成什么类型？放在哪？），只能跳过 —— 但必须回报，不然用户
+   只会以为卡是自己误删的。 */
+describe("workflow 里的不合法节点", () => {
+  const junk = (value: unknown) => value as WorkflowNode;
+
+  it("只有 id 的节点被跳过，并回报原因", () => {
+    const result = workflowToCanvas([junk({ id: "manual" })], [], []);
+
+    expect(result.nodes).toHaveLength(0);
+    expect(result.dropped).toEqual([{ id: "manual", reason: "没有节点类型" }]);
+  });
+
+  /* 逐条写、不用表驱动（each）—— `scripts/check_docs.py` 的静态计数只认行首的
+     直接调用，表驱动在带对象参数时会被算成 1 条，于是文档数字与 `vitest run`
+     的实际条数差几条，check_docs 直接红。显式写最省事。
+     注释里也别出现「表驱动 + 反引号」的组合：计数脚本的正则会把反引号当成
+     模板字符串写法，凭空多算一条（这条注释就被它坑过一次）。 */
+  it("没有 id 的节点被跳过", () => {
+    const result = workflowToCanvas([junk({ type: "prompt", position: { x: 1, y: 2 }, data: {} })], [], []);
+    expect(result.nodes).toHaveLength(0);
+    expect(indexed(result.dropped, 0).reason).toBe("没有 id");
+  });
+
+  it("认不出的节点类型被跳过", () => {
+    const result = workflowToCanvas(
+      [junk({ id: "a", type: "wat", position: { x: 1, y: 2 }, data: {} })],
+      [],
+      [],
+    );
+    expect(result.nodes).toHaveLength(0);
+    expect(indexed(result.dropped, 0).reason).toBe("认不出的节点类型「wat」");
+  });
+
+  it("没有坐标的节点被跳过（React Flow 读 position.x 就会抛）", () => {
+    const result = workflowToCanvas([junk({ id: "a", type: "prompt", data: {} })], [], []);
+    expect(result.nodes).toHaveLength(0);
+    expect(indexed(result.dropped, 0).reason).toBe("没有有效坐标");
+  });
+
+  it("坐标是 NaN 的节点被跳过", () => {
+    const result = workflowToCanvas(
+      [junk({ id: "a", type: "prompt", position: { x: Number.NaN, y: 2 }, data: {} })],
+      [],
+      [],
+    );
+    expect(result.nodes).toHaveLength(0);
+    expect(indexed(result.dropped, 0).reason).toBe("没有有效坐标");
+  });
+
+  it("没有 data 的节点被跳过", () => {
+    const result = workflowToCanvas([junk({ id: "a", type: "prompt", position: { x: 1, y: 2 } })], [], []);
+    expect(result.nodes).toHaveLength(0);
+    expect(indexed(result.dropped, 0).reason).toBe("没有 data");
+  });
+
+  it("一好一坏：坏的跳过，好的原样保留", () => {
+    const good = promptNode("p1");
+    const result = workflowToCanvas([good, junk({ id: "manual" })], [], []);
+
+    expect(result.nodes).toHaveLength(1);
+    expect(indexed(result.nodes, 0).id).toBe("p1");
+    expect(result.dropped).toHaveLength(1);
+  });
+
+  it("指向被跳过节点的边一起丢掉（不留悬空边）", () => {
+    const good = promptNode("p1");
+    const edges = [
+      { id: "e1", source: "img1", target: "p1" },
+      { id: "e2", source: "img2", target: "manual" },
+    ] as never;
+
+    const result = workflowToCanvas([good, junk({ id: "manual" })], edges, []);
+
+    // e1 的 img1 本来就不在 nodes 里、e2 指向被跳过的 manual —— 两条都不该留在画布上
+    expect(result.edges).toHaveLength(0);
+  });
+
+  it("数据齐全的节点一个字段都不改（只做补全，不做改写）", () => {
+    const node = promptNode("p1");
+    const result = workflowToCanvas([node], [], []);
+
+    expect(indexed(result.nodes, 0)).toMatchObject({
+      id: "p1",
+      type: "prompt",
+      position: node.position,
+    });
+    expect(result.dropped).toHaveLength(0);
+  });
+});
+
 describe("prompt node updates", () => {
   it("returns the original array when the patch matches current data (idempotent)", () => {
     const node = promptNode("p1");

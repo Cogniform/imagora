@@ -157,6 +157,18 @@ export interface CanvasDefaults {
 }
 
 /**
+ * 工作流加载结果：`dropped` 是被判为「认不出来」而跳过的节点。
+ *
+ * 为什么要把它们交回调用方、而不是静静丢掉：用户打开一份工作流发现少了几张卡，
+ * 没有任何提示的话只会以为是自己误删了。至少要能说「有 N 个节点数据不完整，已跳过」。
+ */
+export interface CanvasResult {
+  nodes: WorkflowNode[];
+  edges: WorkflowEdge[];
+  dropped: { id: string; reason: string }[];
+}
+
+/**
  * 工作流加载结果转画布：按 missing 列表给对应图片节点打标（红框提示文件缺失）；
  * prompt 节点归一化（重置运行状态为 idle，位置/参数无损保留）。
  *
@@ -169,13 +181,21 @@ export interface CanvasDefaults {
  *
  * 补的是「配置里的第一档」，与新建卡片用的完全是同一个来源（见调用点），
  * 所以修复出来的卡和手动新建的卡长得一样，不会出现「旧卡尺寸是个谁也没选过的值」。
+ *
+ * ## 为什么不合法节点要**跳过**而不是修复
+ *
+ * 缺一个字段能补（尺寸、提示词、data 里的各项），但**节点本身不成立**时无从补起：
+ * 一份只剩 `{ "id": "manual" }` 的节点文件，既没有类型也没有坐标 —— 补成什么类型？
+ * 放在哪？猜出来的节点比没有更糟（用户会以为自己建过那张卡）。
+ * 而 React Flow 拿到这种节点会在读 `node.position.x` 时直接抛错，
+ * 因为没有错误边界，整页白屏。所以：认不出来的跳过，并回报原因。
  */
 export function workflowToCanvas(
   nodes: WorkflowNode[],
   edges: WorkflowEdge[],
   missing: string[],
   defaults?: CanvasDefaults,
-): { nodes: WorkflowNode[]; edges: WorkflowEdge[] } {
+): CanvasResult {
   const missingSet = new Set(missing);
   // 兜底值只在这里算一次；缺省 1024x1024 / high 与新建卡片同源（调用方没给配置时用）
   const fallbackSize = typeof defaults?.size === "string" && defaults.size ? defaults.size : "1024x1024";
@@ -183,34 +203,109 @@ export function workflowToCanvas(
     typeof defaults?.quality === "string" && defaults.quality ? defaults.quality : "high";
   /** 字符串字段：非字符串一律当空串（`prompt` / `outputDir` 空串就是正确答案） */
   const text = (value: unknown): string => (typeof value === "string" ? value : "");
-  const marked = nodes.map((node) => {
-    const cleaned = stripAnimClasses(node.className);
-    const base = { ...node };
+  /** 非负数字段：非数字当 0（`imageCount` / `totalSize` 这类计数） */
+  const count = (value: unknown): number => (typeof value === "number" && Number.isFinite(value) ? value : 0);
+  /** 坐标：React Flow 直接读 `position.x`，缺了会在渲染时抛 `reading 'x'` */
+  const point = (value: unknown): { x: number; y: number } | null => {
+    if (!value || typeof value !== "object") return null;
+    const { x, y } = value as { x?: unknown; y?: unknown };
+    if (typeof x !== "number" || typeof y !== "number") return null;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    return { x, y };
+  };
+
+  const kinds = new Set(["image", "prompt", "group"]);
+  const dropped: { id: string; reason: string }[] = [];
+  /** 留下来的节点 id：边要跟着一起筛，否则会留下指向不存在节点的悬空边 */
+  const kept = new Set<string>();
+
+  const marked = nodes.flatMap((node) => {
+    if (!node || typeof node !== "object") {
+      dropped.push({ id: "?", reason: "不是一个节点对象" });
+      return [];
+    }
+    const id = text((node as { id?: unknown }).id);
+    if (!id) {
+      dropped.push({ id: "?", reason: "没有 id" });
+      return [];
+    }
+    const kind = text((node as { type?: unknown }).type);
+    if (!kinds.has(kind)) {
+      dropped.push({ id, reason: kind ? `认不出的节点类型「${kind}」` : "没有节点类型" });
+      return [];
+    }
+    const position = point((node as { position?: unknown }).position);
+    if (!position) {
+      dropped.push({ id, reason: "没有有效坐标" });
+      return [];
+    }
+    const raw = (node as { data?: unknown }).data;
+    if (!raw || typeof raw !== "object") {
+      dropped.push({ id, reason: "没有 data" });
+      return [];
+    }
+    kept.add(id);
+
+    const cleaned = stripAnimClasses((node as { className?: string }).className);
+    const base = { ...node, position };
     if (cleaned === undefined) delete base.className;
     else base.className = cleaned;
-    if (base.type === "image" && missingSet.has(base.data.registryId)) {
-      return { ...base, data: { ...base.data, missing: true } };
+    const data = raw as Record<string, unknown>;
+
+    if (kind === "image") {
+      const registryId = text(data.registryId);
+      return [
+        {
+          ...base,
+          type: "image" as const,
+          data: {
+            ...(data as object),
+            registryId,
+            name: text(data.name),
+            url: text(data.url),
+            size: count(data.size),
+            ext: text(data.ext),
+            ...(missingSet.has(registryId) ? { missing: true } : {}),
+          },
+        } as WorkflowNode,
+      ];
     }
-    if (base.type === "prompt") {
-      // 无损：保留位置/提示词/尺寸/质量/输出路径，仅清掉运行期状态
-      return {
+    if (kind === "group") {
+      return [
+        {
+          ...base,
+          type: "group" as const,
+          data: {
+            ...(data as object),
+            name: text(data.name),
+            imageCount: count(data.imageCount),
+            totalSize: count(data.totalSize),
+          },
+        } as WorkflowNode,
+      ];
+    }
+    // prompt：无损保留位置/提示词/尺寸/质量/输出路径，仅清掉运行期状态
+    return [
+      {
         ...base,
+        type: "prompt" as const,
         data: {
-          ...base.data,
-          prompt: text(base.data.prompt),
-          size: text(base.data.size) || fallbackSize,
-          quality: text(base.data.quality) || fallbackQuality,
-          outputDir: text(base.data.outputDir),
+          ...(data as object),
+          prompt: text(data.prompt),
+          size: text(data.size) || fallbackSize,
+          quality: text(data.quality) || fallbackQuality,
+          outputDir: text(data.outputDir),
           status: "idle" as const,
           startedAtMs: undefined,
           resultCount: undefined,
           message: undefined,
         },
-      };
-    }
-    return base;
+      } as WorkflowNode,
+    ];
   });
-  return { nodes: marked, edges };
+  // 悬空边跟着丢：指向被跳过节点的边留在画布上只会画出半截线
+  const usableEdges = edges.filter((edge) => kept.has(text(edge?.source)) && kept.has(text(edge?.target)));
+  return { nodes: marked, edges: usableEdges, dropped };
 }
 
 /** 更新单个提示词节点的 data（纯函数：不匹配/非提示词节点原样返回，避免无谓新引用）。
