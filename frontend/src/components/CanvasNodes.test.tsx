@@ -62,18 +62,18 @@ function renderImageNode(
 }
 
 describe("ImageNode", () => {
-  it("opens preview when the image is double-clicked", () => {
+  it("opens preview when the image is double-clicked", async () => {
     const { onZoom } = renderImageNode();
 
-    fireEvent.doubleClick(screen.getByAltText("sample.png"));
+    fireEvent.doubleClick(await screen.findByAltText("sample.png"));
 
     expect(onZoom).toHaveBeenCalledWith("image-1");
   });
 
-  it("does not bubble image double-clicks to the canvas", () => {
+  it("does not bubble image double-clicks to the canvas", async () => {
     const { onCanvasDoubleClick } = renderImageNode();
 
-    fireEvent.doubleClick(screen.getByAltText("sample.png"));
+    fireEvent.doubleClick(await screen.findByAltText("sample.png"));
 
     expect(onCanvasDoubleClick).not.toHaveBeenCalled();
   });
@@ -529,11 +529,12 @@ describe("PromptNode 取消入口", () => {
 });
 
 describe("LOD abstract mode", () => {
-  it("keeps the image thumbnail and double-click zoom but drops the action rail", () => {
+  it("keeps the image thumbnail and double-click zoom but drops the action rail", async () => {
     const { onZoom } = renderImageNode(vi.fn(), vi.fn(), true);
 
-    expect(screen.getByAltText("sample.png")).toBeTruthy();
-    fireEvent.doubleClick(screen.getByAltText("sample.png"));
+    const img = await screen.findByAltText("sample.png");
+    expect(img).toBeTruthy();
+    fireEvent.doubleClick(img);
     expect(onZoom).toHaveBeenCalledWith("image-1");
     expect(screen.queryByTestId("image-action-rail")).toBeNull();
     expect(screen.queryByRole("button", { name: "替换图片" })).toBeNull();

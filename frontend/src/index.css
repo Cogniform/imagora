@@ -215,6 +215,12 @@ html {
 .surface-inset { background: var(--surface-inset); }
 .surface-plain { background: var(--surface-plain); }
 
+/* 缩略图占位：缩略图还在生成时先占住格子（尺寸由外层固定，不会有布局跳动）。
+   底色从品牌色极淡掺出来，与卡片面同族；不加动画——它通常只存在几十毫秒。 */
+.thumb-placeholder {
+  background: color-mix(in srgb, var(--color-brand) 6%, transparent);
+}
+
 /* 字段标签统一块级：inline 时标签盒随父级基线漂移，左右两栏首行会错开数 px
  * （实测左栏比右栏低 3px）；块级后标签顶部即内容起点，跨栏自然对齐。 */
 .field-label { display: block; }

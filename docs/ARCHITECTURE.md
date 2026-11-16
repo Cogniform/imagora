@@ -47,7 +47,7 @@ Imagora 是本地单机工具，运行时分三层，方向单一：
 | `core/` | 后端核心逻辑（见 2.2），全部无 HTTP 依赖的纯业务模块；**双件**：规则层 core/AGENTS.md + 文件索引 core/README.md |
 | `frontend/` | React SPA（见 2.3）；**双件**：frontend/AGENTS.md（规则）+ frontend/README.md（索引） |
 | `scripts/` | 独立运维脚本：`migrate.py`（存储一步到最新，默认只报告、`--apply` 才落盘备份校验）；**双件**：scripts/AGENTS.md + scripts/README.md |
-| `tests/` | 后端 pytest（497 用例）+ 前端 vitest（1054 用例），全部不调上游；**双件**：tests/AGENTS.md + tests/README.md（逐文件覆盖） |
+| `tests/` | 后端 pytest（497 用例）+ 前端 vitest（1072 用例），全部不调上游；**双件**：tests/AGENTS.md + tests/README.md（逐文件覆盖） |
 | `docs/` | 设计圣经 `ARCHITECTURE.md`（本文档）+ `prompt-import-format.md` / `ecom-prompt-import-format.md`（格式规范）；**双件**：docs/AGENTS.md + docs/README.md |
 | `assets/` | **文档配图**（只服务 markdown 渲染，不是应用资源）：`screenshots/` 放 README「界面一览」的界面截图；**双件**：assets/AGENTS.md + assets/README.md |
 | `_ui-audit/` | 开发期 UI 审计图（本机产物，git 忽略）：由 [scripts/capture.py](../scripts/capture.py) 生成，与门面配图 `assets/screenshots/` 不是一回事 |
@@ -243,6 +243,7 @@ React Flow v12（`@xyflow/react`）受控模式：`nodes` / `edges` 状态由 `C
 - **撤销/恢复**：`canvasHistory.ts` 50 条上限的 past/future 栈，删除/连线/新建/导入前记录快照。
 - **画布日志**：右下角浮层只露最新 5 条（`log-toast` 淡入上移），低饱和中性色弱化存在感，`pointer-events-none` 不挡画布操作。
 - **视口辅助（小地图 / 缩放读数）**：都塞进左下角控制坞同一列，不往画布上另叠常驻 UI。**缩放只有读数，没有滑杆**——滚轮与「放大 / 缩小 / 适应」已经够用，滑杆只换来一条要维护的双向同步（拖动改视口 + 视口变化回灌读数 + 拖动期间挡互相拉扯），2026-10-29 移除。读数是纯派生显示：`handleViewportMove` 把视口 zoom 经 `zoomToPercent` 归一成 5%~200% 的整数（行程与 React Flow 的 `minZoom=0.05` / `maxZoom=2` 对齐，常量写死在 `minimapVisible.ts`、不做参数——参数化会让两处数字各自漂移），不落盘。小地图**默认关闭**（卡片少时是纯负担），位置在**左上角**（右下角留给日志轮播）；开关状态落 localStorage（`imagora.canvas-minimap.v1`，读写一律 try/catch 静默降级）。
+- **图片卡片只加载缩略图**：正文图是 3072×4096 这类大图，浏览器显示一张就要摊开一份 RGBA（约 48 MB）；而卡片只显示 128×160，等于为看一个指甲盖大的格子摊开整张原图，十几张卡就是几百 MB —— 拖动画布发涩、切面板回来顿一下，主要都是它。所以卡片一律走 `useThumbnail`（`thumbnails.ts` 提供会话级缓存）：`createImageBitmap` 解码到长边 512 → 画到 canvas → `toBlob(webp)` → `blob:` URL；**双击预览 / 裁剪 / 放大 / 蒙版仍然要原图**，那些地方拿的是 `data.url`，不能拿缩略图凑数。缓存挂在模块上而不是组件 state：画布面板切走时组件会卸载，而模块还活着，缓存跟着活着，切回来不必重新解码。上限 240 条、LRU 淘汰并 `revokeObjectURL`。选浏览器侧缩图而不是服务端出图，是为了不引入图像库依赖，且两个项目能共用同一份实现（见 [决策](../.agents/notes/2026-11-16-thumbnail-in-browser.md)）。
 - **图片派生加工（裁剪 / 放大）**：画布图片节点悬停栏的「裁剪」「放大」都走**派生新图**而不是原地替换——加工是可回溯的派生操作，同一张原图常要裁好几个比例，原地换会连原图一起丢掉且无法从画布回溯。链路：对话框产出 `data:image/png;base64,...` → `dataUrlToFile()` 转 `File`（`canvasUpload` 只收 File）→ 上传注册表 → 在源图右侧偏移 `DERIVED_NODE_OFFSET_X = 200` 处新建图片节点（源节点已删则退化为视口中心）→ `recordHistory()`。裁剪与放大的几何运算**全在前端 canvas 完成**，后端零参与（不新增接口、不改 `generate_image` 契约）。
 - **`dataUrl` 转 `File` 失败必须抛错，不能返回空 File**：上传 0 字节会在画布上多出一个永远加载失败的红框节点，比当场报错难排查得多。
 - **图片切分（`ImageSplitDialog`）**：同一套「派生新图」链路，一次产出多张。几何在 `imageSplit.ts`（纯函数）：`splitCells` 用 `x = col / cols` 直算而不是累加——累加会在最后几格漂出 1 之外的坐标；自定义切割线走 `splitCellsByLines`，先过滤到 `(0,1)` 开区间、排序、1e-6 去重、丢弃距端点 < 0.02 的线，再相邻成对。1×1 是合法输入（等于不切），界面在 `splitCellCount < 2` 时禁用确认并说明理由，而不是悄悄改成 2×2。
@@ -288,7 +289,7 @@ React Flow v12（`@xyflow/react`）受控模式：`nodes` / `edges` 状态由 `C
 > `.assets/` 与 `.refs/`：前者是画布长期图库（永不清理、工作流按编号引用、损坏可重建）；后者是参考图临时缓存（添加即落盘供继承/生成引用，启动清 24h 孤儿，无引用计数）。统一原则：**只要在系统里「出现且被保留」的图都进 `.assets/` 注册表**（画布拖入、生成结果、晋升的参考图），`.refs` 仅是不确定是否要保留时的 24h 暂存。
 - 工作流文件：version 2 JSON（v1 兼容读取）存 `output/workflows/`，含 `savedAt` 元信息；图片节点**只持久化 registryId + 元数据**，url/absPath 由加载时按注册表实时重建——项目改名/移动后旧存档自愈；注册表缺失的 id 进 `missing`（前端标红「图片缺失」并阻止带缺图运行）。
 - 提交图快照：`output/submissions/`，与工作流同 schema（kind='submission'），经典生成自动落盘，提供「整图导入画布」（图片组→提示词→结果连线一次还原）；解析统一走 `resolve_asset`。
-- 恢复快照：独立于手动工作流，自动保存（防抖 1.5s）+ 挂载询问恢复。
+- 恢复快照：独立于手动工作流，自动保存（防抖 1.5s）+ 挂载询问恢复。落盘前一律过 `recovery.ts:buildRecoverySnapshot`：剥运行期字段（`startedAtMs` / `resultCount` / `message` / `cancelRequested` 与 `status` 归 idle）、剥动画类，**并剥掉图片节点上的 `maskDataUrl`**——它是原图尺寸的 PNG data URL（MB 级），而快照每 1.5s 重写一次、留最近 5 份，一旦用过蒙版就会把磁盘写穿。`taskId` 例外：它是「任务还活着」的唯一线索，必须留着（见 5.3）。
 
 ### 5.6 新建节点定位
 
@@ -539,7 +540,7 @@ React Flow v12（`@xyflow/react`）受控模式：`nodes` / `edges` 状态由 `C
 ### 10.1 单元测试
 
 - 后端 pytest：**497 用例**（Windows 含 5 个专属测试，CI 必须 `windows-latest`；默认 tmp 路径的 WinError 5 历史坑已随目录重建恢复，见 AGENTS「活跃坑」）
-- 前端 vitest：**1054 用例**；`tsc --noEmit` + `vite build` 成功；`npm run lint` / `uv run ruff check .` 均零告警
+- 前端 vitest：**1072 用例**；`tsc --noEmit` + `vite build` 成功；`npm run lint` / `uv run ruff check .` 均零告警
 - 文档完整性：`python scripts/check_docs.py`（相对链接可解析 + AGENTS/tests-README/ARCHITECTURE/frontend-README 的测试计数与源码一致；改任何文档后必跑，见 [scripts/README.md](../scripts/README.md)）
 - **逐文件用例 / 覆盖范围 / 变更影响路由（完整表）见 [tests/README.md](../tests/README.md) 文件索引**
 

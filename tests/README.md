@@ -54,7 +54,7 @@ cd frontend; npm test
 | [`test_main_process.py`](test_main_process.py) | 4 | 端口探测 / 祖先链回溯（Windows） |
 | [`test_main_cli.py`](test_main_cli.py) | 31 | CLI gen 子命令全链路（校验/输出解析/文生图+图生图+多参考/失败/--no-asset/比例档位）/ **`--n` 逐张请求（每次 `n=1`、各存各的账、部分失败保留已成功、默认单张行为不变）** / config 输出 |
 
-## 文件索引（前端 vitest，共 1054，位于 frontend/src/）
+## 文件索引（前端 vitest，共 1072，位于 frontend/src/）
 
 | 文件 | 用例 | 覆盖 |
 | --- | --- | --- |
@@ -69,13 +69,15 @@ cd frontend; npm test
 | [`previewZoom.test.ts`](../frontend/src/previewZoom.test.ts) | 9 | 缩放范围 / 平移夹紧 / **倍率↔真实像素换算**（`zoom=1` 不等于原图 1:1：布局先被缩到 68% 时读数必须是 68%；「实际大小」的倍率 = 1/布局缩放比，且被 `ZOOM_MAX` 夹住） |
 | [`canvasHistory.test.ts`](../frontend/src/canvasHistory.test.ts) | 5 | 撤销 / 恢复 / 新分支清空 |
 | [`canvasStyles.test.ts`](../frontend/src/canvasStyles.test.ts) | 8 | 动效 CSS 选择器约束 / **控制坞每行带中文标签**（纯图标认不出）/ 行宽钉死不撑宽 / 小地图在左上角 / **可拖出按钮的六点把手落在按钮右缘内侧**（右内边距 22px + `right: 3px`，JSX 里不许再出现 `-right-1`——那是被 `overflow-hidden` 裁成半枚圆的老写法） |
-| [`recovery.test.ts`](../frontend/src/recovery.test.ts) | 4 | 快照剥离动画类 / 运行期字段清除 |
+| [`recovery.test.ts`](../frontend/src/recovery.test.ts) | 7 | 快照剥离动画类 / 运行期字段清除 / **`taskId` 保留（认领任务的唯一线索）** / **`maskDataUrl` 剥掉**（原图尺寸的 data URL，MB 级；不剥会让每 1.5s 重写、留 5 份的快照把磁盘写穿）|
 | [`useGenerationTask.test.ts`](../frontend/src/useGenerationTask.test.ts) | 8 | hook 稳定成员引用 + **超预算确认（409→确认→带 allowOverBudget 重提、取消则抛出、同实例只问一次、非 409 不触发确认）** |
 | [`useImageZoom.test.ts`](../frontend/src/useImageZoom.test.ts) | 4 | 预览开关：**全程不开新标签页**（单击不再跳转）/ 打开与关闭 / 不再暴露单击开窗入口 |
 | [`useImageEditorViewport.test.ts`](../frontend/src/useImageEditorViewport.test.ts) | 28 | 图片编辑器视口 hook：`fitImageToViewport` 缩放上限 1、`imageEditorContentSize` 保证居中可算、以指针为锚点的两段式缩放（先记锚点再 `useLayoutEffect` 反算 scrollLeft/scrollTop）、滚轮按 `passive:false` 注册且不冒泡、空格/中键拖拽判定、缩放边界（`canZoomIn`/`canZoomOut` 带 0.001 容差）、`ResizeObserver` 缺失守卫。**测试必须桩 `clientWidth`/`clientHeight`/`getBoundingClientRect`/`scrollLeft`**（jsdom 恒 0 且不可写），且 afterEach 先卸载实例再还原原型桩（否则多实例抢同一个 window 监听、假通过） |
 | [`imageCopy.test.ts`](../frontend/src/imageCopy.test.ts) | 4 | 复制走哪条路：有本机路径 → 服务端同步写（**不经浏览器剪贴板**）/ 服务端不可用 → 静默回退浏览器 API / 无路径 → 直接浏览器 / 两条都不通 → 抛可操作提示（B 层真机能力与 canvas 转码不在 jsdom 覆盖） |
 | [`imagePath.test.ts`](../frontend/src/imagePath.test.ts) | 5 | 从 `/api/image?path=…` 反解本机绝对路径；外链 / `blob:` / `data:` / 无查询串一律空串（调用方靠它决定「复制路径」按钮出不出） |
 | [`logPath.test.ts`](../frontend/src/logPath.test.ts) | 6 | 日志路径词条解析（绝对/相对、正反斜杠、多路径、扩展名大小写） |
+| [`thumbnails.test.ts`](../frontend/src/thumbnails.test.ts) | 11 | 缩略图：`thumbTargetSize` 等比缩到长边以内且**绝不放大**、极端长条不产出 0 尺寸（`canvas.width = 0` 会让 `toBlob` 抛错）、非法入参返回 `null` 不产 NaN；`loadThumbnail` 命中缓存不重复取图、同一张图并发只解码一次、取图失败/浏览器无 `createImageBitmap` 都退回原图（缩图是优化，不能让图变空白）、超过上限淘汰最久未用并 `revokeObjectURL`。jsdom 没有真实解码/画布，`createImageBitmap` / `getContext` / `toBlob` / `URL` 全部用桩 |
+| [`useThumbnail.test.tsx`](../frontend/src/useThumbnail.test.tsx) | 5 | 缩略图 hook：未命中先 `null` 后换图、命中缓存**首帧即有**（不闪空白）、失败退回原图、换图不拿上一张顶上、无 url 不发请求 |
 | [`imageOps.test.ts`](../frontend/src/imageOps.test.ts) | 49 | 裁剪/放大几何：`clampCrop` 最小尺寸与越界回收、`moveCrop` 与 `resizeCrop` 八向手柄、`fitCropToRatio` 保持中心收缩到能放下的最大尺寸（像素比与归一化比的换算必须乘框宽高比）、`resolveUpscaleSize` 长边上限与非法入参、`gcdRatio` 约分（含不可约分尺寸）、`centeredSquareCrop` 默认框。**B 层 canvas I/O 不测**（jsdom 的 `getContext("2d")` 返回 null） |
 | [`dataUrlFile.test.ts`](../frontend/src/dataUrlFile.test.ts) | 16 | dataUrl → `File` 转换（base64 与百分号编码两种载荷；非法输入**抛错而不是返回空 File**，0 字节上传会在画布多出永远加载失败的红框节点）、派生文件名（前缀 + 原名清洗 + 时间戳 + 扩展名，长度精确断言） |
 | [`aspectIcon.test.ts`](../frontend/src/aspectIcon.test.ts) | 12 | 比例图标几何：`aspectIconSize` 长边固定 24、短边按比例算且不低于 10（再矮就看不出是矩形）、横竖两个分支都只动短边、非法比例（NaN / 0 / 负数 / Infinity）回落正方形；`ratioFromSizeLabel` 三层解析（括号内 `a:b` → 裸 `a:b` → `WxH` 宽高比），**括号里只有中文方位词（如 `1024x1792 (竖版长图)`）必须退回宽高比**，否则这两项没有图标 |
