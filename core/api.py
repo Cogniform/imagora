@@ -18,7 +18,7 @@ from pathlib import Path
 
 import requests
 
-from core import config
+from core import config, imageinfo
 from core.config import get_api_key, normalize_model_id
 from core.console import print_success
 
@@ -29,6 +29,42 @@ _SEQ = itertools.count(1)
 def format_error(error: Exception, limit: int = 150) -> str:
     """异常 -> 简短可读文本（类型 + 截断消息），供日志/界面统一展示"""
     return f"{type(error).__name__}: {str(error)[:limit]}"
+
+
+# 真实文件头格式 → 落盘扩展名。jpeg 两种写法都合法，比对时按 family 归一。
+_FORMAT_SUFFIX = {
+    "png": ".png",
+    "jpeg": ".jpg",
+    "webp": ".webp",
+    "gif": ".gif",
+    "bmp": ".bmp",
+}
+
+
+def align_output_extension(output_path: str) -> str:
+    """按文件头把落盘扩展名改成真实格式，返回最终路径。
+
+    为什么需要：上游回的格式与调用方预设的 `.png` 经常不一致 ——
+    - 静态图实测回的是 **JPEG**（`ff d8 ff e0`，2026-11-16 / Images 2.6）；
+    - 提示词里点明帧数时回**多帧动画 GIF**。
+    `output_format` 参数只是本地命名提示，**并没有下发给上游**（payload 里只有
+    model/prompt/size/quality/n/watermark/seed），所以磁盘上原本长期是「.png 后缀
+    装 JPEG 字节」：双击打不开、`/api/image` 发出错误的 Content-Type、动图变静帧。
+
+    认不出文件头（测试桩的假字节 / 损坏 / 空文件）时**原样返回**：不猜、不改名，
+    让调用方看到自己写下的那个路径，而不是一个凭空改过的。
+    """
+    real = imageinfo.detect_format(output_path)
+    want = _FORMAT_SUFFIX.get(real)
+    if not want:
+        return output_path
+    have = Path(output_path).suffix.lower()
+    # jpg / jpeg 同族，不互相改名
+    if have == want or (real == "jpeg" and have in (".jpg", ".jpeg")):
+        return output_path
+    new_path = str(Path(output_path).with_suffix(want))
+    os.replace(output_path, new_path)
+    return new_path
 
 
 def resolve_size_with_ratio(size, ratio, tier):
@@ -380,4 +416,9 @@ def generate_image(
     else:
         raise RuntimeError(f"接口响应没有图片数据：{str(item)[:200]}")
 
+    # 上游可能回动画 GIF（多帧）而不是 PNG：按真实文件头校正扩展名再报路径，
+    # 否则调用方拿到的 dest 与实际文件格式不一致（历史/账本/画布全跟着错）。
+    output_path = align_output_extension(output_path)
+
     print_success(f"已保存: {output_path}")
+    return output_path

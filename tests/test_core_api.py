@@ -15,6 +15,7 @@ import pytest
 
 import core.api as core_api
 from core.api import (
+    align_output_extension,
     build_default_output_path,
     format_error,
     resolve_size_with_ratio,
@@ -412,3 +413,57 @@ def test_mask_ignored_when_not_given(post_recorder, tmp_path):
         prompt="p", images=[str(base)], output_path=str(tmp_path / "out.png")
     )
     assert post_recorder.field_names() == ["image"]
+
+
+# ---------- align_output_extension ----------
+
+_SNIFF_JPEG = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00"
+_SNIFF_GIF = b"GIF89a\x64\x00\xc8\x00\x00\x00\x00"
+_SNIFF_PNG = b"\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR\x00\x00\x00\x64\x00\x00\x00\xc8"
+
+
+def test_align_renames_png_named_jpeg(tmp_path):
+    """上游静态图实际是 JPEG：`.png` 名字要改成 `.jpg`，且旧文件不残留。"""
+    p = tmp_path / "out.png"
+    p.write_bytes(_SNIFF_JPEG)
+    got = align_output_extension(str(p))
+    assert got == str(tmp_path / "out.jpg")
+    assert Path(got).read_bytes() == _SNIFF_JPEG
+    assert not p.exists()
+
+
+def test_align_renames_png_named_gif(tmp_path):
+    """多帧 GIF 回包：`.png` 名字要改成 `.gif`（否则动图变静帧 + MIME 错）。"""
+    p = tmp_path / "out.png"
+    p.write_bytes(_SNIFF_GIF)
+    got = align_output_extension(str(p))
+    assert got == str(tmp_path / "out.gif")
+    assert Path(got).exists()
+
+
+def test_align_keeps_true_png(tmp_path):
+    p = tmp_path / "out.png"
+    p.write_bytes(_SNIFF_PNG)
+    assert align_output_extension(str(p)) == str(p)
+    assert p.exists()
+
+
+def test_align_keeps_jpg_and_jpeg_both(tmp_path):
+    """jpg / jpeg 同族：不互相改名，避免无意义的路径变更。"""
+    for name in ("out.jpg", "out.jpeg"):
+        p = tmp_path / name
+        p.write_bytes(_SNIFF_JPEG)
+        assert align_output_extension(str(p)) == str(p)
+
+
+def test_align_leaves_unrecognized_bytes_alone(tmp_path):
+    """桩数据 / 损坏文件：原样返回，不猜、不改名。"""
+    p = tmp_path / "out.png"
+    p.write_bytes(b"generated")
+    assert align_output_extension(str(p)) == str(p)
+    assert p.exists()
+
+
+def test_align_leaves_missing_file_alone(tmp_path):
+    missing = str(tmp_path / "nope.png")
+    assert align_output_extension(missing) == missing

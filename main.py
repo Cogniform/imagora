@@ -227,26 +227,32 @@ def handle_gen_command(args):
         try:
             if ref_paths:
                 # 多张参考图一次请求提交（与 web 表单 images 字段等价）
-                generate_image(
-                    prompt=args.prompt,
-                    images=ref_paths,
-                    size=size,
-                    quality=args.quality,
-                    model=args.model,
-                    n=1,
-                    output_format=output_format,
-                    output_path=dest,
+                dest = (
+                    generate_image(
+                        prompt=args.prompt,
+                        images=ref_paths,
+                        size=size,
+                        quality=args.quality,
+                        model=args.model,
+                        n=1,
+                        output_format=output_format,
+                        output_path=dest,
+                    )
+                    or dest
                 )
             else:
-                generate_image(
-                    prompt=args.prompt,
-                    image_path=None,
-                    size=size,
-                    quality=args.quality,
-                    model=args.model,
-                    n=1,
-                    output_format=output_format,
-                    output_path=dest,
+                dest = (
+                    generate_image(
+                        prompt=args.prompt,
+                        image_path=None,
+                        size=size,
+                        quality=args.quality,
+                        model=args.model,
+                        n=1,
+                        output_format=output_format,
+                        output_path=dest,
+                    )
+                    or dest
                 )
             ok = True
             spent += unit_cost
