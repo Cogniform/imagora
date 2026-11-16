@@ -135,7 +135,13 @@ html {
 /* ============ 设计 token：高度 / 圆角 / 卡片内边距（统一管理，勿再散落魔法数字） ============
  * 高度阶梯：顶栏控件 28 → 表单控件 38 → 主行动 46；
  * 圆角阶梯：胶囊（顶栏控件）→ 卡片 16 → 输入控件 10。
- * 顶栏内所有控件共用 --h-ctl，保证同一条水平基线上等高（层次靠底色/字重区分，不靠高度差）。 */
+ * 顶栏内所有控件共用 --h-ctl，保证同一条水平基线上等高（层次靠底色/字重区分，不靠高度差）。
+ *
+ * ⚠️ 纪律：这三档是**控件**高度，任何可点 / 可输入的控件都必须引用其一，
+ * 不许再用 padding + line-height 自己撑。曾经 `--h-field` 定义了却没人用、
+ * `.field-control` 靠 py-2 算出同样的 38 —— 数字碰巧相等，改字号就漂。
+ * 同理，同一容器里的输入框与下拉必须共用同一个左右内边距（见 .compact-controls
+ * 与 .studio-canvas .node-pop 两处）：高度齐了、左端字不齐，看着还是两套控件。 */
 :root {
   --h-ctl: 28px;
   --h-field: 38px;
@@ -713,13 +719,23 @@ html[data-canvas-bounds="off"] .studio-canvas .react-flow__renderer {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-brand) 16%, transparent), 0 14px 30px rgba(33,44,53,.16) !important;
 }
 .studio-canvas .node-pop .field-control { background: var(--surface-inset); }
-/* 节点里的尺寸下拉：标签带单价，比表单那栏长；14px 在 7fr 列里会被截成「1024x1024 (1:1) (0…」，
-   截在数字中间比换行更糟。节点本来就该比表单紧凑 —— 触发值降到 12px 并收紧左右内边距，完整标签正好放下。
-   只作用于节点，表单那边保持 14px。 */
+/* 节点里的输入控件与下拉**共用同一组尺寸**：紧凑档高度 + 同一左右内边距。
+ *
+ * 这一段原来只覆盖了 .select-trigger（font-size 12 / padding 8px），而节点里的
+ * 单行输入框仍是表单档的 38 / 20px —— 同一张卡里，下拉的字从 8px 起、输入框的字
+ * 从 20px 起，高度也差 10px。截图里最刺眼的那种参差就是它。
+ *
+ * 节点本来就该比表单紧凑，所以两件一起收：高度取 --h-ctl，内边距统一 10px
+ * （与 .compact-controls 同值，不再有第三个 8px）。
+ * ⚠️ 只作用于节点，表单那边保持 --h-field / 20px。 */
+.studio-canvas .node-pop .field-control:not(textarea),
 .studio-canvas .node-pop .select-trigger {
+  height: var(--h-ctl);
+  padding-block: 0;
+  padding-inline: 10px;
   font-size: 12px;
-  padding-left: 8px;
-  padding-right: 8px;
+}
+.studio-canvas .node-pop .select-trigger {
   gap: 6px;
 }
 /* 连线描边取 --edge-stroke-* 三个 token（见文件开头「连线三态描边」段）：
@@ -809,7 +825,7 @@ html[data-canvas-bounds="off"] .studio-canvas .react-flow__renderer {
 /* 搜索框：贴在列表顶部，与选项区用一条细线分开；输入框本身不要 field-control 的边框，
    否则「框里套框」，在已经带边框的浮层里显得脏。 */
 .select-search { flex: none; padding: 2px 2px 6px; border-bottom: 1px solid rgba(31,41,55,.1); margin-bottom: 4px; }
-.select-search__input { width: 100%; height: 30px; padding: 0 9px; border: 0; border-radius: 7px; background: color-mix(in srgb, var(--color-brand) 5%, transparent); color: #17202b; font-size: 13px; }
+.select-search__input { width: 100%; height: var(--h-ctl); padding: 0 10px; border: 0; border-radius: 7px; background: color-mix(in srgb, var(--color-brand) 5%, transparent); color: #17202b; font-size: 13px; }
 .select-search__input:focus { outline: 2px solid color-mix(in srgb, var(--color-brand) 32%, transparent); outline-offset: 0; }
 .select-search__input::placeholder { color: rgba(23,32,43,.34); }
 .select-empty { padding: 14px 10px; color: rgba(23,32,43,.4); font-size: 12px; text-align: center; }
@@ -967,8 +983,26 @@ html[data-canvas-bounds="off"] .studio-canvas .react-flow__renderer {
      不包含 width/height——否则 textarea 原生 resize 拖动时每帧被插值动画
      「拖慢一拍」，表现为右下角拉伸卡顿/不跟手（经典表单与画布卡片同源）。 */
   .field-control {
-    @apply w-full rounded-lg border border-neutral-300 bg-white px-5 py-2 text-sm outline-none;
+    @apply w-full rounded-lg border border-neutral-300 bg-white px-5 text-sm outline-none;
+    /* 高度走 --h-field，不再靠 py-2 撑。
+     *
+     * 为什么改：`--h-field: 38px` 这个 token 从定义那天起就没被任何规则消费过
+     * （全文件只有 --h-cta 用过一次），`.field-control` 一直是 py-2 + text-sm
+     * 算出来的 38 —— 数字巧合相等，但**它不是同一件事**：改字号或行高就会漂，
+     * 而 token 不会。同一条水平线上的 .select-trigger 带的是 .field-control 类，
+     * 所以这里一改，输入框与下拉自动同步 —— 这也正是它们本该同源的理由。
+     *
+     * 内边距 px-5（20px）保持不变；紧凑场景由 .compact-controls 覆写成
+     * padding-inline: 10px，两者读的是同一组值。 */
+    height: var(--h-field);
+    padding-block: 0;
     transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  }
+  /* 多行控件不吃固定高度：textarea 要跟着内容长、还要能拖右下角。 */
+  textarea.field-control {
+    height: auto;
+    min-height: var(--h-field);
+    padding-block: 0.5rem;
   }
   .field-control:hover {
     @apply border-neutral-400;
