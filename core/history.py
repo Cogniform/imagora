@@ -1,4 +1,16 @@
-"""本地生成历史读取：容忍损坏 JSONL，支持轻量筛选。"""
+"""本地生成历史读取：容忍损坏 JSONL，支持轻量筛选。
+
+## 为什么按块倒着读
+
+账本是 append-only 的 JSONL，列表与看板都只关心**最新那一段**。早先的实现是
+`read_text().splitlines()` 再 `reversed()`：整份文件读进内存、逐行 `json.loads`
+到凑够条数为止 —— 文件多大就吃多大内存，且每次打开历史都要把历史全解析一遍。
+现在改成从文件尾部按块往回读，凑够条数就停；统计仍要全量，但走同一个迭代器，
+内存只与块大小有关，不再随账本增长。
+
+顺带修掉一个隐性失败：整份 `read_text()` 遇到**任何**一行非法 UTF-8 就整体抛
+`UnicodeDecodeError`（连累其余所有行）。改成逐行解码后，坏行按既有约定跳过。
+"""
 
 import hashlib
 import json
@@ -6,7 +18,7 @@ import os
 import re
 import shutil
 import time
-from pathlib import Path
+from collections.abc import Iterator
 
 from core import registry
 from core.config import WORK_ROOT
@@ -14,45 +26,88 @@ from core.logging import LOGS_DIR
 
 HISTORY_FILE = LOGS_DIR / "generation.jsonl"
 
+# 倒序读的块大小：64KB 够摊平逐行读取的系统调用，又不至于让单次解码过大。
+_REVERSE_CHUNK = 64 * 1024
+
 # 搜索空白折叠：账本 prompt 存 Windows CRLF（表单提交 %0D%0A），用户粘进单行搜索框时
 # 浏览器把换行归一/移除，与账本换行错位导致整串子串匹配失败——两侧统一折叠为单空格。
 _SPACES = re.compile(r"\s+")
 
 
-def _collect_all(query: str = "", status: str = "", raw_limit: int = 500) -> list[dict]:
-    """读取账本并聚合后的完整列表（最新在前，坏行忽略）。
+def iter_ledger_lines_reversed(
+    path: str | os.PathLike[str] = HISTORY_FILE,
+    chunk_size: int = _REVERSE_CHUNK,
+) -> Iterator[str]:
+    """从文件尾部按块倒序产出行（最新在前），不把整份文件读进内存。
 
-    raw_limit 限制**原始行数**（聚合前），防大账本全盘扫描；聚合由
-    dedupe_generation_history 完成，因此返回条数 ≤ 原始行数。
-    读取/筛选/聚合三步骤在此收敛，供分页与整页共用，语义一致。
+    块边界会切开某一行：切下来的前半段留作下一轮的 carry 拼回去，所以产出的
+    永远是完整行（除了文件首行本来就没有前导换行）。
     """
-    # 两侧都做空白折叠（CRLF/LF/连续空格 → 单空格），换行差异不再导致整串匹配失败
-    needle = _SPACES.sub(" ", query.strip()).casefold()
-    status_filter = status.strip().casefold()
-    try:
-        lines = Path(HISTORY_FILE).read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return []
-    items: list[dict] = []
-    for line in reversed(lines):
+    with open(path, "rb") as f:
+        f.seek(0, os.SEEK_END)
+        pos = f.tell()
+        carry = b""
+        while pos > 0:
+            step = min(chunk_size, pos)
+            pos -= step
+            f.seek(pos)
+            block = f.read(step) + carry
+            pieces = block.split(b"\n")
+            carry = pieces[0]  # 可能是半行：下一块的前缀补上它
+            yield from reversed(pieces[1:])
+        if carry:
+            yield carry
+
+
+def _iter_records_reversed(
+    path: str | os.PathLike[str] = HISTORY_FILE,
+) -> Iterator[dict]:
+    """倒序产出**可解析的**记录（坏行 / 非对象 / 非法编码一律跳过）。"""
+    for raw in iter_ledger_lines_reversed(path):
+        line = raw.decode("utf-8", errors="replace").strip()
+        if not line:
+            continue
         try:
             record = json.loads(line)
         except (TypeError, ValueError):
             continue
-        if not isinstance(record, dict):
-            continue
-        if status_filter and str(record.get("status", "")).casefold() != status_filter:
-            continue
-        if needle:
-            haystack = " ".join(
-                _SPACES.sub(" ", str(record.get(key, "")))
-                for key in ("time", "prompt", "mode", "quality", "output")
-            ).casefold()
-            if needle not in haystack:
+        if isinstance(record, dict):
+            yield record
+
+
+def _matches(record: dict, needle: str, status_filter: str) -> bool:
+    """搜索与状态筛选（在聚合**之前**做，与分页语义一致）。"""
+    if status_filter and str(record.get("status", "")).casefold() != status_filter:
+        return False
+    if not needle:
+        return True
+    haystack = " ".join(
+        _SPACES.sub(" ", str(record.get(key, "")))
+        for key in ("time", "prompt", "mode", "quality", "output")
+    ).casefold()
+    return needle in haystack
+
+
+def _collect_all(query: str = "", status: str = "", raw_limit: int = 500) -> list[dict]:
+    """读取账本并聚合后的完整列表（最新在前，坏行忽略）。
+
+    raw_limit 限制**匹配到的原始行数**（聚合前）——凑够就停，不再往文件更早的部分读。
+    聚合由 dedupe_generation_history 完成，因此返回条数 ≤ 原始行数。
+    """
+    # 两侧都做空白折叠（CRLF/LF/连续空格 → 单空格），换行差异不再导致整串匹配失败
+    needle = _SPACES.sub(" ", query.strip()).casefold()
+    status_filter = status.strip().casefold()
+    cap = max(1, int(raw_limit))
+    items: list[dict] = []
+    try:
+        for record in _iter_records_reversed(HISTORY_FILE):
+            if not _matches(record, needle, status_filter):
                 continue
-        items.append(record)
-        if len(items) >= max(1, int(raw_limit)):
-            break
+            items.append(record)
+            if len(items) >= cap:
+                break
+    except OSError:
+        return []
     return dedupe_generation_history(items)
 
 
@@ -91,22 +146,18 @@ def read_raw_history(limit: int | None = None) -> list[dict]:
     与 read_generation_history 的区别是口径不同：那边面向「列表展示」，会聚合同参数
     记录并限制原始行数；这边面向**统计与计费**——每个成功行都真实花过钱，聚合会少算
     费用，故保留全部原始行。limit 为 None 表示不限。
+
+    同样走倒序按块读：内存只与块大小有关，账本再大也不会整份进内存。
     """
+    cap = None if limit is None else max(1, int(limit))
+    items: list[dict] = []
     try:
-        lines = Path(HISTORY_FILE).read_text(encoding="utf-8").splitlines()
+        for record in _iter_records_reversed(HISTORY_FILE):
+            items.append(record)
+            if cap is not None and len(items) >= cap:
+                break
     except OSError:
         return []
-    items: list[dict] = []
-    for line in reversed(lines):
-        try:
-            record = json.loads(line)
-        except (TypeError, ValueError):
-            continue
-        if not isinstance(record, dict):
-            continue
-        items.append(record)
-        if limit is not None and len(items) >= max(1, int(limit)):
-            break
     return items
 
 
