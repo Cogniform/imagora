@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 
 import { recoveryLatest, recoverySave } from "./api";
 import { errMessage } from "./format";
@@ -17,6 +17,15 @@ interface UseCanvasRecoveryOptions {
    *  「是否恢复」确认框。 */
   defaultSize?: string | undefined;
   defaultQuality?: string | undefined;
+  /**
+   * 画布是否已经渲染崩过（由 CanvasBoundary 置位）。崩了就不再自动写快照。
+   *
+   * 为什么需要这道闸：崩溃时组件会被卸载，而卸载路径会 flush 一次 ——
+   * 它写下去的正是那份让页面崩掉的状态。下次打开又读回它，于是「一次事故」
+   * 变成「每次打开都崩、界面里还没法自救」。数据侧已在保存前收敛形状
+   * （recovery.ts），这一道是从「状态可信吗」的角度再堵一次。
+   */
+  crashedRef: RefObject<boolean>;
 }
 
 /** 自动保存到独立恢复快照，并在挂载时询问是否恢复最近快照。 */
@@ -27,6 +36,7 @@ export function useCanvasRecovery({
   onLog,
   defaultSize,
   defaultQuality,
+  crashedRef,
 }: UseCanvasRecoveryOptions) {
   const [ready, setReady] = useState(false);
   const mountedRef = useRef(true);
@@ -67,10 +77,12 @@ export function useCanvasRecovery({
   const snapshot = useMemo(() => buildRecoverySnapshot(nodes, edges), [nodes, edges]);
   const snapshotKey = useMemo(() => JSON.stringify(snapshot), [snapshot]);
   const saveSnapshot = useCallback(() => {
+    // 崩过就别写：这一次保存写下去的正是那份让页面崩掉的状态
+    if (crashedRef.current) return;
     void recoverySave(snapshot).catch((err) => {
       if (mountedRef.current) onLog(`自动保存失败：${errMessage(err)}`);
     });
-  }, [onLog, snapshot]);
+  }, [crashedRef, onLog, snapshot]);
 
   useEffect(() => {
     if (!ready || !snapshot.nodes.length) return;
