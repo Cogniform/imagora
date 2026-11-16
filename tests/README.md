@@ -5,7 +5,7 @@ FastAPI 路由级 + 纯逻辑测试，**不调真实上游 API、不花钱**。�
 ## 本地常用命令（在项目根目录执行）
 
 ```powershell
-# 后端全量（485 用例）
+# 后端全量（497 用例）
 .\.venv\Scripts\python.exe -m pytest
 # 按模块筛选
 .\.venv\Scripts\python.exe -m pytest tests/test_core_config.py tests/test_server_helpers.py
@@ -23,11 +23,11 @@ cd frontend; npm test
 - **测试数字是 AGENTS 仪表盘数据源**：增/删测试用例必须同步 AGENTS「当前仪表盘」；数字意外变化（非新增导致）必须报告维护者
 - **别按变量名读断言**：`test_core_api.py` 里的 `calls["n"] == 3` 是**重试次数**计数器，与生成张数无关。看名字以为"多张已覆盖"过一次误判（CLI `--n` 的真覆盖在 `test_main_cli.py`，见 issue #34）
 
-## 文件索引（后端 pytest，共 485）——每个 test_*.py 测什么
+## 文件索引（后端 pytest，共 497）——每个 test_*.py 测什么
 
 | 文件 | 用例 | 覆盖 |
 | --- | --- | --- |
-| [`test_core_api.py`](test_core_api.py) | 24 | 尺寸解析 / 默认输出路径（并发唯一）/ 错误格式化 / 写文件瞬时锁重试 / **蒙版局部重绘（mask_data_url 落临时文件并进 multipart 的 `mask` 字段、临时文件必删、无底图时报清晰错误、mask_path 优先、data URL 非法报错）** |
+| [`test_core_api.py`](test_core_api.py) | 30 | 尺寸解析 / 默认输出路径（并发唯一）/ 错误格式化 / 写文件瞬时锁重试 / **蒙版局部重绘（mask_data_url 落临时文件并进 multipart 的 `mask` 字段、临时文件必删、无底图时报清晰错误、mask_path 优先、data URL 非法报错）** |
 | [`test_core_batch.py`](test_core_batch.py) | 10 | 配置读取 / 路径解析 / 模块过滤 / dry-run |
 | [`test_core_config.py`](test_core_config.py) | 26 | API Key 跟随 profile / profile 解析优先级与缺失回退 / 白名单校验 / RATIOS 表结构 / **配置来源视图（值 + 来自哪一层、.env 与系统环境变量区分、密钥不回传值）** / **`normalize_model_id` 只在当前 profile 内折叠连字符、不跨 profile 借名** |
 | [`test_core_config_override.py`](test_core_config_override.py) | 16 | `.env` 本机覆盖通道（`BASE_URL_` / `MODEL_` / `API_PATH_<PROFILE>`）：**未设环境变量时行为与没有覆盖时逐字相同**、覆盖只影响自己那一个键、只对当前 profile 生效、换 profile 后覆盖跟着换、空值视为未设置、来源标注区分 `.env` 与系统环境变量、删掉覆盖行后回到 config.json profile、非覆盖键没有环境变量名 |
@@ -40,7 +40,7 @@ cd frontend; npm test
 | [`test_core_logging.py`](test_core_logging.py) | 8 | 日志写入 / 并发串行 / 路径相对化 |
 | [`test_core_history.py`](test_core_history.py) | 18 | 历史读取 / 坏行容忍 / 筛选 / **搜索换行归一（CRLF 粘贴可命中）** / **聚合：失败只留最新（时间不算参数、任一参数不同不合并、inputAssetIds 参与判定、成功吸收更早的失败）＋成功一条都不合并（同参数连跑两次 = 两行，产出与历史一一对应）** / **分页（聚合后切片与 total、offset 越界、与搜索/状态一致）** / backfill（报告·补齐·幂等·跳过无法反查·坏行保留） |
 | [`test_core_canvas.py`](test_core_canvas.py) | 32 | 注册表（v2+v1 兼容）/ 内容去重 / import 边界 / kind 来源标签 / workflow 归一化与自愈 / recovery / submission / persist_submission_assets |
-| [`test_core_imageinfo.py`](test_core_imageinfo.py) | 10 | PNG/JPEG/GIF/WebP/BMP 头解析 / 垃圾与截断返回 None |
+| [`test_core_imageinfo.py`](test_core_imageinfo.py) | 16 | PNG/JPEG/GIF/WebP/BMP 头解析 / 垃圾与截断返回 None |
 | [`test_core_migrate.py`](test_core_migrate.py) | 19 | 注册表 detect/升级/重建/回填/迁目录 / 工作流升级 / CLI 端到端 |
 | [`test_core_tasks.py`](test_core_tasks.py) | 11 | 任务状态机 / 并发上限 / 取消 / 快照 / TTL 清理 |
 | [`test_core_pathtrust.py`](test_core_pathtrust.py) | 2 | 路径白名单（match_roots 双根/单根/跨盘） |

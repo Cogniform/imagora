@@ -2,7 +2,7 @@
 
 import struct
 
-from core.imageinfo import image_dimensions
+from core.imageinfo import detect_format, image_dimensions
 
 
 def _png(w=100, h=200):
@@ -149,3 +149,48 @@ def test_truncated_png_returns_none(tmp_path):
 
 def test_missing_file_returns_none(tmp_path):
     assert image_dimensions(str(tmp_path / "nope.png")) is None
+
+
+# ---------- detect_format：只判格式，不吃 64 字节窗口 ----------
+
+
+def test_detect_format_all_known(tmp_path):
+    cases = [
+        ("a.png", _png(), "png"),
+        ("a.jpg", _jpeg(), "jpeg"),
+        ("a.gif", _gif(), "gif"),
+        ("a.webp", _webp_vp8(), "webp"),
+        ("a.bmp", _bmp(), "bmp"),
+    ]
+    for name, data, want in cases:
+        assert detect_format(_write(tmp_path, name, data)) == want
+
+
+def test_detect_format_ignores_extension(tmp_path):
+    """判据是字节不是后缀：`.png` 名字里装 JPEG 也要报 jpeg。"""
+    assert detect_format(_write(tmp_path, "lying.png", _jpeg())) == "jpeg"
+
+
+def test_detect_format_reads_jpeg_with_long_app_segment(tmp_path):
+    """JPEG 的 APP0/EXIF 段长于 64 字节时 SOF 落在读窗之外。
+
+    回归：`image_dimensions()` 此时返回 None（宽高未知），但这不影响「是不是 JPEG」——
+    实测上游静态图正是这种带大段 EXIF 的 JPEG，落盘扩展名曾因此一直没被校正。
+    """
+    long_app = b"\xff\xe1\xff\xf0" + b"\x00" * 0xF0  # 一条 0xFFF0 字节的 EXIF 段
+    data = b"\xff\xd8" + long_app + _jpeg()[2:]
+    p = _write(tmp_path, "big.jpg", data)
+    assert image_dimensions(p) is None  # 宽高读不到（既有 64 字节窗口的限制）
+    assert detect_format(p) == "jpeg"  # 但格式判定不受影响
+
+
+def test_detect_format_garbage_returns_empty(tmp_path):
+    assert detect_format(_write(tmp_path, "g.bin", b"not an image at all")) == ""
+
+
+def test_detect_format_short_file_returns_empty(tmp_path):
+    assert detect_format(_write(tmp_path, "s.bin", b"\x89PN")) == ""
+
+
+def test_detect_format_missing_file_returns_empty(tmp_path):
+    assert detect_format(str(tmp_path / "nope.gif")) == ""
