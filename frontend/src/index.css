@@ -987,14 +987,36 @@ html[data-canvas-bounds="off"] .studio-canvas .react-flow__renderer {
   .btn-icon { display: inline-flex; min-width: 36px; min-height: 36px; align-items: center; justify-content: center; border-radius: 10px; }
   .btn-icon--sm { min-width: 30px; min-height: 30px; border-radius: 8px; }
 
-  /* 紧凑控件行：一行内并排的输入 / 下拉 / 按钮统一尺寸（历史页筛选行、成本看板预算行）。
-     收敛在此、而不是散成各元素的 !py-* / !px-* 覆盖 —— 覆盖各写各的，同排控件就会参差不齐。 */
-  .compact-controls .field-control {
-    @apply px-2.5 py-1 text-xs;
+  /* 紧凑控件行：一行内的输入 / 下拉 / 按钮**同高、同字号**（历史页筛选行、成本看板预算行）。
+   *
+   * 高度由容器定死、子控件填满，而不是让每个控件带着自己的 py-* 各自算 ——
+   * 各写各的必然参差，实测就是四档挤在一行里：
+   *   .field-control 默认 py-2 → 38、搜索框 !py-1 → 30、
+   *   数字输入去掉上下箭头后只剩内容高 → 26、按钮 py-1 → 24。
+   * 现在统一取 --h-ctl（顶栏那一档，见 .studio-header 的同一套写法），
+   * 一行里出现任何控件都自动对齐，不必再在调用点写 !py-* / !px-* 覆盖。
+   *
+   * 下拉宽度也归这里定：标题带的筛选和预算行并排时，"全部状态" 这种四字标签
+   * 在 w-28（112px）里会被省略号截成 "全部…"，9rem 才放得下。 */
+  .compact-controls {
+    --row-h: var(--h-ctl);
+  }
+  .compact-controls .field-control,
+  .compact-controls .select-trigger {
+    height: var(--row-h);
+    padding-block: 0;
+    padding-inline: 10px;
+    font-size: 12px;
+  }
+  .compact-controls .select-root {
+    width: 9rem;
   }
   .compact-controls .btn-primary,
   .compact-controls .btn-ghost {
-    @apply px-2.5 py-1 text-xs;
+    height: var(--row-h);
+    padding-block: 0;
+    padding-inline: 12px;
+    font-size: 12px;
   }
   /* 数字输入去掉原生上下箭头：它在紧凑行里几乎与字段等宽，且各浏览器外观不一 */
   .compact-controls .field-control[type='number']::-webkit-outer-spin-button,
@@ -1005,6 +1027,24 @@ html[data-canvas-bounds="off"] .studio-canvas .react-flow__renderer {
   .compact-controls .field-control[type='number'] {
     -moz-appearance: textfield;
     appearance: textfield;
+  }
+
+  /* 成本看板的指标网格：列宽用 max-content 兜底，而不是等宽 1fr。
+   *
+   * 等宽列只是「看起来齐」，某格装不下就把内容截掉 —— 成功率带括号（549/649）
+   * 是五格里最长的一格，实测只差 2px 就变成「84.6%（549/64…」。
+   * max-content 保证每列放得下自己的字，富余宽度各家均分，列依然成列。
+   * 三档列数与原版一致（2 / 3 / 5），只是把 minmax(0,1fr) 换成 minmax(max-content,1fr)。
+   * 列数写在类里而不是调用点的 grid-cols-*：Tailwind 的 utilities 层会压过这里，
+   * 两处同时写列数只会剩下 utilities 那份，minmax 白写。 */
+  .cost-board-grid {
+    grid-template-columns: repeat(2, minmax(max-content, 1fr));
+  }
+  @media (min-width: 640px) {
+    .cost-board-grid { grid-template-columns: repeat(3, minmax(max-content, 1fr)); }
+  }
+  @media (min-width: 1024px) {
+    .cost-board-grid { grid-template-columns: repeat(5, minmax(max-content, 1fr)); }
   }
 
   /* 字段标签 */

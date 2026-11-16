@@ -57,7 +57,7 @@ export function CostBoard({
           {/* 指标 + 预算设置：指标等宽成列（标签在上、数值在下，列间对齐），
               设置靠右、与指标用竖线分区；窄屏各自换行。 */}
           <div className="flex flex-wrap items-stretch gap-x-4 gap-y-2">
-            <div className="grid min-w-0 flex-1 grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3 lg:grid-cols-5">
+            <div className="cost-board-grid grid min-w-0 flex-1 gap-x-4 gap-y-2">
               {rows.map((row) => (
                 <div key={row.label} className="min-w-0">
                   <div className="truncate text-[10px] leading-4 text-neutral-400">{row.label}</div>

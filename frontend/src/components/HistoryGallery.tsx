@@ -244,29 +244,28 @@ export function HistoryGallery({
   return (
     <>
       <ModalShell title="生成历史" onClose={onClose} className="history-modal modal-panel--history corner-rings" overlayClassName="history-overlay">
-        <header className="flex flex-wrap items-center gap-2 border-b border-neutral-200 surface-float px-4 py-3">
+        <header className="compact-controls flex flex-wrap items-center gap-2 border-b border-neutral-200 surface-float px-4 py-3">
           <h2 className="mr-2 text-sm font-semibold">生成历史</h2>
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             onKeyDown={(event) => { if (event.key === "Enter") void load(); }}
             placeholder="搜索提示词、质量或文件名"
-            className="field-control !w-72 !py-1"
+            className="field-control !w-72"
           />
           <Select
             value={status}
             onChange={(next) => { setStatus(next); void load({ status: next }); }}
-            className="w-28"
             options={[{ value: "", label: "全部状态" }, { value: "ok", label: "成功" }, { value: "error", label: "失败" }]}
           />
-          <button type="button" className="btn-ghost !px-3 !py-1" onClick={() => void load()}>搜索</button>
+          <button type="button" className="btn-ghost" onClick={() => void load()}>搜索</button>
 
           {lostRefCount > 0 && (
             <span className="text-[11px] text-amber-600" title="图生图记录但参考图已从资产库找不回，无法还原">
               {lostRefCount} 条参考图已丢失
             </span>
           )}
-          <button type="button" className="btn-ghost ml-auto !px-3 !py-1" onClick={onClose}>关闭</button>
+          <button type="button" className="btn-ghost ml-auto" onClick={onClose}>关闭</button>
         </header>
         <CostBoard
           stats={stats}
