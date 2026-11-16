@@ -46,11 +46,19 @@ import { dataUrlToFile, derivedImageName, derivedImageSeries } from "../dataUrlF
 import { dimmedEdgeIds, edgeStyle, edgeVisualState } from "../edgeStyle";
 import { errMessage } from "../format";
 import { minimapNodeColor } from "../minimapColor";
+import { readMinimapVisible, saveMinimapVisible } from "../minimapVisible";
 import {
-  readMinimapVisible,
-  saveMinimapVisible,
+  FIT_ANIM_MS,
+  FIT_MAX_ZOOM,
+  FIT_PADDING,
+  LOD_IN_ZOOM,
+  MAX_ZOOM,
+  MIN_FIT_ZOOM,
+  MIN_ZOOM,
+  ZOOM_ANIM_MS,
+  nextLod,
   zoomToPercent,
-} from "../minimapVisible";
+} from "../zoom";
 import {
   applySnapToChanges,
   readSnapEnabled,
@@ -112,13 +120,7 @@ import { buildPromptNodes, type PromptCardSpec } from "../promptImportFormat";
 /** 节点删除退场动画时长（与 .node-exiting 的 fade-out 0.2s 一致） */
 const FADE_DURATION = 200;
 
-/** fitView 允许的最小缩放：画布节点很多时仍能一屏全览（低于 ReactFlow minZoom 属性，仅 fitView 生效） */
-const MIN_FIT_ZOOM = 0.02;
-
-/** LOD 抽象模式缩放阈值：缩小到 LOD_IN_ZOOM 以下进入抽象渲染，放大到 LOD_OUT_ZOOM 以上恢复完整渲染。
- *  两值之间是迟滞带（0.1~0.2），避免在阈值附近反复缩放时抖动切换。 */
-const LOD_IN_ZOOM = 0.1;
-const LOD_OUT_ZOOM = 0.2;
+/** fitView 允许的最小缩放、LOD 阈值、行程上下限等全部集中在 `zoom.ts`（缩放唯一真值表） */
 
 /** 聚焦节点时底部要让出的高度：画布日志浮层常驻右下角，聚焦后节点压在日志上等于白聚焦。
  *  取 96px ≈ 五行日志条（LOG_VISIBLE_COUNT = 5）加上边距，宁多留一点。 */
@@ -293,14 +295,13 @@ export function CanvasPage({
   const handleViewportMove = useCallback(
     (_event: unknown, viewport: { zoom: number }) => {
       setZoomPercent(zoomToPercent(viewport.zoom));
-      const z = viewport.zoom;
-      if (!lodRef.current && z < LOD_IN_ZOOM) {
-        lodRef.current = true;
-        setLod(true);
-      } else if (lodRef.current && z > LOD_OUT_ZOOM) {
-        lodRef.current = false;
-        setLod(false);
-      }
+      // 迟滞判定收在 zoom.ts 的 nextLod：同一份逻辑在插件里逐字复用，
+      // 阈值与死区只有一处定义（状态机只看「我现在在哪一档」，丢帧也能自愈）
+      setLod((current) => {
+        const next = nextLod(current, viewport.zoom);
+        lodRef.current = next;
+        return next;
+      });
     },
     [],
   );
@@ -517,7 +518,7 @@ export function CanvasPage({
   const fitCanvasToContent = useCallback(() => {
     window.requestAnimationFrame(() => {
       window.requestAnimationFrame(() => {
-        void rfInstanceRef.current?.fitView({ padding: 0.15, duration: 300, minZoom: MIN_FIT_ZOOM });
+        void rfInstanceRef.current?.fitView({ padding: FIT_PADDING, duration: FIT_ANIM_MS, minZoom: MIN_FIT_ZOOM });
       });
     });
   }, []);
@@ -2403,8 +2404,8 @@ export function CanvasPage({
           onSelectionChange={onSelectionChange}
           onMove={handleViewportMove}
           onInit={handleInit}
-          minZoom={0.05}
-          maxZoom={2}
+          minZoom={MIN_ZOOM}
+          maxZoom={MAX_ZOOM}
           // LOD 抽象模式：连线动画静止（省逐帧重排）；完整模式保持流动
           defaultEdgeOptions={defaultEdgeOptions}
           // 视口虚拟化：只渲染可视区域的节点，节点多时拖拽/平移不卡
@@ -2447,7 +2448,7 @@ export function CanvasPage({
             showZoom={false}
             showFitView={false}
             showInteractive={false}
-            fitViewOptions={{ padding: 0.15, minZoom: MIN_FIT_ZOOM, maxZoom: 2 }}
+            fitViewOptions={{ padding: FIT_PADDING, minZoom: MIN_FIT_ZOOM, maxZoom: FIT_MAX_ZOOM }}
           >
             {/* 缩放读数（只显示，不可拖）。**滑杆已移除**：滚轮与「放大/缩小/适应」够用，
                 而滑杆要维护一条双向同步（拖它改视口 + 视口变化回灌读数 + 拖动期间挡互相拉扯），
@@ -2461,14 +2462,14 @@ export function CanvasPage({
               label="放大"
               title="放大画布（滚轮同样可以缩放）"
               ariaLabel="放大画布"
-              onClick={() => void rfInstanceRef.current?.zoomIn({ duration: 180 })}
+              onClick={() => void rfInstanceRef.current?.zoomIn({ duration: ZOOM_ANIM_MS })}
             />
             <DockRow
               icon={<Icon name="zoomOut" />}
               label="缩小"
               title="缩小画布（滚轮同样可以缩放）"
               ariaLabel="缩小画布"
-              onClick={() => void rfInstanceRef.current?.zoomOut({ duration: 180 })}
+              onClick={() => void rfInstanceRef.current?.zoomOut({ duration: ZOOM_ANIM_MS })}
             />
             <DockRow
               icon={<Icon name="maximize" />}

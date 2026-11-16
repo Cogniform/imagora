@@ -55,7 +55,7 @@ cd frontend; npm test
 | [`test_main_process.py`](test_main_process.py) | 4 | 端口探测 / 祖先链回溯（Windows） |
 | [`test_main_cli.py`](test_main_cli.py) | 31 | CLI gen 子命令全链路（校验/输出解析/文生图+图生图+多参考/失败/--no-asset/比例档位）/ **`--n` 逐张请求（每次 `n=1`、各存各的账、部分失败保留已成功、默认单张行为不变）** / config 输出 |
 
-## 文件索引（前端 vitest，共 1094，位于 frontend/src/）
+## 文件索引（前端 vitest，共 1099，位于 frontend/src/）
 
 | 文件 | 用例 | 覆盖 |
 | --- | --- | --- |
@@ -90,7 +90,8 @@ cd frontend; npm test
 | [`snapGuidesStore.test.ts`](../frontend/src/snapGuidesStore.test.ts) | 9 | 对齐线外置 store：拖拽每帧 `setSnapGuides` 时**按内容逐条比对**（同一组线重复写入不产生新快照），快照引用稳定 + `getSnapGuides` 返回同引用（否则 `useSyncExternalStore` 会死循环渲染）、订阅/退订、松手清空后通知一次 |
 | [`SnapGuides.test.tsx`](../frontend/src/components/SnapGuides.test.tsx) | 7 | 对齐线渲染组件：`axis` 决定竖线/横线、空快照不渲染任何线、位置只走 `style`（不进 React state）、订阅 store 后随变化重绘、卸载即退订（避免拖拽残留线） |
 | [`ImageSplitDialog.test.tsx`](../frontend/src/components/ImageSplitDialog.test.tsx) | 13 | 切分对话框：五个预设按钮与 `aria-pressed`、行列手填即时夹到 1~8、网格预览格子数（`split-cell` 数量）随行列变化、1×1 时确认禁用、文件名预览、确认后 `splitDataUrl` 收到 `{rows, cols}` 且 `onConfirm` 拿到数组、失败显示 `role="alert"` 且不回调。`vi.importActual` 部分替身只换 `splitDataUrl` / `readImageSize` |
-| [`minimapVisible.test.ts`](../frontend/src/minimapVisible.test.ts) | 9 | 小地图显隐偏好（默认关、脏值当未设置、localStorage 不可用时静默降级）+ **缩放读数归一化**（`zoomToPercent` 倍率→百分比、行程与 ReactFlow min/maxZoom 对齐、NaN/±Infinity 夹到端点不抛错）。滑杆已移除，反向换算与持久化用例一并删除 |
+| [`minimapVisible.test.ts`](../frontend/src/minimapVisible.test.ts) | 4 | 小地图显隐偏好（默认关、脏值当未设置、localStorage 不可用时静默降级） |
+| [`zoom.test.ts`](../frontend/src/zoom.test.ts) | 10 | 缩放唯一真值表：百分比行程由倍率算出来（不写第二份字面量）/ `clampZoomPercent` 夹取与 NaN、±Infinity 端点 / `zoomToPercent` 倍率→百分比 / **LOD 迟滞（15% 进、20% 出、死区不翻转、连续缩放只翻一次）** |
 | [`minimapColor.test.ts`](../frontend/src/minimapColor.test.ts) | 6 | 小地图节点取色（从 CanvasPage 抽出的模块级纯函数）：提示词用品牌色、图片/图片组两档中性灰、未知类型走更深的兜底色（旧工作流文件的 `node.type` 未必在当前三类里）、只做类型映射不读 DOM 与主题实值 |
 | [`rankByName.test.ts`](../frontend/src/rankByName.test.ts) | 10 | 模糊排序：query 是 name 的大小写不敏感**有序子序列**（`gi25` 命中 `gpt-image-2.5`）、边界命中加分优先、相邻匹配加分、跳跃扣分、空 query 返回**同一数组引用**、全角 U+2011 折叠后比对 |
 | [`optionGroups.test.ts`](../frontend/src/optionGroups.test.ts) | 6 | 分组归并：组间按首次出现顺序、组内保持源顺序、无分组的项归入空标题兜底组、全部无分组时返回单组、混合时兜底组排最后 |
