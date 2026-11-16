@@ -92,6 +92,7 @@ import {
 import { layoutPromptResults, layoutSelection, nodeSize } from "../layout";
 import { focusViewportForNode, nodeBounds, revealViewport, type NodeBox } from "../canvasGeometry";
 import { GroupNode, ImageNode, PromptNode } from "./CanvasNodes";
+import { CanvasBoundary, NodeBoundary } from "./ErrorBoundary";
 // 控件坞那九行的图标走本仓内联的 ./Icon（与 DSH 插件版同源，见该文件顶部：为什么换、
 // 形状从哪来、改形状要两个仓库一起改）。名字走字符串键，顺带绕开了「import 一个叫 Map
 // 的组件会遮蔽全局 Map 类型、把 React Flow 的泛型推断搞崩」那条老坑。
@@ -270,6 +271,13 @@ export function CanvasPage({
   const canvasRef = useRef<HTMLDivElement>(null);
   /** React Flow 实例引用：自动布局后调 fitView 自适应居中 */
   const rfInstanceRef = useRef<ReactFlowInstance<WorkflowNode, Edge> | null>(null);
+
+  /** 画布是否已经渲染崩过：崩了就停掉自动快照。
+   *
+   * 这是「一次事故变成永久打不开」的直接成因 —— 崩溃时组件被卸载，卸载钩子
+   * flush 下去写的正是那份让页面崩掉的状态，下次打开又读回它。
+   * 数据侧已在保存前收敛形状（recovery.ts），这一道从「状态可信吗」再堵一次。 */
+  const crashedRef = useRef(false);
   /** LOD 抽象模式：缩小视图后节点降级为轻量卡片（图片仍可双击放大、连线动画静止、不可编辑），
    *  迟滞切换防抖动；只影响渲染，拖拽/选中/连线等基础交互不变 */
   const [lod, setLod] = useState(false);
@@ -559,6 +567,8 @@ export function CanvasPage({
     // 缺 size/quality 的旧卡片补成配置里的第一档（与新建卡片同源）
     defaultSize: config.sizes[0]?.value,
     defaultQuality: config.qualities[0],
+    // 崩过就别再把当前状态写回快照（见 crashedRef 的注释）
+    crashedRef,
   });
 
   /* 经典结果整图导入：收到 importSubmissionId 时拉取提交快照并合并进画布（去重复用图片节点） */
@@ -2118,41 +2128,50 @@ export function CanvasPage({
   );
 
   /* ---------------- 渲染 ---------------- */
+  /* 每个节点类型外面套一层 NodeBoundary：节点数据来自外部（工作流文件 / 恢复快照），
+     一个想不到的渲染异常不该让整页消失。边界必须在**节点组件外面** ——
+     组件自己 render 里抛的错，只有它外层的边界接得住。 */
   const nodeTypes = useMemo(
     () => ({
       image: (props: object) => (
-        <ImageNode
-          {...(props as ComponentProps<typeof ImageNode>)}
-          lod={lod}
-          onReplace={handleReplaceImage}
-          onDelete={handleDeleteNode}
-          onZoom={handleZoom}
-          onCrop={handleCropImage}
-          onUpscale={handleUpscaleImage}
-          onSplit={handleSplitImage}
-          onMask={handleMaskImage}
-          onClearMask={clearMask}
-        />
+        <NodeBoundary nodeId={(props as { id?: string }).id}>
+          <ImageNode
+            {...(props as ComponentProps<typeof ImageNode>)}
+            lod={lod}
+            onReplace={handleReplaceImage}
+            onDelete={handleDeleteNode}
+            onZoom={handleZoom}
+            onCrop={handleCropImage}
+            onUpscale={handleUpscaleImage}
+            onSplit={handleSplitImage}
+            onMask={handleMaskImage}
+            onClearMask={clearMask}
+          />
+        </NodeBoundary>
       ),
       group: (props: object) => (
-        <GroupNode
-          {...(props as ComponentProps<typeof GroupNode>)}
-          lod={lod}
-          onDelete={handleDeleteNode}
-        />
+        <NodeBoundary nodeId={(props as { id?: string }).id}>
+          <GroupNode
+            {...(props as ComponentProps<typeof GroupNode>)}
+            lod={lod}
+            onDelete={handleDeleteNode}
+          />
+        </NodeBoundary>
       ),
       prompt: (props: object) => (
-        <PromptNode
-          {...(props as ComponentProps<typeof PromptNode>)}
-          lod={lod}
-          onRun={handleRun}
-          onCancel={handleCancel}
-          onUpdate={handleNodeUpdate}
-          onDelete={handleDeleteNode}
-          sizeOptions={sizeOptions}
-          qualityOptions={qualityOptions}
-          qualityEffective={qualityEffective}
-        />
+        <NodeBoundary nodeId={(props as { id?: string }).id}>
+          <PromptNode
+            {...(props as ComponentProps<typeof PromptNode>)}
+            lod={lod}
+            onRun={handleRun}
+            onCancel={handleCancel}
+            onUpdate={handleNodeUpdate}
+            onDelete={handleDeleteNode}
+            sizeOptions={sizeOptions}
+            qualityOptions={qualityOptions}
+            qualityEffective={qualityEffective}
+          />
+        </NodeBoundary>
       ),
     }),
     [
@@ -2349,6 +2368,20 @@ export function CanvasPage({
           </div>
         )}
         <div ref={canvasRef} className="relative h-full w-full">
+        {/* 画布整体的兜底：节点级边界（nodeTypes 里那层）拦不到 React Flow 内部
+            抛的错（比如它自己读 `node.position.x`），这一层接住，
+            把「整页消失」降级成「画布区一句话 + 重试 / 清空」。
+            出错时置 crashedRef，让自动快照停下来 —— 别把坏状态写回磁盘。 */}
+        <CanvasBoundary
+          onCrash={(error) => {
+            crashedRef.current = true;
+            pushLog(`画布渲染出错：${error.message}`);
+          }}
+          onClear={() => {
+            setNodes([]);
+            setEdges([]);
+          }}
+        >
         <ReactFlow
           nodes={nodesWithCounts}
           edges={edges}
@@ -2500,6 +2533,7 @@ export function CanvasPage({
               订阅与渲染都在 <SnapGuides /> 里，CanvasPage 不读 guides，也不因它重渲染。 */}
           <SnapGuides />
         </ReactFlow>
+        </CanvasBoundary>
         {/* 拖拽落点示意（useCanvasDrop 提供：portal 到 body 跟随光标，显示图片数量/新建类型） */}
         {dropChip}
         {/* 右键拖拽框选的选框（画布坐标转屏幕坐标定位，pointer-events-none 不挡交互） */}
