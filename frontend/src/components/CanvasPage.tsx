@@ -556,6 +556,9 @@ export function CanvasPage({
     edges,
     onRestore: restoreCanvas,
     onLog: pushLog,
+    // 缺 size/quality 的旧卡片补成配置里的第一档（与新建卡片同源）
+    defaultSize: config.sizes[0]?.value,
+    defaultQuality: config.qualities[0],
   });
 
   /* 经典结果整图导入：收到 importSubmissionId 时拉取提交快照并合并进画布（去重复用图片节点） */
@@ -935,7 +938,12 @@ export function CanvasPage({
       nodeTaskRef.current.clear();
       taskNodeRef.current.clear();
       const wf = await workflowLoad(name);
-      const { nodes: loadedNodes, edges: loadedEdges } = workflowToCanvas(wf.nodes, wf.edges, wf.missing);
+      // 缺 size/quality 的旧卡片补成「配置里的第一档」，与新建卡片同源
+      // （见下面新建卡片的 config.sizes[0] ?? "1024x1024"）
+      const { nodes: loadedNodes, edges: loadedEdges } = workflowToCanvas(wf.nodes, wf.edges, wf.missing, {
+        size: config.sizes[0]?.value,
+        quality: config.qualities[0],
+      });
       historyRef.current.clear();
       setNodes(loadedNodes);
       setEdges(loadedEdges);
@@ -1516,7 +1524,7 @@ export function CanvasPage({
       const node = nodesRef.current.find((n) => n.id === nodeId);
       if (!node || node.type !== "prompt") return;
       const data = node.data;
-      if (!data.prompt.trim()) {
+      if (!(data.prompt ?? "").trim()) {
         pushLog(`节点 ${nodeId}：请先输入提示词`);
         return;
       }
@@ -1733,7 +1741,7 @@ export function CanvasPage({
   const handleRunAll = useCallback(async () => {
     const all = nodesRef.current.filter((n) => n.type === "prompt");
     const runnable = all
-      .filter((n) => n.data.prompt.trim())
+      .filter((n) => (n.data.prompt ?? "").trim())
       .filter((n) => !nodeTaskRef.current.has(n.id));
     if (!runnable.length) {
       pushLog(
@@ -1834,7 +1842,7 @@ export function CanvasPage({
         node.type === "prompt" && selectedIdsRef.current.has(node.id),
     );
     const runnable = selected.filter(
-      (node) => node.data.prompt.trim() && !nodeTaskRef.current.has(node.id),
+      (node) => (node.data.prompt ?? "").trim() && !nodeTaskRef.current.has(node.id),
     );
     if (!runnable.length) {
       pushLog(

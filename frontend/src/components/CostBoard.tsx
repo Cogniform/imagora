@@ -24,19 +24,34 @@ export function CostBoard({
   const [draft, setDraft] = useState<BudgetSettings>(EMPTY_BUDGET);
   const [saving, setSaving] = useState(false);
   const [savedTip, setSavedTip] = useState("");
+  /** 用户动过这两个框没有。
+   *
+   * 下面那句同步的本意是「用户没编辑时显示后端已保存的值」，但只看 `stats` 变化
+   * 会把**用户刚敲进去的字**盖掉：stats 是一次网络请求，它晚到时（慢一点、
+   * 或者保存后回读）就会把输入框重置回旧值 —— 用户看到的是「我打进去的 5 没了」。
+   * 加了这道闸，只有用户没碰过才接受服务端的值。 */
+  const [dirty, setDirty] = useState(false);
 
   // stats 变化时同步草稿（用户未编辑时的默认值：后端已保存的预算）
   useEffect(() => {
-    if (stats) {
-      setDraft({ dailyLimit: stats.budget.dailyLimit, singleRunLimit: stats.budget.singleRunLimit });
-    }
-  }, [stats]);
+    if (!stats || dirty) return;
+    setDraft({ dailyLimit: stats.budget.dailyLimit, singleRunLimit: stats.budget.singleRunLimit });
+  }, [stats, dirty]);
+
+  /** 编辑：记下「用户动过」，并清掉上一次的保存提示 */
+  const edit = (patch: Partial<BudgetSettings>) => {
+    setDirty(true);
+    setSavedTip("");
+    setDraft((prev) => ({ ...prev, ...patch }));
+  };
 
   const handleSave = async () => {
     setSaving(true);
     setSavedTip("");
     try {
       await onSaveBudget(draft);
+      // 保存成功：交还控制权，下一次 stats 回读的值可以覆盖草稿
+      setDirty(false);
       setSavedTip("预算已保存");
     } catch (err) {
       setSavedTip(err instanceof Error ? err.message : "保存失败");
@@ -73,7 +88,7 @@ export function CostBoard({
                   min={0}
                   step={0.01}
                   value={draft.dailyLimit}
-                  onChange={(event) => setDraft((prev) => ({ ...prev, dailyLimit: Number(event.target.value) }))}
+                  onChange={(event) => edit({ dailyLimit: Number(event.target.value) })}
                   title="当日累计费用上限（元），0 = 不限；超限提交前会要求确认"
                   className="field-control !w-20 text-right"
                 />
@@ -85,7 +100,7 @@ export function CostBoard({
                   min={0}
                   step={0.01}
                   value={draft.singleRunLimit}
-                  onChange={(event) => setDraft((prev) => ({ ...prev, singleRunLimit: Number(event.target.value) }))}
+                  onChange={(event) => edit({ singleRunLimit: Number(event.target.value) })}
                   title="单次提交（含批量重跑）预估上限（元），0 = 不限"
                   className="field-control !w-20 text-right"
                 />

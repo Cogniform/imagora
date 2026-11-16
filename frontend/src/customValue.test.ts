@@ -38,6 +38,14 @@ describe("normalizeCustomValue", () => {
     expect(normalizeCustomValue("\t\n\u3000")).toBe("");
   });
 
+  /* 节点 data 是外部数据（工作流文件 / 恢复快照），字段可能整个不存在。
+     早先这里直接 `raw.trim()`，一份缺 size 的工作流就会抛 TypeError，
+     而画布没有错误边界 —— 整页白屏。 */
+  it("非字符串（缺字段读出来的 undefined / null）当空串，不抛错", () => {
+    expect(normalizeCustomValue(undefined)).toBe("");
+    expect(normalizeCustomValue(null)).toBe("");
+  });
+
   it("**不做大小写归一**（模型 ID 大小写敏感，改了就是发错请求）", () => {
     // 这条是硬约束：谁「顺手」加个 toLowerCase，这里立刻红
     expect(normalizeCustomValue("  Dall-E-3  ")).toBe("Dall-E-3");
