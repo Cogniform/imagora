@@ -50,6 +50,29 @@ describe("recovery snapshots", () => {
 
     expect(second).toEqual(first);
   });
+
+  it("keeps taskId: it is reattach evidence, not runtime state", () => {
+    // 任务活在服务端进程里；画布重挂载后内存映射清空，只有节点 data 里的 taskId
+    // 能让我们把还活着的任务重新接上（以及捞回切走期间跑完的结果）。
+    const source = {
+      ...runningPrompt(1_700_000_000_000),
+      data: {
+        prompt: "p",
+        size: "1024x1024",
+        quality: "high",
+        outputDir: "",
+        status: "running",
+        startedAtMs: 1_700_000_000_000,
+        taskId: "t_abc123",
+      },
+    } as WorkflowNode;
+
+    const saved = indexed(buildRecoverySnapshot([source], []).nodes, 0);
+    expect(saved.type === "prompt" && saved.data.taskId).toBe("t_abc123");
+    // 运行态本身仍然被剥掉（恢复出来的卡片从 idle 起步，随后由认领改成 queued/running）
+    expect(saved.type === "prompt" && saved.data.status).toBe("idle");
+    expect(saved.type === "prompt" && saved.data.startedAtMs).toBeUndefined();
+  });
 });
 
 describe("recovery snapshot strips animation classes", () => {
