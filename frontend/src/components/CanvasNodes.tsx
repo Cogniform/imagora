@@ -4,6 +4,7 @@ import type { CanvasGroupNodeData, CanvasImageNodeData, CanvasPromptNodeData } f
 import { ratioFromSizeLabel } from "../aspectIcon";
 import { mergeCustomOption } from "../customValue";
 import { generatingLabel } from "../format";
+import { useThumbnail } from "../useThumbnail";
 import { AspectIcon } from "./AspectIcon";
 import { FolderPicker } from "./FolderPicker";
 import { Icon } from "./Icon";
@@ -164,6 +165,9 @@ export const ImageNode = memo(function ImageNode({
     </button>
   ) : null;
   // 固定展示框避免图片加载后撑高节点，object-contain 保留完整画面。
+  // 卡片只用缩略图：原图 3072×4096 摊开一次约 48 MB，而这里只显示 128×160。
+  // 原图地址仍留给双击放大 / 裁剪 / 放大 / 蒙版（见各自的回调）。
+  const thumbSrc = useThumbnail(data.url);
   const thumb = (
     <div
       className="h-40 w-32 cursor-zoom-in overflow-hidden rounded bg-neutral-50"
@@ -172,8 +176,11 @@ export const ImageNode = memo(function ImageNode({
         onZoom(id);
       }}
     >
-      {data.url ? (
-        <img src={data.url} alt={data.name} loading="lazy" decoding="async" className="block h-full w-full object-contain" draggable={false} />
+      {data.url && thumbSrc ? (
+        <img src={thumbSrc} alt={data.name} loading="lazy" decoding="async" className="block h-full w-full object-contain" draggable={false} />
+      ) : data.url ? (
+        // 缩略图还在生成：占位（尺寸由外层固定，不会引起布局跳动）
+        <div className="thumb-placeholder h-full w-full" aria-hidden="true" />
       ) : (
         <div className="flex h-full w-full items-center justify-center p-2 text-center text-[11px] text-red-500">
           图片缺失

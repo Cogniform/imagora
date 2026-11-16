@@ -8,7 +8,7 @@ React 19 + TypeScript + Vite + Tailwind v4 + React Flow（`@xyflow/react`）。�
 npm install
 npm run dev        # 开发模式（热更新；需后端已启动，见下）
 npm run build      # tsc --noEmit + vite build → dist/（git 忽略，由后端服务托管）
-npm test           # vitest run（1054 用例）
+npm test           # vitest run（1072 用例）
 npm run lint       # eslint
 npx tsc --noEmit   # 类型检查
 ```
@@ -149,8 +149,14 @@ $env:IMAGORA_APP_ROOT = $h
 - 注意：格式规范见 [../docs/README.md](../docs/README.md)；缺漏进 issues 标红，绝不静默猜测。**铺排必须按卡片真实尺寸算**（`CARD_W = 380` / `CARD_H = 326`，列距 420、行距 366、每行 3 张）：旧实现整批共用 `origin + (i % 6) * 30` 的 30px 栅格，而卡片宽 380，一次导入 8 张会完全叠成一张
 
 ### [recovery.ts](src/recovery.ts)
-- 职责：恢复快照归一化（`buildRecoverySnapshot`，剥离动画类与运行期字段 `startedAtMs` / `resultCount` / `message` / `cancelRequested`，并把 status 折回 `idle`）
+- 职责：恢复快照归一化（`buildRecoverySnapshot`，剥离动画类与运行期字段 `startedAtMs` / `resultCount` / `message` / `cancelRequested`，把 status 折回 `idle`，**并剥掉图片节点的 `maskDataUrl`**）
 - 被谁依赖：useCanvasRecovery.ts
+- 注意：`maskDataUrl` 是原图尺寸的 PNG data URL（MB 级），而快照每 1.5s 重写一次、留 5 份——不剥就会把磁盘写穿。代价是刷新后涂抹痕迹不恢复（图、位置、引用关系不受影响）。`taskId` 相反：它是认领任务的唯一线索，必须留
+
+### [thumbnails.ts](src/thumbnails.ts)
+- 职责：画布卡片的**缩略图生成 + 会话缓存**（`loadThumbnail` / `cachedThumbnail` / `clearThumbnailCache` / `thumbTargetSize`；常量 `THUMB_MAX_EDGE = 512` / `THUMB_CACHE_LIMIT = 240`）
+- 被谁依赖：useThumbnail.ts → 画布图片节点
+- 注意：原图是 12 MP，一张解码成 RGBA 约 48 MB，而卡片只显示 128×160 —— 不缩等于为看一个格子摊开整张原图。缓存是**模块级 Map**（不是组件 state）：画布面板切走时组件卸载、模块还活着，切回来不必重新解码。上限 240 条 + LRU + 淘汰时 `revokeObjectURL`（否则 blob URL 永不释放）。任何一步失败都退回原图地址，绝不让图变空白。选浏览器侧缩图而不是服务端出图，是为了不引依赖且两个项目共用（见 [决策](../.agents/notes/2026-11-16-thumbnail-in-browser.md)）
 
 ### [format.ts](src/format.ts)
 - 职责：显示格式化（`formatBytes` / `generatingLabel` / `errMessage`）
@@ -329,6 +335,11 @@ $env:IMAGORA_APP_ROOT = $h
 
 ### [useCanvasRecovery.ts](src/useCanvasRecovery.ts)
 - 职责：恢复快照自动保存/恢复接线
+
+### [useThumbnail.ts](src/useThumbnail.ts)
+- 职责：给图片卡片取缩略图地址（`useThumbnail(src)`）：命中缓存同步返回、未命中先 `null` 再换、失败退回原图
+- 被谁依赖：`components/CanvasNodes.tsx` 的图片节点；缩略图本身由 [thumbnails.ts](src/thumbnails.ts) 生成
+- 注意：**原图地址由调用方自己传给预览 / 裁剪 / 放大 / 蒙版**，那些地方要真实像素，不能拿缩略图凑数；`src` 变了但新地址还没解析出来时返回 `null`（绝不拿上一张的缩略图顶上）
 
 ### [useImageEditorViewport.ts](src/useImageEditorViewport.ts)
 - 职责：图片编辑器视口（`useImageEditorViewport(image, open)`）——缩放（1×~4×，步进 1.2）、以指针为锚点、空格/中键拖拽平移、`ResizeObserver` 跟随容器尺寸。返回 `viewportRef`（回调 ref）/ `stageRef` / `zoom` / `isPanning` / `spacePressed` / `scrollClassName` / `panHandlers` / `canZoomIn` / `canZoomOut` / `imageScale` / `zoomIn` / `zoomOut` / `resetZoom` / `contentStyle` / `stageStyle` / `mediaStyle`；纯函数部分（`fitImageToViewport` / `imageEditorContentSize` / `imageEditorAnchorAt` / `imageEditorAnchorScroll` / `isImageEditorPanGesture` 等）也全部导出可单测

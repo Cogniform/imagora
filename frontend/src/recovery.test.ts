@@ -102,3 +102,47 @@ describe("recovery snapshot strips animation classes", () => {
     expect(indexed(snapshot.nodes, 0).className).toBe("node-related");
   });
 });
+
+describe("recovery snapshot drops the mask", () => {
+  const masked = (): WorkflowNode =>
+    ({
+      id: "img1",
+      type: "image",
+      position: { x: 0, y: 0 },
+      data: {
+        registryId: "r1",
+        name: "a.png",
+        url: "/api/image?path=a",
+        size: 1,
+        ext: "png",
+        refCount: 0,
+        absPath: "C:\\output\\a.png",
+        // 原图尺寸的 PNG data URL：几 MB 量级，绝不该进快照
+        maskDataUrl: "data:image/png;base64,iVBORw0KGgo=",
+      },
+    }) as WorkflowNode;
+
+  it("drops maskDataUrl from image nodes", () => {
+    const source = masked();
+    const saved = indexed(buildRecoverySnapshot([source], []).nodes, 0);
+
+    expect(saved.type === "image" && saved.data.maskDataUrl).toBeUndefined();
+    // 其他字段一个不少：蒙版只是「要不要重绘哪一块」的附加信息
+    expect(saved.type === "image" && saved.data.registryId).toBe("r1");
+    expect(saved.type === "image" && saved.data.url).toBe("/api/image?path=a");
+    expect(saved.position).toEqual({ x: 0, y: 0 });
+    // 原节点不被改动：画布上那张图的蒙版还得继续生效
+    expect(source.type === "image" && source.data.maskDataUrl).toBe("data:image/png;base64,iVBORw0KGgo=");
+  });
+
+  it("同一张图放大成十份蒙版也不会撑大快照", () => {
+    const nodes = Array.from({ length: 10 }, (_, i) => {
+      const node = masked();
+      return { ...node, id: `img${i}` } as WorkflowNode;
+    });
+    const snapshot = buildRecoverySnapshot(nodes, []);
+    const text = JSON.stringify(snapshot);
+    expect(text).not.toContain("maskDataUrl");
+    expect(text.length).toBeLessThan(2_000);
+  });
+});
