@@ -148,14 +148,41 @@ export function canvasEntriesToNodes(
   return created;
 }
 
-/** 工作流加载结果转画布：按 missing 列表给对应图片节点打标（红框提示文件缺失）；
- *  prompt 节点归一化（重置运行状态为 idle，位置/参数无损保留） */
+/** 新建卡片 / 修复旧卡片时用的参数缺省值（调用方按当前配置传进来，见 `workflowToCanvas`） */
+export interface CanvasDefaults {
+  /** 尺寸：缺 `size` 的卡补成它（配置里的第一档） */
+  size?: string | undefined;
+  /** 质量：缺 `quality` 的卡补成它 */
+  quality?: string | undefined;
+}
+
+/**
+ * 工作流加载结果转画布：按 missing 列表给对应图片节点打标（红框提示文件缺失）；
+ * prompt 节点归一化（重置运行状态为 idle，位置/参数无损保留）。
+ *
+ * ## 为什么这里要把缺的字段补齐，而不是只在渲染时兜住
+ *
+ * 工作流文件与恢复快照都是**外部数据**：手改过的、旧版本写的、写到一半断电留下的，
+ * 都可能整个缺一个字段。渲染层当然也得挡（`normalizeCustomValue` 收 `undefined`），
+ * 但只挡「不炸」是不够的 —— 卡片活下来了，尺寸框却是空的，点运行还是不知道用什么尺寸。
+ * 加载时按当前配置补齐，卡片就是一张**完整、能直接跑**的卡。
+ *
+ * 补的是「配置里的第一档」，与新建卡片用的完全是同一个来源（见调用点），
+ * 所以修复出来的卡和手动新建的卡长得一样，不会出现「旧卡尺寸是个谁也没选过的值」。
+ */
 export function workflowToCanvas(
   nodes: WorkflowNode[],
   edges: WorkflowEdge[],
   missing: string[],
+  defaults?: CanvasDefaults,
 ): { nodes: WorkflowNode[]; edges: WorkflowEdge[] } {
   const missingSet = new Set(missing);
+  // 兜底值只在这里算一次；缺省 1024x1024 / high 与新建卡片同源（调用方没给配置时用）
+  const fallbackSize = typeof defaults?.size === "string" && defaults.size ? defaults.size : "1024x1024";
+  const fallbackQuality =
+    typeof defaults?.quality === "string" && defaults.quality ? defaults.quality : "high";
+  /** 字符串字段：非字符串一律当空串（`prompt` / `outputDir` 空串就是正确答案） */
+  const text = (value: unknown): string => (typeof value === "string" ? value : "");
   const marked = nodes.map((node) => {
     const cleaned = stripAnimClasses(node.className);
     const base = { ...node };
@@ -170,7 +197,10 @@ export function workflowToCanvas(
         ...base,
         data: {
           ...base.data,
-          quality: base.data.quality ?? "high",
+          prompt: text(base.data.prompt),
+          size: text(base.data.size) || fallbackSize,
+          quality: text(base.data.quality) || fallbackQuality,
+          outputDir: text(base.data.outputDir),
           status: "idle" as const,
           startedAtMs: undefined,
           resultCount: undefined,

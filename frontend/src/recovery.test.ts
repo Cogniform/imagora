@@ -145,4 +145,29 @@ describe("recovery snapshot drops the mask", () => {
     expect(text).not.toContain("maskDataUrl");
     expect(text.length).toBeLessThan(2_000);
   });
+
+  /* 自锁：快照是下次启动的唯一来源。缺字段的节点若被原样写回磁盘，
+     下次打开又读回同一份坏数据 —— 一次事故变成每次打开都崩、界面里还没法自救。
+     所以落盘前必须把形状压成合法字符串。 */
+  it("缺必需字段的提示词卡，落盘时补成合法字符串（不留 undefined）", () => {
+    const broken = {
+      id: "p1",
+      type: "prompt",
+      position: { x: 1, y: 2 },
+      data: { status: "idle" },
+    } as unknown as WorkflowNode;
+
+    const saved = indexed(buildRecoverySnapshot([broken], []).nodes, 0);
+
+    expect(saved.type === "prompt" && saved.data).toMatchObject({
+      prompt: "",
+      // 缺失时补空串而不是替用户编一个尺寸：加载侧才按当前配置补齐
+      size: "",
+      quality: "high",
+      outputDir: "",
+      status: "idle",
+    });
+    // 关键：JSON 里不能再出现 undefined（它会让下次加载又缺一次）
+    expect(JSON.stringify(saved)).not.toContain("undefined");
+  });
 });

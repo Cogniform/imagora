@@ -79,6 +79,50 @@ describe("workflow defaults", () => {
 
     expect(prompt.type === "prompt" && prompt.data.quality).toBe("high");
   });
+
+  /* 缺字段的旧卡片：只「不炸」是不够的，加载时还得把它补成一张能直接跑的卡。
+     早先只兜了 quality，size 缺失会让渲染层抛 TypeError（整页白屏），
+     而且就算不炸，卡片的尺寸框也是空的、点运行不知道用什么尺寸。 */
+  it("补上缺失的 size / prompt / outputDir，补的是调用方给的第一档", () => {
+    const broken = {
+      id: "p1",
+      type: "prompt",
+      position: { x: 1, y: 2 },
+      data: { status: "idle" },
+    } as unknown as WorkflowNode;
+
+    const result = workflowToCanvas([broken], [], [], { size: "1152x2048", quality: "medium" });
+    const prompt = indexed(result.nodes, 0);
+
+    expect(prompt.type === "prompt" && prompt.data).toMatchObject({
+      prompt: "",
+      size: "1152x2048",
+      quality: "medium",
+      outputDir: "",
+      status: "idle",
+    });
+  });
+
+  it("没给缺省值时才回落到 1024x1024 / high", () => {
+    const broken = {
+      id: "p1",
+      type: "prompt",
+      position: { x: 1, y: 2 },
+      data: { prompt: "hi" },
+    } as unknown as WorkflowNode;
+
+    const prompt = indexed(workflowToCanvas([broken], [], []).nodes, 0);
+
+    expect(prompt.type === "prompt" && prompt.data).toMatchObject({ size: "1024x1024", quality: "high" });
+  });
+
+  it("已有的 size 不会被缺省值覆盖（只补缺的，不改写的）", () => {
+    const node = legacyPromptNode("p1");
+
+    const prompt = indexed(workflowToCanvas([node], [], [], { size: "2048x1152" }).nodes, 0);
+
+    expect(prompt.type === "prompt" && prompt.data.size).toBe("1024x1024");
+  });
 });
 
 describe("prompt node updates", () => {

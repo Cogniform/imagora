@@ -547,7 +547,7 @@ export const PromptNode = memo(function PromptNode({
         <button
           type="button"
           onClick={() => onRun(id)}
-          disabled={busy || !data.prompt.trim()}
+          disabled={busy || !(data.prompt ?? "").trim()}
           className={`btn-primary btn-sm flex-1 ${busy ? "btn-busy" : ""}`}
         >
           {running ? <ElapsedText startedAtMs={data.startedAtMs} /> : queued ? "排队中..." : "运行"}

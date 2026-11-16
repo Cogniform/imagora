@@ -54,10 +54,20 @@ export type CustomValueResult = { ok: true; value: string } | { ok: false; reaso
  *
  * `\s` 在 JS 里覆盖 Tab / 换行 / 不换行空格 / 全角空格（U+3000）——中文输入法下
  * 顺手敲出的全角空格会被一并折掉，这是刻意的。
- * @param raw 用户原始输入
- * @returns 归一化后的字符串；空输入或纯空白返回空串
+ *
+ * ## 为什么入参允许 undefined
+ *
+ * 这里的值多数来自**节点 data**，而节点 data 是从工作流文件 / 恢复快照读回来的 ——
+ * 那是外部数据，字段可能整个不存在（手改的文件、旧版本写的、写到一半断电留下的）。
+ * 声明成 `string` 只是说「正常情况该是字符串」，运行期挡不住 `undefined`：
+ * 早先这里直接 `raw.trim()`，一份缺 `size` 的工作流就会抛 TypeError，
+ * 而画布没有错误边界，整页当场白屏。非字符串一律当空串 ——
+ * 空串在本模块里本来就有明确语义（不追加自定义项），不需要另一条分支。
+ * @param raw 用户原始输入；缺字段时为 `undefined` / `null` 也照收
+ * @returns 归一化后的字符串；空输入、纯空白或非字符串一律返回空串
  */
-export function normalizeCustomValue(raw: string): string {
+export function normalizeCustomValue(raw: string | null | undefined): string {
+  if (typeof raw !== "string") return "";
   return raw.trim().replace(/\s+/g, " ");
 }
 

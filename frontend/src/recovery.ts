@@ -38,9 +38,27 @@ export function buildRecoverySnapshot(
         cancelRequested: _cancelRequested,
         ...data
       } = base.data;
+      /* 必需字段只保证「是字符串」，**不替用户编造值**。
+       *
+       * 为什么必须有这一步：快照是**下一次启动的唯一来源**。节点 data 里若留着
+       * `undefined`（缺字段的旧文件、手改的 JSON），它会被原样写回磁盘，
+       * 下次打开又读回同一份坏数据 —— 一次事故就变成每次打开都崩、界面里还没法自救。
+       * 这里落盘前把形状压缩成合法字符串，坏数据最多影响它自己这一次。
+       *
+       * 为什么缺失时补空串而不是补一个默认尺寸：空串是**诚实的**「还不知道」，
+       * 加载侧（`workflowToCanvas`）会按当前配置的第一档补上，那时才知道用户用的是哪个模型。
+       * 在这里写死 1024x1024 等于把一个猜测永久钉进存档，换模型后就成了错的值。 */
+      const text = (value: unknown): string => (typeof value === "string" ? value : "");
       return {
         ...base,
-        data: { ...data, quality: data.quality ?? "high", status: "idle" },
+        data: {
+          ...data,
+          prompt: text(data.prompt),
+          size: text(data.size),
+          quality: text(data.quality) || "high",
+          outputDir: text(data.outputDir),
+          status: "idle",
+        },
       };
     }),
     edges: [...edges],
