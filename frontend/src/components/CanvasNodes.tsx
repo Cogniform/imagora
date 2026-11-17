@@ -540,7 +540,7 @@ export const PromptNode = memo(function PromptNode({
       <div className="nodrag mt-2">
         <label className="field-label-compact">输出路径</label>
         <div className="mt-0.5">
-          <FolderPicker value={data.outputDir} onChange={(v) => onUpdate(id, { outputDir: v })} alignEnd />
+          <FolderPicker value={data.outputDir} onChange={(v) => onUpdate(id, { outputDir: v })} alignEnd icon />
         </div>
       </div>
       <div className="nodrag mt-2 flex items-center gap-2">
