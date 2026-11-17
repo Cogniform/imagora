@@ -745,6 +745,42 @@ html[data-canvas-bounds="off"] .studio-canvas .react-flow__renderer {
 .studio-canvas .node-pop .select-trigger {
   gap: 6px;
 }
+
+/* 输出路径行（FolderPicker）：输入框与按钮**同高同源**。
+ *
+ * 踩过的坑：节点里的 `.field-control` 已经钉成 --h-ctl(28)，而旁边的 `.btn-ghost`
+ * 一直是 `py-2 + text-sm` 算出来的 36 —— 同一行里按钮比输入框高一截，两边的字
+ * 也不在同一基线上。根因不是数值没对齐，是**高度有两个来源**：一个读 token、
+ * 一个靠内边距凑。所以这里按容器定死，两边都填满同一档。
+ *
+ * 两档各有出处：
+ *   表单（经典表单那一刻）读 --h-field
+ *   节点卡读 --h-ctl，与卡里其它输入框 / 下拉同一档
+ * ⚠️ 这些规则不放进 @layer components：那边是分层规则，未分层的这里才压得住
+ * `.btn-ghost` 的 py-2（与文件里其它节点级覆盖同一做法）。 */
+.folder-picker > .btn-ghost {
+  flex: none;
+  height: var(--h-field);
+  padding-block: 0;
+}
+/* 图标档：正方形，宽度跟着高度走，换档时自动跟着变 */
+.folder-picker > .btn-icon {
+  width: var(--h-field);
+  min-width: var(--h-field);
+  min-height: var(--h-field);
+  padding-inline: 0;
+}
+.studio-canvas .node-pop .folder-picker > .btn-ghost {
+  height: var(--h-ctl);
+  padding-inline: 12px;
+  font-size: 12px;
+}
+.studio-canvas .node-pop .folder-picker > .btn-icon {
+  width: var(--h-ctl);
+  min-width: var(--h-ctl);
+  min-height: var(--h-ctl);
+  padding-inline: 0;
+}
 /* 连线描边取 --edge-stroke-* 三个 token（见文件开头「连线三态描边」段）：
    这两条是无内联样式时的兜底（如工作流加载后首帧、或 JS 未接管时），
    实际悬停/选中/降权由 edgeStyle.ts 内联到 <path> 上，内联优先级更高。 */
