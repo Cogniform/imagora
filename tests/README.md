@@ -55,7 +55,7 @@ cd frontend; npm test
 | [`test_main_process.py`](test_main_process.py) | 4 | 端口探测 / 祖先链回溯（Windows） |
 | [`test_main_cli.py`](test_main_cli.py) | 31 | CLI gen 子命令全链路（校验/输出解析/文生图+图生图+多参考/失败/--no-asset/比例档位）/ **`--n` 逐张请求（每次 `n=1`、各存各的账、部分失败保留已成功、默认单张行为不变）** / config 输出 |
 
-## 文件索引（前端 vitest，共 1103，位于 frontend/src/）
+## 文件索引（前端 vitest，共 1104，位于 frontend/src/）
 
 | 文件 | 用例 | 覆盖 |
 | --- | --- | --- |
@@ -139,7 +139,7 @@ cd frontend; npm test
 - 改 `core/api.py` → `test_core_api.py` + `test_main_cli.py`
 - 改 `server.py` 路由 → 对应 `test_server_*.py` + 前端 `types.ts`/`api.ts`
 - 改前端纯函数 → 对应 `*.test.ts`（同目录同名）
-- 改前端组件 → 组件单测 + E2E（`../frontend/e2e/verify_canvas.py` 105 断言；改来源/配置相关再跑 `verify_provider.py` 38 断言）
+- 改前端组件 → 组件单测 + E2E（`../frontend/e2e/verify_canvas.py` 109 断言；改来源/配置相关再跑 `verify_provider.py` 38 断言）
 - **增/删用例后更新 AGENTS「当前仪表盘」数字**
 
 ## CI 要求

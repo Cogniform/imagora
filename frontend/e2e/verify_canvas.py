@@ -13,7 +13,8 @@
 提示词 @ 引用（引用不存在的图在运行前就被拦下，不偷偷退回全收集）、
 节点右键菜单（右键单击节点 → 菜单 → 预览大图）、
 连线三态（默认 1.5px → hover 加粗 → 单击选中 → Delete 删除）、
-尺寸下拉自由输入（清单外的 1280x720 也能用）。
+尺寸下拉自由输入（清单外的 1280x720 也能用）、
+点画布空白处收起下拉（真鼠标，验捕获阶段的外部点击监听）。
 
 前置：本地服务已启动（uv run python -m main ui --port 7860），且已安装：
   pip install playwright && playwright install chromium
@@ -1330,6 +1331,31 @@ def main():
             # `.react-flow__edge-interaction` 路径，而连线按设计恒在节点之上
             # （ARCHITECTURE 5.4 连线分层），交叉处的节点控件点不到。这是既有取舍，
             # 不是本次改动引入的；同一处理方式见 click_hover_action 的说明。
+            size_trigger.dispatch_event("click")
+            page.wait_for_timeout(400)
+            check("点开下拉后列表展开", page.locator(".select-list").count() == 1)
+
+            # 23a. 点画布空白处应收起下拉（真鼠标，不经 dispatch_event）
+            # 回归：外部点击监听曾挂在 document 的**冒泡阶段**，而 React Flow 的平移走
+            # d3-zoom，它的 mousedown 处理第一件事就是 `stopImmediatePropagation()`，
+            # 事件到不了 document —— 表现为「点画布空白处下拉不收起，非得先选一项」。
+            # 必须在真实画布上验：合成事件不会经过 d3-zoom，jsdom 里也复现不出来。
+            blank = pane_blank_point(page)
+            check("画布上能找到空白点（否则下一条无从谈起）", blank is not None)
+            if blank is not None:
+                page.mouse.click(blank["x"], blank["y"])
+                page.wait_for_timeout(400)
+                check(
+                    "点画布空白处收起下拉",
+                    page.locator(".select-list").count() == 0,
+                    f"list={page.locator('.select-list').count()}",
+                )
+                check(
+                    "收起后触发器回到 aria-expanded=false",
+                    size_trigger.get_attribute("aria-expanded") == "false",
+                    f"aria-expanded={size_trigger.get_attribute('aria-expanded')}",
+                )
+            # 重新展开，接着验自由输入（上面那次点击已经把它收起了）
             size_trigger.dispatch_event("click")
             page.wait_for_timeout(400)
             size_search = page.locator(".select-list input").first
