@@ -65,6 +65,28 @@ describe("Select", () => {
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
   });
 
+  it("点画布空白处也能收起（外层在 mousedown 上 stopPropagation 时）", () => {
+    // 回归：下拉在画布节点里展开后，点画布空白关不掉，非得先选一项。
+    // 根因：外部点击监听若挂在 document 的**冒泡阶段**，就会被下游拦掉 ——
+    // React Flow 的平移 / 拖拽走 d3-zoom 与 d3-drag，两者的 mousedowned 第一件事
+    // 都是 `stopImmediatePropagation()`（d3 的 nopropagation），事件到不了 document。
+    // 所以监听必须在**捕获阶段**：它在目标之前跑，不受下游 stopPropagation 影响。
+    render(
+      // 替身就是画布：外层把 mousedown 吃在自己的 handler 里（= d3 的 nopropagation），
+      // 兄弟节点「pane」代表画布空白处 —— 点在它上面时事件不往 document 冒。
+      <div onMouseDown={(event) => event.stopPropagation()}>
+        <Select options={options} value="a" onChange={vi.fn()} />
+        <div data-testid="pane" />
+      </div>,
+    );
+    const trigger = screen.getByRole("button", { name: /选项 A/ });
+    fireEvent.click(trigger);
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+
+    fireEvent.mouseDown(screen.getByTestId("pane"));
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+  });
+
   it("暴露 option 选中语义，并容忍空选项和未知值", () => {
     const { rerender } = render(<Select options={options} value="b" onChange={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: /选项 B/ }));

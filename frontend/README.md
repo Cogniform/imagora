@@ -8,7 +8,7 @@ React 19 + TypeScript + Vite + Tailwind v4 + React Flow（`@xyflow/react`）。�
 npm install
 npm run dev        # 开发模式（热更新；需后端已启动，见下）
 npm run build      # tsc --noEmit + vite build → dist/（git 忽略，由后端服务托管）
-npm test           # vitest run（1103 用例）
+npm test           # vitest run（1104 用例）
 npm run lint       # eslint
 npx tsc --noEmit   # 类型检查
 ```
@@ -19,7 +19,7 @@ npx tsc --noEmit   # 类型检查
 .\.venv\Scripts\python.exe -m main ui --no-browser --port 7860
 ```
 
-E2E（画布交互回归，真实浏览器；105 断言）：
+E2E（画布交互回归，真实浏览器；109 断言）：
 
 ```powershell
 # 前置：7860 服务已在跑 + playwright 已装
@@ -387,7 +387,7 @@ $env:IMAGORA_APP_ROOT = $h
 - [`MaskBrushDialog.tsx`](src/components/MaskBrushDialog.tsx) — 蒙版笔刷对话框（局部重绘）：原图上涂出要重绘的区域（画笔 / 橡皮 / 粗细滑杆 / 清除），确认后回传**与原图同尺寸**的 PNG data URL。几何在 [maskBrush.ts](src/maskBrush.ts)。**alpha 语义按 OpenAI images/edits 口径：透明像素 = 要重绘的区域，不透明 = 保持原样**——导出时先铺满不透明白再让涂过的笔画走 `destination-out` 抠洞，写反了就是「用户圈哪块、上游偏偏不重绘哪块」，而且错得很安静（图能出来，只是没按预期改）。**空蒙版时确认按钮禁用**：空蒙版等于整图重绘，又慢又白花钱。测试用 `vi.spyOn(HTMLCanvasElement.prototype, "toDataURL")`（jsdom 无 2D context）
 - [`NodeContextMenu.tsx`](src/components/NodeContextMenu.tsx) — 节点右键菜单（`createPortal` 到 body、`position: fixed`、`z-index: 1000`）：位置由 [contextMenu.ts](src/contextMenu.ts) 现算，`useLayoutEffect` 量真实高度后再夹一次（贴底右键不出屏）。挂载时 `pushPopup()` 让 Esc 先收菜单而不穿透弹窗。**禁用项用 `aria-disabled` 而不是原生 `disabled`** —— 原生 disabled 会让键盘焦点跳过它，菜单里的项位置一变用户就找不到。外观复用 `.select-list` / `.select-option`（浮层同一档材质），不新增 CSS 类
 - [`FolderPicker.tsx`](src/components/FolderPicker.tsx) — 目录选择：输入框 + 一颗按钮弹系统文件夹选择器（取消保留原值）。**两档外观**：缺省是文字按钮（经典表单，空间充足、文字更明确）；传 `icon` 只用一枚文件夹图标（提示词卡固定 380px，五个汉字会把路径挤成一截），文字仍在 `title` / `aria-label` 里。**输入框与按钮同高**由 index.css 的 `.folder-picker` 按容器定死（表单 `--h-field` / 节点 `--h-ctl`）—— 曾经两边高度来源不同（一个读 token、一个靠 `py-2` 凑），同一行差 8px
-- [`Select.tsx`](src/components/Select.tsx) — 通用下拉框（`options` / `value` / `onChange`，`searchable` 缺省按选项数自动判定 + `emptyLabel` + `option.group` 分组）。**展开列表 createPortal 到 body**：此前就地 absolute 定位会被弹窗的 `overflow:hidden` / `overflow-y:auto` 裁掉，表现为「下拉展开后底部几项看不见」。坐标按触发器 `getBoundingClientRect` 现算，展开期间监听 scroll / resize / `ResizeObserver` 重算（后者覆盖「窗口没变但触发器被挤窄」），下方空间不足自动翻到上方并据此限高。搜索框在**列表内部**顶部（不替换触发器，避免「已选值」与「搜索词」抢同一块区域），**缺省按选项数自动出现**（≥ 4 项才给，见 `SELECT_SEARCH_THRESHOLD`；调用方可传 `true` / `false` 显式覆盖——三五项一眼扫完，多一行输入框只是噪音），过滤走 `rankByName`。完整键盘导航（↑↓ Home End Enter Esc Space）、`aria-activedescendant` / `aria-selected` / `aria-controls`，展开时 `pushPopup()` 让 Esc 先收下拉再关弹窗（见 [popupLayer.ts](src/popupLayer.ts)）。无障碍属性由 `Field` 经 `cloneElement` 注入后**转发到触发器按钮**——按钮才是 `label` 的控件。可选 `allowCustom` + `onCreateCustom` 允许输入清单外的值（**只在搜索框真的出现时生效**——手填靠的就是那个输入入口，自动判定没给搜索框时手填不会凭空可用）；精确命中已有项时走正常 `onChange`，校验不过时 Enter **什么都不做**（不回落选中模糊命中的那一行，否则用户打的 ID 会被悄悄换掉）；自定义行放在 `<ul role="listbox">` **之外**（ARIA 要求 listbox 只含 option/group）
+- [`Select.tsx`](src/components/Select.tsx) — 通用下拉框（`options` / `value` / `onChange`，`searchable` 缺省按选项数自动判定 + `emptyLabel` + `option.group` 分组）。**展开列表 createPortal 到 body**：此前就地 absolute 定位会被弹窗的 `overflow:hidden` / `overflow-y:auto` 裁掉，表现为「下拉展开后底部几项看不见」。坐标按触发器 `getBoundingClientRect` 现算，展开期间监听 scroll / resize / `ResizeObserver` 重算（后者覆盖「窗口没变但触发器被挤窄」），下方空间不足自动翻到上方并据此限高。搜索框在**列表内部**顶部（不替换触发器，避免「已选值」与「搜索词」抢同一块区域），**缺省按选项数自动出现**（≥ 4 项才给，见 `SELECT_SEARCH_THRESHOLD`；调用方可传 `true` / `false` 显式覆盖——三五项一眼扫完，多一行输入框只是噪音），过滤走 `rankByName`。完整键盘导航（↑↓ Home End Enter Esc Space）、`aria-activedescendant` / `aria-selected` / `aria-controls`，展开时 `pushPopup()` 让 Esc 先收下拉再关弹窗（见 [popupLayer.ts](src/popupLayer.ts)）。无障碍属性由 `Field` 经 `cloneElement` 注入后**转发到触发器按钮**——按钮才是 `label` 的控件。可选 `allowCustom` + `onCreateCustom` 允许输入清单外的值（**只在搜索框真的出现时生效**——手填靠的就是那个输入入口，自动判定没给搜索框时手填不会凭空可用）；精确命中已有项时走正常 `onChange`，校验不过时 Enter **什么都不做**（不回落选中模糊命中的那一行，否则用户打的 ID 会被悄悄换掉）；自定义行放在 `<ul role="listbox">` **之外**（ARIA 要求 listbox 只含 option/group）。**点外部收起走 document 的捕获阶段**：React Flow 的平移 / 拖拽由 d3-zoom / d3-drag 处理，其 `mousedown` 第一句就是 `stopImmediatePropagation()`，冒泡阶段挂的监听收不到 —— 表现为「点画布空白处下拉不收起」。判据见 `Select.test.tsx`（外层替身模拟 d3）与 E2E「点画布空白处收起下拉」（真鼠标）
 - [`Field.tsx`](src/components/Field.tsx) — 表单字段壳（`id` / `label` / `hint` / `error` / `action` / `children`）：`hint` 与 `error` **共用同一个消息槽位** `<p id="{id}-message">`，invalid 时 error 顶掉 hint，任何时刻至多一行提示；`aria-describedby` 只在有内容时拼 id（无内容传 `undefined` 而非空串）、`aria-invalid` 用条件展开（`exactOptionalPropertyTypes` 下不能写 `= {undefined}`）。控件本体由调用方渲染，`Field` 用 `cloneElement` 注入 aria（非单个元素时降级为原样渲染）。移植自 DeepSeek Harness（MIT）的 `SettingsValueField`
 
 ### 根文件
@@ -395,7 +395,7 @@ $env:IMAGORA_APP_ROOT = $h
 - [`App.tsx`](src/App.tsx) — 根组件：顶栏（品牌区 3D `brand-swing` 系、`chip` 角标、`corner-note` 镜像小字）、经典/画布模式切换、**外观弹窗**（主体色 / 我的壁纸 / 画布边界：壁纸图存 IndexedDB 后铺成整页背景，`html[data-wallpaper]` / `html[data-canvas-bounds]` 属性驱动「底色让位」与「画布边界开关」）、**生图 API 配置弹窗**（选择器：选来源 + 选模型两件事，值 + 来源由 `/api/config` 的 `profileView` 下发，改地址/密钥请改文件）与 **添加第三方供应商弹窗**（`ProviderModal`，顶栏插头图标；建新来源写 `providers.local.json`）。品牌区参数（`BRAND_LAYERS`/`TEXT_Z_STEP`/`LOGO_Z_STEP`/`LOGO_FACE*`）在 App.tsx 顶部——**标题与 logo 挤出深度分档**（logo 线条细，同深度会糊成红块）
 - [`main.tsx`](src/main.tsx) — 入口（挂载 + accent 主题注入）
 - [`index.css`](src/index.css) — **唯一样式层**（Tailwind v4）：`:root` 设计 token + `@layer components` 组件类 + 动效层；导出的 token 与公共类清单见本文「样式体系」节，组件只引用类名、不写死尺寸与颜色
-- [`verify_canvas.py`](e2e/verify_canvas.py) — 画布交互 E2E（105 断言，Playwright headless）
+- [`verify_canvas.py`](e2e/verify_canvas.py) — 画布交互 E2E（109 断言，Playwright headless）
 - [`verify_provider.py`](e2e/verify_provider.py) — 「添加第三方供应商」E2E（38 断言）：真实点顶栏插头 → 填表 → 真实落盘 `providers.local.json` → 断言文件内容（8 档尺寸单价全 0 / 7 个比例 / 模型目录 / **不含密钥** / 地址带 `/v1` 时路径不重复）→ 新来源出现在配置弹窗下拉。探测那步打一个不存在的域名（预期 400，不花外部配额）；Provider ID 用随机值，跑完不留残留。开关：`--base` / `--app-root`（要跟服务进程的应用根一致）/ `--only`
 
 ## 上下游依赖

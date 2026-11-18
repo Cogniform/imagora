@@ -268,8 +268,13 @@ export function Select({
       if (document.getElementById(listboxId)?.contains(target)) return;
       closeList();
     };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+    // **必须用捕获阶段**：画布（React Flow）的平移与节点拖拽都走 d3-zoom / d3-drag，
+    // 两者的 mousedown 处理第一件事就是 `stopImmediatePropagation()`（d3 的 nopropagation），
+    // 冒泡阶段挂的 document 监听因此收不到事件 —— 表现为「点画布空白关不掉下拉，
+    // 非得先选一项」。捕获阶段在目标之前跑，不受下游 stopPropagation 影响。
+    // 判据：把这条断言改成冒泡，Select.test.tsx 的「点画布空白处也能收起」会红。
+    document.addEventListener("mousedown", handleClickOutside, true);
+    return () => document.removeEventListener("mousedown", handleClickOutside, true);
     // closeList 只读 state setter，无需进依赖
      
   }, [listboxId]);
