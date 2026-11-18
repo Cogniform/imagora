@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type PointerEvent } from "rea
 import { createPortal } from "react-dom";
 
 import { copyImageToClipboard, copyTextToClipboard } from "../imageCopy";
-import { actualZoomPercent, clampPreviewPan, clampZoom, zoomForActualPixels } from "../previewZoom";
+import { actualZoomPercent, clampPreviewPan, clampZoom, fitZoomFor, zoomForActualPixels } from "../previewZoom";
 import { ModalShell } from "./ModalShell";
 
 /** 工作流条目（保存/加载弹窗共用） */
@@ -243,14 +243,14 @@ export function ZoomModal({
     setView((prev) => clampPan({ zoom, pan: prev.pan }));
   }, [clampPan]);
 
-  /** 适应窗口：按图片自然尺寸缩放到当前视口（全屏布局，控制条悬浮不占位，留 2% 呼吸） */
+  /** 适应窗口：占可视区的 80%，四周各留一成（分母是布局盒，不能用原始像素 —— 见 previewZoom.ts） */
   const fitToWindow = useCallback(() => {
-    const natural = naturalRef.current;
     const wrap = wrapRef.current;
-    if (!natural || !wrap) return;
-    const availW = wrap.clientWidth * 0.98;
-    const availH = wrap.clientHeight * 0.98;
-    const zoom = clampZoom(Math.min(1, availW / natural.width, availH / natural.height));
+    if (!wrap) return;
+    const zoom = fitZoomFor(imageBoxRef.current, {
+      width: wrap.clientWidth,
+      height: wrap.clientHeight,
+    });
     setView({ zoom, pan: { x: 0, y: 0 } });
   }, []);
 

@@ -8,7 +8,7 @@ React 19 + TypeScript + Vite + Tailwind v4 + React Flow（`@xyflow/react`）。�
 npm install
 npm run dev        # 开发模式（热更新；需后端已启动，见下）
 npm run build      # tsc --noEmit + vite build → dist/（git 忽略，由后端服务托管）
-npm test           # vitest run（1103 用例）
+npm test           # vitest run（1108 用例）
 npm run lint       # eslint
 npx tsc --noEmit   # 类型检查
 ```
@@ -97,6 +97,7 @@ $env:IMAGORA_APP_ROOT = $h
 | 画布控制坞 | `.dock-row` · `.dock-row__label` · `.dock-row__is-on` · `.dock-row--readout` | 左下角一列「图标 + 中文标签」（放大/缩小/适应/聚焦/吸附/地图/锁定/帮助）。行宽 `min-width: 64px` + `width: auto`：**下限**留给四位百分比与中文两字标签，英文标签更长时按内容变宽（钉死过 64px，英文 `Zoom out` 直接溢出到列外）。必须显式 `width: auto`，否则 `.react-flow__controls-button` 的 `width: 30px` 会顶掉下限；开关态用主体色 + 加粗表达。**标签是语义来源，别改回纯图标**。图标本身走 [Icon.tsx](src/components/Icon.tsx)（内联图标，见下方「画布图标」行） |
 | 画布图标 | [Icon.tsx](src/components/Icon.tsx) · `.node-actions` | 画布图标语言的**唯一出处**：控制坞九行 + 节点右侧操作栏七个按钮都从这里取（24 viewBox、`strokeWidth 1.7`、round cap/join、`currentColor`）。`PATHS` 与 DSH 插件版 `dsh-imagora-desk` 的 `src/client/icons.tsx` 逐字同源 —— **改形状 = 两个仓库同时改**，只改单边立刻分叉；新增画布图标加进这个文件，别再为它引图标库。`.node-actions` 是 hover 操作栏的描边（`rgba(32,43,51,.13)`，与节点卡 `.node-pop` 同值），替掉原来的 `border-white/40`：白 40% 只在深色底上读得出来，浅底画布上等于没有边。`lucide-react` 仍被顶栏 / 可拖出按钮的把手 / 结果区状态图标使用，**别删依赖** |
 | 画布控件 | `.dock-row--readout` · `.dock-row__value` · `.studio-canvas .react-flow__minimap` | 缩放读数只显示百分比、不可拖（滑杆已移除：滚轮与放大/缩小/适应够用）。小地图底色走 `--surface-float`，默认关、位置在**左上角**（右下角留给日志轮播） |
+| 透明底格纹 | `.checker` · `--bg-checker-base` · `--bg-checker-tile` | 棋盘格垫在图片下面，透明像素透出它。**只在画布节点的缩略图用**（那里要一眼看出「图是透明的」而不是「图本身是白的」）；**放大预览刻意不用**——那边看成品与细节，格纹会干扰判断、也给不透明图平添一张假底。画法是两块 45° 渐变错位半格（16px 一格，随容器缩放不变形，位图会糊成脏灰）。深浅两色走 token，所以过 [surfaceAudit.test.ts](src/surfaceAudit.test.ts) 的「底色不许写死」 |
 | 下拉浮层 | `.select-list` · `--search` · `--empty` · `--group__title` · `--group__rows` · `--trigger` | 通用下拉（[Select.tsx](src/components/Select.tsx)）：浮层 `createPortal` 到 body 后坐标由 TSX 现算内联给，这里只管外观。底色走 `--surface-float`，与弹窗同一档。搜索框在**列表内部顶部**、不替换触发器。组标题 `position: sticky; top: 0`，底色同样只能取 `--surface-float`（表面系统要求底色唯一产地是 [surface.ts](src/surface.ts)，不能为它单独写不透明色）——代价是粘顶时下方选项会按通透度透上来一点，属既有设计不是缺陷 |
 | 对齐线 | `.snap-guide` | 拖拽吸附时的辅助线（[CanvasPage.tsx](src/components/CanvasPage.tsx) 画在 React Flow 的 `ViewportPortal` 层里，位置由 TSX 用视口坐标算，随平移缩放自动跟随；这里只给视觉不给尺寸）。颜色取 `--color-brand` 不取中性灰（点阵背景上灰线看不清），`opacity: 0.55` 免得盖过节点。**`pointer-events: none` 必须写死**——它横跨整个视口，可点的话会挡住所有节点拖拽与点击 |
 | 连线描边 | `--edge-stroke-idle` · `--edge-stroke-hovered` · `--edge-stroke-selected` | 连线的**唯一取色处**（[edgeStyle.ts](src/edgeStyle.ts) 以 `var(--edge-stroke-*)` 字符串内联到 `<path>`，TS 里不写死颜色，换主体色时连线跟着走）。四态 idle / hovered / selected / dimmed 由 `edgeVisualState()` 判优先级（`selected > hovered > dimmed > idle`），`edgeStyle()` 出宽度/透明度/动画。`index.css` 里 `.react-flow__edge-path` 只留**无内联样式时的兜底**（工作流加载首帧、JS 未接管）；**不要再写 `:hover` 的 stroke** —— 内联优先级更高，那条规则永远不生效，只会误导人去改它。过渡（stroke / stroke-width / opacity 各 120ms）写在这里，因为内联只设值不设 transition，颜色不进过渡就会硬切 |

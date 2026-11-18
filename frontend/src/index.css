@@ -208,6 +208,30 @@ html {
   /* 放大预览专用的**轻一档**模糊：预览是"看这张图"，背景只需退到"看不清字"，
    * 用弹窗那档 10px 会把页面糊成一片、也看不出图是从哪儿放大的。 */
   --scrim-blur-soft: blur(4px) saturate(0.96);
+
+  /* —— 透明底格纹（棋盘格）——
+   * 只在**画布节点**里用：那里看的是「这张图长什么样」，透明区必须一眼可辨，
+   * 否则分不清「图是透明的」还是「图本身是白的」。
+   * **放大预览里不用**：那边是看细节与成品，格纹会干扰对画面本身的判断，
+   * 也给不透明图平添一张"假底"。规则见下方 .checker 注释。
+   * 两格一深一浅，深浅差约 12/255：够辨认，又不至于抢图。 */
+  --bg-checker-base: #ffffff;
+  --bg-checker-tile: #ededed;
+}
+
+/* 透明底格纹：棋盘格垫在图片下面，透明像素透出它。
+ *
+ * 为什么用 CSS 渐变而不是一张 png：格纹要跟着缩放走（16px 一格在 32px 的缩略图和
+ * 400px 的卡片里都应看起来一样大），位图缩放会糊成脏灰。
+ *
+ * 画法：两块 45° 渐变错位半格叠出棋盘。transform 参与不了，所以不写 transition。 */
+.checker {
+  background-color: var(--bg-checker-base);
+  background-image:
+    linear-gradient(45deg, var(--bg-checker-tile) 25%, transparent 25%, transparent 75%, var(--bg-checker-tile) 75%),
+    linear-gradient(45deg, var(--bg-checker-tile) 25%, transparent 25%, transparent 75%, var(--bg-checker-tile) 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 8px 8px;
 }
 
 /* —— 表面角色类 ——
