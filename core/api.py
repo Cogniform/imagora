@@ -19,8 +19,9 @@ from pathlib import Path
 import requests
 
 from core import config, imageinfo
+from core import payload as payload_rules
 from core.config import get_api_key, normalize_model_id
-from core.console import print_success
+from core.console import print_info, print_success
 
 # 全局序号：保证默认文件名在并发/多窗口下唯一（时间戳只有秒级，同秒必撞）
 _SEQ = itertools.count(1)
@@ -342,6 +343,18 @@ def generate_image(
     payload["watermark"] = bool(watermark)
     if seed is not None:
         payload["seed"] = seed
+    # 交给 payload 规则拼装：基线（上面这份）+ 渠道字段 + 模型字段。
+    # 默认两者都空 → 与改动前逐字相同；差异写在配置里，不再改代码
+    # （分层依据与实测数据见 core/payload.py 文件头）。
+    payload, payload_notes = payload_rules.build_payload(
+        payload,
+        config.TRANSPORT,
+        config.model_params(model),
+    )
+    if payload_notes:
+        # 只打「有配置在起作用的情况」：默认配置下 notes 为空，日志与以前一致。
+        # 有配置就必须可见——否则用户分不清「配置生效了」和「配置被忽略了」。
+        print_info("请求体按配置调整: " + " ".join(payload_notes))
     output_path = build_default_output_path(output_path, output_format)
 
     image_paths = images if images else ([image_path] if image_path else [])

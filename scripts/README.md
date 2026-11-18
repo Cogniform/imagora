@@ -18,6 +18,14 @@
   - 只解析 markdown 链接 `[..](..)`，写在反引号里的路径（如 `` `docs/x.md` ``）照不到
 - 背景：计数分散多处人工同步易漏（曾出现 221→222 漏改、frontend 145 过时数字），脚本把「数字与源码一致」从纪律变成可执行检查
 
+### [check_provider.py](check_provider.py)
+- 职责：打印「最终发给上游的请求体」——配置解析 + 三层叠加的唯一可观测点；给写配置的人与 agent 自检用
+- 危险级别：**低**（只读：不发请求、不花钱、不需要密钥、不写任何文件）
+- 命令：`python scripts/check_provider.py [--profile X] [--model Y] [--json]`；退出码 0=配置合法 / 1=有问题（问题逐条打印，并说明被忽略后的实际行为）
+- 输出三块：写了什么（`transport.request` / `drop` / `models[].params`）→ 最终请求体 → 标注（`drop:` / `channel:` / `model:` / `passthrough:`）
+- 改后必测：`tests/test_core_payload.py`（规则本身）+ 手工跑一次 `--json` 看形状
+- 为什么要有：`transport` / `params` 是自由字段，写错**不会报错、只会不生效**；这个脚本是「配置到底有没有读进去」的唯一判据。语义见 [../docs/provider-config.md](../docs/provider-config.md)
+
 ### [migrate.py](migrate.py)
 - 职责：存储迁移统一入口——注册表升级/重建/回填/迁目录（委托 `registry.migrate(apply, rebuild, backfill)`）、工作流升级（委托 `graphstore.migrate_workflows`）、历史账本回填（委托 `history.backfill_output_asset_ids`）
 - 危险级别：**高**（写文件）

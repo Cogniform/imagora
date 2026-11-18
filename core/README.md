@@ -23,6 +23,7 @@ FastAPI 路由（`server.py`）与 CLI（`main.py`）共用的业务层。**不�
 - 被谁依赖：`server.py`、`api.py`、`main.py`、`registry.py`、`history.py`、`config_write.py`
 - 改后必测：`tests/test_core_config.py` + `tests/test_core_config_override.py`（本机覆盖通道）
 - 注意：新增 config.json profile 键必须同步 `unknown_profile_keys` 白名单 + 测试
+- 注意：`TRANSPORT`（渠道字段块）与 `model_params()`（模型字段）在加载时归一化，坏块**整块丢弃 + 警告**（fail-open）；两者都只喂给 [payload.py](payload.py)，配置语义见 [../docs/provider-config.md](../docs/provider-config.md)
 - 注意：**本机覆盖通道**只开这五个键：`ACTIVE_PROFILE`（全局，不带后缀）与 `BASE_URL_` / `MODEL_` / `API_PATH_` / `API_KEY_<PROFILE 大写>`；未设环境变量时回退路径必须与没有覆盖时逐字相同（有单测锁死）。运行时取常量用 `config.xxx`，不用模块顶层 `from core.config import XXX` 的名字（那是导入时快照）
 - 注意：**`ACTIVE_PROFILE` 是其余覆盖键的父级** —— `BASE_URL_<P>` / `MODEL_<P>` 都挂在选中的来源下，所以同一次写请求里既切来源又改字段时，字段键必须按**选中**的来源拼（`MODEL_VOLC`），不能按当前生效的拼，否则切过去后覆盖对不上任何生效的键
 - 注意：`config.json` 是**出厂目录**（git 跟踪），界面永不写；本机偏好写 `.env`。见 [../docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md) 4.4
@@ -65,6 +66,15 @@ FastAPI 路由（`server.py`）与 CLI（`main.py`）共用的业务层。**不�
 - 注意：**`generate_image()` 返回最终落盘路径**，调用方必须用它而不是自己预设的 `dest`。上游同一个模型可能回静态 PNG，也可能回**多帧动画 GIF**（提示词里点明帧数时），`align_output_extension()` 会按文件头把 `.png` 改成 `.gif` 再返回；不接返回值就会拿到一个已不存在的路径。认不出文件头（测试桩的假字节 / 损坏）时原样返回，不改名
 - 注意：单测已 mock 上游，不花钱；改接口签名要同步 `server.py` 与 `main.py` 两处调用；落盘统一走 `write_file_with_retry`（Windows 杀软/云同步瞬时锁，只重试 PermissionError，见 [../docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md) 9.6）
 - 注意：**蒙版局部重绘**（`mask_path` / `mask_data_url`，后者优先被前者覆盖）。语义按 OpenAI `images/edits` 约定：**透明像素 = 要重绘的区域，不透明像素 = 保持原样**（前端 `MaskBrushDialog` 产出的正是这个格式）。有 mask 就必须走 edits 接口，所以 mask 没有底图时直接报 `mask 需要至少一张底图（image_path / images）`——OpenAI 契约里 mask 不能单独存在。`mask_data_url` 在函数内解析成临时文件、`try/finally` 保证返回前删除；**绝不能把 data URL 原样塞进 multipart**（上游必 400）
+- 注意：请求体不在这里硬拼。基线字典交给 [payload.py](payload.py) 的 `build_payload()` 叠加渠道 / 模型字段；**默认零配置时结果与引入该机制前逐字相同**
+
+### [payload.py](payload.py)
+- 职责：请求体组装的**唯一规则处**（纯函数，无 I/O、不发请求）：`基线 → 按 drop 摘 → 叠 transport.request → 叠 models[].params`
+- 关键导出：`build_payload()`（返回 payload + `notes` 标注来源）、`normalize_transport()` / `normalize_model_params()`（坏块整体丢弃，fail-open）、`check_block()`、`describe()`
+- 被谁依赖：`core/api.py`（唯一调用点）、`core/config.py`（加载时归一化）、`scripts/check_provider.py`（自检预览）
+- 改后必测：`tests/test_core_payload.py` + `tests/test_core_api.py`（接线断言）
+- 注意：**与插件的 `src/host/payload.js` 同语义**，两边靠同名断言防漂移；改这里必须让插件 `scripts/smoke-host.mjs` 的 `payload:` 段同时通过
+- 注意：分层判据是「换模型还成立吗 / 换服务器还成立吗」，别把渠道差异写进模型字段（理由与实测见 [../docs/provider-config.md](../docs/provider-config.md)、[../.agents/notes/2026-11-18-request-payload-layers.md](../.agents/notes/2026-11-18-request-payload-layers.md)）
 
 ### [tasks.py](tasks.py)
 - 职责：生成任务状态机（纯内存 TaskManager：queued → running → done/failed/cancelled，终态 TTL 清理）

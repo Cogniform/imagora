@@ -14,6 +14,7 @@ from typing import Self
 import pytest
 
 import core.api as core_api
+from core import config
 from core.api import (
     align_output_extension,
     build_default_output_path,
@@ -413,6 +414,74 @@ def test_mask_ignored_when_not_given(post_recorder, tmp_path):
         prompt="p", images=[str(base)], output_path=str(tmp_path / "out.png")
     )
     assert post_recorder.field_names() == ["image"]
+
+
+# ---------- 请求体按配置调整（core/payload.py 的接线） ----------
+
+
+def test_generations_payload_untouched_by_default(post_recorder, tmp_path):
+    """默认配置（transport 空块）下，发出去的 json 与改动前逐字相同。"""
+    config.TRANSPORT = {"request": {}, "drop": []}
+    core_api.generate_image(
+        prompt="p",
+        size="1024x1024",
+        quality="high",
+        output_path=str(tmp_path / "o.png"),
+    )
+    sent = post_recorder.last["json"]
+    assert sent == {
+        "model": config.DEFAULT_MODEL,
+        "prompt": "p",
+        "size": "1024x1024",
+        "quality": "high",
+        "n": 1,
+        "output_format": "png",
+        "watermark": False,
+    }
+
+
+def test_generations_payload_applies_transport_block(post_recorder, tmp_path):
+    """声明了 b64 + drop 之后，请求体真的变了（这是透明底能拿到 PNG 的唯一通路）。"""
+    config.TRANSPORT = {
+        "request": {"response_format": "b64_json"},
+        "drop": ["output_format", "watermark"],
+    }
+    core_api.generate_image(
+        prompt="p",
+        size="1024x1024",
+        quality="high",
+        output_path=str(tmp_path / "o.png"),
+    )
+    sent = post_recorder.last["json"]
+    assert sent["response_format"] == "b64_json"
+    assert "output_format" not in sent
+    assert "watermark" not in sent
+
+
+def test_generations_payload_applies_model_params(post_recorder, tmp_path, monkeypatch):
+    """模型级字段与渠道级字段叠加，模型级胜出。"""
+    config.TRANSPORT = {"request": {"background": "opaque"}, "drop": []}
+    monkeypatch.setattr(
+        config, "model_params", lambda model_id: {"background": "transparent"}
+    )
+    core_api.generate_image(
+        prompt="p",
+        size="1024x1024",
+        quality="high",
+        output_path=str(tmp_path / "o.png"),
+    )
+    assert post_recorder.last["json"]["background"] == "transparent"
+
+
+def test_edits_payload_carries_transport_fields(post_recorder, tmp_path):
+    """图生图（edits）走 multipart，同一套字段进 `data`。"""
+    config.TRANSPORT = {"request": {"response_format": "b64_json"}, "drop": []}
+    base = tmp_path / "base.png"
+    base.write_bytes(_PNG_BYTES)
+    core_api.generate_image(
+        prompt="p", images=[str(base)], output_path=str(tmp_path / "out.png")
+    )
+    assert post_recorder.last["data"]["response_format"] == "b64_json"
 
 
 # ---------- align_output_extension ----------
