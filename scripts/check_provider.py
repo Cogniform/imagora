@@ -54,9 +54,16 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
     if args.profile:
-        # 换 profile 要重跑整条解析链（与 reload_config 同一条路）
+        # 换 profile 要重跑整条解析链（与 reload_config 同一条路）。
+        #
+        # 细节：.env 里的 ACTIVE_PROFILE 会盖掉这里传的值 —— `_load_env_file()`
+        # 只让「用户自己 export 的系统变量」优先，判据是 `name not in
+        # _ENV_FILE_KEYS`。首轮加载已把 ACTIVE_PROFILE 登记进那个集合，所以
+        # 直接改 os.environ 会被 .env 悄悄覆盖，`--profile` 形同不存在。
+        # 先把它从集合里摘掉，这笔赋值才被当作「外部来源」看待。
         import os
 
+        config._ENV_FILE_KEYS.discard("ACTIVE_PROFILE")
         os.environ["ACTIVE_PROFILE"] = args.profile
         config.reload_config()
 

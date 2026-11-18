@@ -5,7 +5,7 @@ FastAPI 路由级 + 纯逻辑测试，**不调真实上游 API、不花钱**。�
 ## 本地常用命令（在项目根目录执行）
 
 ```powershell
-# 后端全量（531 用例）
+# 后端全量（535 用例）
 .\.venv\Scripts\python.exe -m pytest
 # 按模块筛选
 .\.venv\Scripts\python.exe -m pytest tests/test_core_config.py tests/test_server_helpers.py
@@ -23,12 +23,12 @@ cd frontend; npm test
 - **测试数字是 AGENTS 仪表盘数据源**：增/删测试用例必须同步 AGENTS「当前仪表盘」；数字意外变化（非新增导致）必须报告维护者
 - **别按变量名读断言**：`test_core_api.py` 里的 `calls["n"] == 3` 是**重试次数**计数器，与生成张数无关。看名字以为"多张已覆盖"过一次误判（CLI `--n` 的真覆盖在 `test_main_cli.py`，见 issue #34）
 
-## 文件索引（后端 pytest，共 531）——每个 test_*.py 测什么
+## 文件索引（后端 pytest，共 535）——每个 test_*.py 测什么
 
 | 文件 | 用例 | 覆盖 |
 | --- | --- | --- |
 | [`test_core_api.py`](test_core_api.py) | 34 | 尺寸解析 / 默认输出路径（并发唯一）/ 错误格式化 / 写文件瞬时锁重试 / **蒙版局部重绘（mask_data_url 落临时文件并进 multipart 的 `mask` 字段、临时文件必删、无底图时报清晰错误、mask_path 优先、data URL 非法报错）** |
-| [`test_core_payload.py`](test_core_payload.py) | 27 | 请求体三层叠加（零配置=逐字不变 / 渠道字段 / 模型字段覆盖渠道 / `drop` 只摘基线 / 摘后可再给值 / 透传可见）+ 护栏（产品语义键与凭证键被拒、嵌套值被拒）+ 失败降级（坏块整体丢弃后回到默认） |
+| [`test_core_payload.py`](test_core_payload.py) | 30 | 请求体三层叠加（零配置=逐字不变 / 渠道字段 / 模型字段覆盖渠道 / `drop` 只摘基线 / 摘后可再给值 / 透传可见）+ 护栏（产品语义键与凭证键被拒、嵌套值被拒）+ 失败降级（坏块整体丢弃后回到默认） |
 | [`test_core_batch.py`](test_core_batch.py) | 10 | 配置读取 / 路径解析 / 模块过滤 / dry-run |
 | [`test_core_config.py`](test_core_config.py) | 26 | API Key 跟随 profile / profile 解析优先级与缺失回退 / 白名单校验 / RATIOS 表结构 / **配置来源视图（值 + 来自哪一层、.env 与系统环境变量区分、密钥不回传值）** / **`normalize_model_id` 只在当前 profile 内折叠连字符、不跨 profile 借名** |
 | [`test_core_config_override.py`](test_core_config_override.py) | 16 | `.env` 本机覆盖通道（`BASE_URL_` / `MODEL_` / `API_PATH_<PROFILE>`）：**未设环境变量时行为与没有覆盖时逐字相同**、覆盖只影响自己那一个键、只对当前 profile 生效、换 profile 后覆盖跟着换、空值视为未设置、来源标注区分 `.env` 与系统环境变量、删掉覆盖行后回到 config.json profile、非覆盖键没有环境变量名 |
@@ -48,7 +48,7 @@ cd frontend; npm test
 | [`test_core_pathtrust.py`](test_core_pathtrust.py) | 2 | 路径白名单（match_roots 双根/单根/跨盘） |
 | [`test_core_clipboard.py`](test_core_clipboard.py) | 7 | CF_DIB 字节布局（40 字节头 / 24 位 BGR / **自下而上** / 4 字节行对齐 / **透明合成白底而非丢 alpha**）＋ PNG 载荷（源是 PNG 原字节直传且 alpha 完好、jpg 等转 PNG）＋ 非 Windows 抛 `ClipboardError`（前端据此回退浏览器路径） |
 | [`test_server_clipboard.py`](test_server_clipboard.py) | 3 | `POST /api/clipboard/image`：成功交给 core 只写一次 / 文件不存在 404 / 后端拒绝（非 Windows、被别的程序占着）503 + 人话 |
-| [`test_server_helpers.py`](test_server_helpers.py) | 33 | 窗口分配 / 安全路径白名单 / upload-ref / delete-ref / generate 同步性 / history 注册表解析 + inputRefs/inputRefMissing / **/api/history 分页 hasMore** / _persist_submission 含 temp_bases / 导入与展示同源（注册表副本 + 账本 output 原路径双收，含画布回流回归）/ **静态产物 MIME 钉死（不受 Windows 注册表 `.js` 被写成 text/plain 影响）** / **输出路径两件事（显式默认读写与清除、目录离线保留记录、`resolve_default_output_dir` 优先级「显式 > 上次 > 窗口」、`/api/output-dir/default` 拒绝相对路径且自动建目录）** |
+| [`test_server_helpers.py`](test_server_helpers.py) | 34 | 窗口分配 / 安全路径白名单 / upload-ref / delete-ref / generate 同步性 / history 注册表解析 + inputRefs/inputRefMissing / **/api/history 分页 hasMore** / _persist_submission 含 temp_bases / 导入与展示同源（注册表副本 + 账本 output 原路径双收，含画布回流回归）/ **静态产物 MIME 钉死（不受 Windows 注册表 `.js` 被写成 text/plain 影响）** / **输出路径两件事（显式默认读写与清除、目录离线保留记录、`resolve_default_output_dir` 优先级「显式 > 上次 > 窗口」、`/api/output-dir/default` 拒绝相对路径且自动建目录）** |
 | [`test_server_canvas.py`](test_server_canvas.py) | 18 | canvas 路由 / workflow 往返（v2）/ missing 收集 / ref_paths 放行 |
 | [`test_server_tasks.py`](test_server_tasks.py) | 10 | generate 提交即返回 / multipart 临时文件清理 + temp 参考图注册账本 / **参考图提交时注册（源文件删后账本仍完整）** / 保存消息为绝对路径 / 路径校验 / 任务路由 |
 | [`test_server_generate_mask.py`](test_server_generate_mask.py) | 7 | 蒙版重绘链路：`/api/generate` 收 `mask` Form（空白视为未传、去掉首尾空白）并进 `GenerationTask` / `run_generation` 把 mask 转交 `generate_image` 且**强制走图生图**（无参考图时 `images=[]` 交给 core 报错、不静默跳过、消息记「蒙版重绘 · 无参考图」）/ 无 mask 时行为逐字不变 |
@@ -56,7 +56,7 @@ cd frontend; npm test
 | [`test_main_process.py`](test_main_process.py) | 4 | 端口探测 / 祖先链回溯（Windows） |
 | [`test_main_cli.py`](test_main_cli.py) | 31 | CLI gen 子命令全链路（校验/输出解析/文生图+图生图+多参考/失败/--no-asset/比例档位）/ **`--n` 逐张请求（每次 `n=1`、各存各的账、部分失败保留已成功、默认单张行为不变）** / config 输出 |
 
-## 文件索引（前端 vitest，共 1104，位于 frontend/src/）
+## 文件索引（前端 vitest，共 1103，位于 frontend/src/）
 
 | 文件 | 用例 | 覆盖 |
 | --- | --- | --- |
@@ -96,7 +96,7 @@ cd frontend; npm test
 | [`minimapColor.test.ts`](../frontend/src/minimapColor.test.ts) | 6 | 小地图节点取色（从 CanvasPage 抽出的模块级纯函数）：提示词用品牌色、图片/图片组两档中性灰、未知类型走更深的兜底色（旧工作流文件的 `node.type` 未必在当前三类里）、只做类型映射不读 DOM 与主题实值 |
 | [`rankByName.test.ts`](../frontend/src/rankByName.test.ts) | 10 | 模糊排序：query 是 name 的大小写不敏感**有序子序列**（`gi25` 命中 `gpt-image-2.5`）、边界命中加分优先、相邻匹配加分、跳跃扣分、空 query 返回**同一数组引用**、全角 U+2011 折叠后比对 |
 | [`optionGroups.test.ts`](../frontend/src/optionGroups.test.ts) | 6 | 分组归并：组间按首次出现顺序、组内保持源顺序、无分组的项归入空标题兜底组、全部无分组时返回单组、混合时兜底组排最后 |
-| [`CanvasNodes.test.tsx`](../frontend/src/components/CanvasNodes.test.tsx) | 33 | 节点操作栏（含**蒙版重绘**入口）/ **提示词卡取消入口**（排队·生成中出现、`cancelRequested` 变「取消中…」并禁用、就绪/终态不出现）/ 双击行为 / 组卡去重提示渲染 / **蒙版角标只在带蒙版时出现，点一下即清除** / **`ImageNode` 与 `GroupNode` 的 memo 浅比较**（父组件重渲染但 props 全等时函数体不执行，用 getter 计数取证） |
+| [`CanvasNodes.test.tsx`](../frontend/src/components/CanvasNodes.test.tsx) | 35 | 节点操作栏（含**蒙版重绘**入口）/ **提示词卡取消入口**（排队·生成中出现、`cancelRequested` 变「取消中…」并禁用、就绪/终态不出现）/ 双击行为 / 组卡去重提示渲染 / **蒙版角标只在带蒙版时出现，点一下即清除** / **`ImageNode` 与 `GroupNode` 的 memo 浅比较**（父组件重渲染但 props 全等时函数体不执行，用 getter 计数取证） |
 | [`CanvasPage.baseline.test.tsx`](../frontend/src/components/CanvasPage.baseline.test.tsx) | 63 | **CanvasPage 拆分护栏**（唯一渲染整页的文件）：`@xyflow/react` 走自建桩、真实渲染 `nodeTypes[type]`，钉住「拆了就崩」的接线——`nodeTypes` 身份在节点坐标变化时不变（否则全节点重挂）、14 个 deps 的回调身份、`modalOpen` 十条来源全为 true（拖放互斥）、撤销/重做与 Ctrl+A/Ctrl+S、吸附接线（`applySnapToChanges` 只拦 position）、右键菜单四项、保存/加载、任务状态机的 status 流转、**取消入口（issue #33）**（单卡取消→不立刻复位 / 终态清标记 / 视图说没在取消就退回可点（本机意图由 hook 合成）/ 工具栏「取消全部 (n)」只取消在跑任务）、画布偏好读写、counts 统计随节点增删刷新 |
 | [`Field.test.tsx`](../frontend/src/components/Field.test.tsx) | 8 | 字段壳：label 与控件经 id 关联、`hint` 与 `error` **共用同一个消息槽位**（invalid 时 error 顶掉 hint、任何时刻至多一行）、`aria-describedby` 无内容时不写空串、`aria-invalid` 条件展开、`action` 插槽渲染 |
 | [`ImageCropDialog.test.tsx`](../frontend/src/components/ImageCropDialog.test.tsx) | 7 | 裁剪对话框：比例预设按钮（`aria-pressed`）、八向手柄拖拽的位移换算（先除 stage 宽高再交给 `resizeCrop`）、遮罩用 `boxShadow` spread 覆盖整块视口、确认回传 dataUrl、取消关闭。测试用 `vi.mock("../imageOps", …)` 部分替身（`vi.importActual` 展开真身、只换 `readImageSize` / `cropDataUrl` 两个 canvas I/O 函数），几何纯函数全走真实实现 |
@@ -114,7 +114,7 @@ cd frontend; npm test
 | [`promptImportFormat.test.ts`](../frontend/src/promptImportFormat.test.ts) | 23 | 导入格式解析容错 / 尺寸映射 / 建卡 / **`importCardPositions` 按卡片真实尺寸铺排**（旧实现用 30px 栅格而卡片宽 380，整批导入会完全叠住；现按 420×326 间距、每行 3 张） |
 | [`cost.test.ts`](../frontend/src/cost.test.ts) | 6 | 金额/比例/耗时格式化（非法值回退 -）/ 预算摘要（不限与设限两种、兼容预检结果的 settings 形态）/ 看板主指标行顺序与文案 |
 | [`api-guards.test.ts`](../frontend/src/api-guards.test.ts) | 10 | `/api` 响应形状守卫（必填字段类型、可选字段「在但类型错」、多出的键放行）/ **providers 来源目录（缺字段放行、类型错拦下）** |
-| [`apiCatalog.test.ts`](../frontend/src/apiCatalog.test.ts) | 18 | 按接口地址命中来源 / 跨来源按 id 找模型（全角 U+2011 连字符折叠）/ 尺寸解析优先级（模型自带 > 来源级 > 后端兜底）/ 单价摘要与提示 / **qualityAppliesTo：豆包 Seedream 不认质量档（含中转站代理豆包的情形）** |
+| [`apiCatalog.test.ts`](../frontend/src/apiCatalog.test.ts) | 15 | 按接口地址命中来源 / 跨来源按 id 找模型（全角 U+2011 连字符折叠）/ 尺寸解析优先级（模型自带 > 来源级 > 后端兜底）/ 单价摘要与提示 |
 | [`apiErrors.test.ts`](../frontend/src/apiErrors.test.ts) | 2 | 405 翻成人话（提示服务端是旧版本、需重开）；非 405 保持原始信息不误伤真实上游报错 |
 | [`format.test.ts`](../frontend/src/format.test.ts) | 6 | `formatBytes` 三档与 1024 边界 / `generatingLabel` 文案 / `errMessage`（Error 与非 Error、超长才截断、恰好等于上限不截、limit 可覆盖） |
 | [`accent.test.ts`](../frontend/src/accent.test.ts) | 12 | 同一编号恒定取色、`null` 回落 1 号、黄金角色相分布（含越过 360 回绕与 0 号负色相的现行为）、`brand` 与 `brandDark` 只差明度 / 色相归一到 [0,360) / NaN·Infinity 回落 0 不产出坏值 / 自定义色相与自动取色共用同一公式 / 读写往返（未设置读 `null`、存后读回、存越界先归一、传 `null` 清除、空白或非法视为未设置） |

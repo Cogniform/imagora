@@ -24,6 +24,7 @@
 - 命令：`python scripts/check_provider.py [--profile X] [--model Y] [--json]`；退出码 0=配置合法 / 1=有问题（问题逐条打印，并说明被忽略后的实际行为）
 - 输出三块：写了什么（`transport.request` / `drop` / `models[].params`）→ 最终请求体 → 标注（`drop:` / `channel:` / `model:` / `passthrough:`）
 - 改后必测：`tests/test_core_payload.py`（规则本身）+ 手工跑一次 `--json` 看形状
+- 坑：`--profile` 靠 `os.environ["ACTIVE_PROFILE"]` 换来源，而 `.env` 里的同名键会覆盖它（`_load_env_file()` 只让「外部来源」优先）。所以赋值前先把该键从 `_ENV_FILE_KEYS` 摘掉，否则参数静默失效、看到的仍是 `.env` 那个 profile
 - 为什么要有：`transport` / `params` 是自由字段，写错**不会报错、只会不生效**；这个脚本是「配置到底有没有读进去」的唯一判据。语义见 [../docs/provider-config.md](../docs/provider-config.md)
 
 ### [migrate.py](migrate.py)

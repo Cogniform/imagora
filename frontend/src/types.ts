@@ -158,6 +158,11 @@ export interface ProviderDeleteResult {
 export interface AppConfig {
   sizes: SizeOption[];
   qualities: string[];
+  /** 质量档位在这个渠道上是否真的生效。判据是「quality 会不会进请求体」
+   *  （渠道不认就写进 `transport.drop`，见 core/config.py 的 quality_effective）——
+   *  不按模型名/域名猜。为假时界面不渲染那个下拉框：上游不认的选项
+   *  给了也只会是「调了没反应」。 */
+  qualityEffective?: boolean;
   /** 新建提示词卡片的输出路径（显式默认 > 上次使用 > 按窗口分区）。仍可逐卡手动改。 */
   defaultOutputDir: string;
   /** 上面那个值的来源：`explicit` = 用户手动设过（稳定，跑图不改它）；

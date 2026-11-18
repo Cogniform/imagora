@@ -157,3 +157,35 @@ def test_describe_lists_fields_and_notes():
     assert "字段（2）" in text
     assert "a, b" in text
     assert "channel:a" in text
+
+
+def test_sends_true_when_not_dropped():
+    """没写 transport、或 drop 里没有它 → 会发出去。"""
+    assert payload_rules.sends(None, "quality") is True
+    assert payload_rules.sends({}, "quality") is True
+    assert (
+        payload_rules.sends({"request": {}, "drop": ["watermark"]}, "quality") is True
+    )
+
+
+def test_sends_false_when_dropped():
+    """渠道不认的字段写进 drop → 不发；界面据此不显示那个控件。"""
+    assert payload_rules.sends({"request": {}, "drop": ["quality"]}, "quality") is False
+    assert (
+        payload_rules.sends({"drop": ["quality", "output_format"]}, "quality") is False
+    )
+
+
+def test_sends_matches_what_build_payload_actually_sends():
+    """判据必须与真实请求体一致，否则界面会替一个「其实没发」的字段背书。"""
+    base = {"model": "m", "prompt": "p", "quality": "high", "size": "1024x1024"}
+    transport = {"request": {}, "drop": ["quality"]}
+    payload, notes = payload_rules.build_payload(base, transport, {})
+    assert payload_rules.sends(transport, "quality") is ("quality" in payload)
+    assert "quality" not in payload
+    assert "drop:quality" in notes
+
+    kept, _ = payload_rules.build_payload(base, {"request": {}, "drop": []}, {})
+    assert payload_rules.sends({"request": {}, "drop": []}, "quality") is (
+        "quality" in kept
+    )

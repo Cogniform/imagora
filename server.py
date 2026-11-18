@@ -362,6 +362,10 @@ def get_config(win: int | None = None):
     return {
         "sizes": config.SIZE_OPTIONS,
         "qualities": config.QUALITY_OPTIONS,
+        # 质量档位在这个渠道上是否真的生效：判据是「quality 会不会进请求体」
+        # （渠道不认就写进 transport.drop），不是按模型名/域名猜 —— 界面据此
+        # 决定显不显示那个下拉框。见 core/config.py 的 quality_effective。
+        "qualityEffective": config.quality_effective(),
         "defaultOutputDir": default_dir,
         # 来源让前端能区分「你手动设定的默认」与「自动跟上次用的」：
         # 后者会被任何一次生成覆盖，界面上必须能看出来，否则用户以为设过了。
