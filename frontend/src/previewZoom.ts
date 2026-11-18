@@ -72,3 +72,37 @@ export function zoomForActualPixels(
   if (!scale) return 1;
   return clampZoom(1 / scale);
 }
+
+/* ---------------- 适应窗口 ----------------
+ *
+ * 四周各留一成空隙：图占可视区的 80%，上、下（或左、右）各空 10%。
+ *
+ * ⚠️ 分母必须是**布局盒**（`imageBox`，图片已被 CSS 缩进窗口后的实际尺寸），
+ * 不是原始像素。用原始像素算会得到「原始 → 窗口」的比例，却把它乘在**已经缩过一遍**
+ * 的图上 —— 等于缩两次：一张 1024×1536 的图会只剩窗口的一半，方形图剩六成多。
+ * 这正是「点了适应窗口反而变小」的原因。
+ *
+ * 也不设 1 的上限：小图在窗口里本来就小，`fit` 的语义就是「占满到 80%」，
+ * 放大到填满才对；上 1 会让小图按下去毫无反应。
+ */
+
+/** 「适应窗口」四周各留的空隙比例（0.1 = 每边留一成） */
+export const FIT_MARGIN = 0.1;
+
+/**
+ * 「适应窗口」的倍率。
+ * @param box 图片布局盒（已 fit 的实际尺寸）
+ * @param viewport 可视区尺寸
+ * @param margin 每边留白比例
+ */
+export function fitZoomFor(
+  box: { width: number; height: number },
+  viewport: { width: number; height: number },
+  margin: number = FIT_MARGIN,
+): number {
+  const ratio = 1 - 2 * margin;
+  const availW = viewport.width * ratio;
+  const availH = viewport.height * ratio;
+  if (!box.width || !box.height || availW <= 0 || availH <= 0) return 1;
+  return clampZoom(Math.min(availW / box.width, availH / box.height));
+}

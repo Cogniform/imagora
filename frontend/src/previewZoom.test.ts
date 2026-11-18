@@ -4,6 +4,8 @@ import {
   actualZoomPercent,
   clampPreviewPan,
   clampZoom,
+  FIT_MARGIN,
+  fitZoomFor,
   layoutScale,
   zoomForActualPixels,
   ZOOM_MAX,
@@ -77,5 +79,42 @@ describe("缩放倍率 ↔ 真实像素", () => {
     expect(zoomForActualPixels(natural, { width: 51, height: 77 })).toBe(ZOOM_MAX);
     // 未测量时不改变倍率
     expect(zoomForActualPixels(null, { width: 0, height: 0 })).toBe(1);
+  });
+});
+
+/**
+ * 回归测试：「适应窗口」必须按布局盒算，且四周各留一成。
+ *
+ * 老实现拿**原始像素**当分母，算出的比例却乘在**已缩过一遍**的布局盒上 —— 等于缩两次：
+ * 一张 1024×1536 的图在 1200×800 窗口里会从 800px 高缩到 408px，方形图缩到六成多。
+ * 用户看到的就是「点了适应窗口反而变小」，和「双击打开时的贴边」两种样子。
+ */
+describe("fitZoomFor", () => {
+  it("四周各留一成：竖向受限时按高度算出 80%", () => {
+    // 已 fit 的盒子 533×800（1024×1536 塞进 1200×800），可视区同尺寸
+    const zoom = fitZoomFor({ width: 533, height: 800 }, { width: 1200, height: 800 });
+    expect(zoom).toBeCloseTo(0.8, 6);
+    // 渲染后 426×640 = 视口高度的 80%，上下各留 10%
+    expect(800 * zoom).toBeCloseTo(640, 6);
+  });
+
+  it("横向受限时同样留一成（不是只压高度）", () => {
+    // 2048×1152 塞进 1200×800 后盒子 = 1200×675
+    const zoom = fitZoomFor({ width: 1200, height: 675 }, { width: 1200, height: 800 });
+    expect(1200 * zoom).toBeCloseTo(960, 6);
+  });
+
+  it("小图允许放大到占满 80%（不设 1 的上限，否则按下去毫无反应）", () => {
+    expect(fitZoomFor({ width: 256, height: 256 }, { width: 1200, height: 800 })).toBeCloseTo(2.5, 6);
+  });
+
+  it("margin 可调：0.1 是默认的每边一成", () => {
+    expect(FIT_MARGIN).toBe(0.1);
+    const zero = fitZoomFor({ width: 800, height: 800 }, { width: 800, height: 800 }, 0);
+    expect(zero).toBe(1);
+  });
+
+  it("未测量（盒子为 0）时不改变倍率", () => {
+    expect(fitZoomFor({ width: 0, height: 0 }, { width: 1200, height: 800 })).toBe(1);
   });
 });

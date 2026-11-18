@@ -170,7 +170,9 @@ export const ImageNode = memo(function ImageNode({
   const thumbSrc = useThumbnail(data.url);
   const thumb = (
     <div
-      className="h-40 w-32 cursor-zoom-in overflow-hidden rounded bg-neutral-50"
+      /* checker：透明底 PNG 在这里必须看得出透明（否则分不清「透明」和「白底」）。
+         放大预览里刻意不加格纹 —— 那边看的是成品与细节。 */
+      className="checker h-40 w-32 cursor-zoom-in overflow-hidden rounded"
       onDoubleClick={(event) => {
         event.stopPropagation();
         onZoom(id);
