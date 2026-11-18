@@ -195,6 +195,19 @@ def build_payload(
     return payload, notes
 
 
+def sends(transport: dict | None, key: str) -> bool:
+    """这个字段最终会不会进请求体（基线里有、且没被 `drop` 摘掉）。
+
+    界面拿它当**唯一判据**决定「这个控件该不该出现」：上游不认的字段，
+    显示出来就是个骗人的选项 —— 用户调了没反应，还以为是自己没调对。
+
+    为什么由这里答，而不是按模型名/域名猜：那是写死。同一台网关换个模型、
+    同一个模型换台网关，结论就变了；而这里问的是「我们实际发了什么」，
+    换谁都不会答错。渠道不认某个字段，就把它写进 `transport.drop`。
+    """
+    return key not in ((transport or {}).get("drop") or [])
+
+
 def describe(payload: dict, notes: list[str]) -> str:
     """人话摘要（预览脚本与日志共用）。"""
     shape = ", ".join(sorted(payload))

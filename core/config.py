@@ -545,6 +545,18 @@ RATIOS = _get("ratios")
 SIZE_OPTIONS = _get("size_options")
 
 
+def quality_effective() -> bool:
+    """质量档位在这套渠道上是否真的生效 —— 界面据此决定显不显示那个下拉框。
+
+    判据只有一条：**`quality` 最终会不会进请求体**（见 core/payload.py 的 sends）。
+    不按模型名或域名猜：那是写死，同一台网关换个模型、同一个模型换台网关就答错。
+    渠道不认它，就把它写进 `transport.drop`，请求体与界面同时干净。
+
+    也要看得懂「只有一档」的情况：只有一档时选了也没区别，同样不必显示。
+    """
+    return len(QUALITY_OPTIONS) > 1 and payload_rules.sends(TRANSPORT, "quality")
+
+
 def cost_for_size(size: str, model_id: str | None = None) -> float:
     """按尺寸查单张费用。
 

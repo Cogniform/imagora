@@ -117,20 +117,3 @@ export function priceHint(sizes: SizeOption[]): string {
     : `计价 ${first} 元/张`;
 }
 
-/** 质量档位（low / medium / high）对这套 API 是否真的生效。
- *
- *  豆包 Seedream 的图片接口**没有 quality 参数**：火山官方《图片生成 API》的参数表里
- *  就没有它（只有 size/seed/sequential_image_generation/watermark/output_format…），
- *  官方指引还明确写过「不要把 OpenAI Images 的 n / quality / style 当作 Seedream 参数发」。
- *  发了只会被静默忽略 —— 三档出图完全一样，那就不该在界面上给一个骗人的选项。
- *
- *  中转站（OpenAI 兼容的 GPT Image）认 quality：它决定输出 token 数，也就是细节与耗时。
- *  中转站按**出图数量**计费（1K=0.05、2K/4K=0.1），所以选高档只变慢、不变贵。
- *
- *  两个信号都看：模型 ID 前缀（doubao-*）与接口地址（volces.com）—— 模型名判断为主，
- *  地址兜底覆盖「同一个 Seedream 模型走了别的 endpoint」的情况。
- */
-export function qualityAppliesTo(modelId: string, baseUrl: string): boolean {
-  if (/^doubao/i.test((modelId || "").trim())) return false;
-  return !/volces\.com/i.test(baseUrl || "");
-}

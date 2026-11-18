@@ -145,6 +145,29 @@ def test_get_config_window_id_increments(monkeypatch):
     assert second["defaultOutputDir"].endswith(f"win{second['windowId']}")
 
 
+def test_get_config_reports_quality_effective_from_payload_rules(monkeypatch):
+    """/api/config 的质量档位开关必须由「quality 会不会进请求体」算出来。
+
+    界面据此决定显不显示那个下拉框。判据若是按模型名/域名猜，同一台网关换个
+    模型、同一个模型换台网关就答错；这里锁的是「渠道路由配置说了算」。
+    """
+    from server import get_config
+
+    monkeypatch.setattr("server.load_last_output_dir", lambda: None)
+
+    monkeypatch.setattr("core.config.QUALITY_OPTIONS", ["low", "high"])
+    monkeypatch.setattr("core.config.TRANSPORT", {"request": {}, "drop": []})
+    assert get_config(None)["qualityEffective"] is True
+
+    monkeypatch.setattr("core.config.TRANSPORT", {"request": {}, "drop": ["quality"]})
+    assert get_config(None)["qualityEffective"] is False
+
+    # 只有一档：选了也没区别，同样不该显示
+    monkeypatch.setattr("core.config.QUALITY_OPTIONS", ["high"])
+    monkeypatch.setattr("core.config.TRANSPORT", {"request": {}, "drop": []})
+    assert get_config(None)["qualityEffective"] is False
+
+
 def test_get_config_keeps_existing_window_id(monkeypatch):
     """传已有窗口号 -> 沿用该编号与对应分区（刷新页面编号不变）"""
     from server import get_config

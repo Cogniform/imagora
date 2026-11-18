@@ -31,7 +31,7 @@ import type { AppConfig, ConfigFileState, GenerationTaskStatus, RefItem, ResultI
 import { errMessage, generatingLabel } from "./format";
 import { clearInheritedState, readInheritedState, saveInheritedState } from "./windowInherit";
 import { pickRecentPrompts } from "./recentPrompts";
-import { findProvider as findCatalogProvider, qualityAppliesTo, resolveSizes } from "./apiCatalog";
+import { findProvider as findCatalogProvider, resolveSizes } from "./apiCatalog";
 import { BRAND_LOGO_PATH, BRAND_LOGO_VIEWBOX, brandLogoSvg } from "./brand/logo";
 import { UploadZone } from "./components/UploadZone";
 import { FolderPicker } from "./components/FolderPicker";
@@ -1142,11 +1142,10 @@ useEffect(() => {
     () => activeSizes.map((s) => ({ value: s.value, label: `${s.label}（${s.cost}元）` })),
     [activeSizes],
   );
-  /** 质量档位对当前模型是否真的生效。
-   *  豆包 Seedream 的图片接口没有 quality 参数（火山官方参数表里就没有），发了被静默忽略 ——
-   *  三档出图完全一样，那就不该给用户一个骗人的选项：为真才渲染这一栏。
-   *  中转站（GPT Image）认 quality，决定输出 token 数与耗时；按张计费所以不变贵。 */
-  const qualityEffective = qualityAppliesTo(activeModelId, activeApiBaseUrl);
+  /** 质量档位对当前渠道是否真的生效 —— 后端算好的，判据是「quality 会不会进请求体」
+   *  （渠道不认就写进 `transport.drop`）。这里不做模型名/域名的判断：那是写死，
+   *  同一台网关换个模型、同一个模型换台网关就答错。为真才渲染这一栏。 */
+  const qualityEffective = config?.qualityEffective !== false;
   const qualityOptions = useMemo(
     () => (config?.qualities ?? []).map((q) => ({ value: q, label: q })),
     [config],

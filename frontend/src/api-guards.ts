@@ -65,6 +65,8 @@ export function isAppConfig(value: unknown): value is AppConfig {
     value.qualities.every((quality) => typeof quality === "string") &&
     typeof value.defaultOutputDir === "string" &&
     typeof value.windowId === "number" &&
+    (value.qualityEffective === undefined ||
+      typeof value.qualityEffective === "boolean") &&
     (value.providers === undefined ||
       (Array.isArray(value.providers) && value.providers.every(isProviderCatalog)))
   );

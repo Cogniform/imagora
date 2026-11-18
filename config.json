@@ -4,6 +4,12 @@
     "volc": {
       "label": "火山方舟官方",
       "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+      "transport": {
+        "drop": [
+          "quality"
+        ],
+        "request": {}
+      },
       "api_paths": {
         "generations": "/images/generations",
         "edits": "/images/generations"

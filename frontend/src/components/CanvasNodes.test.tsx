@@ -402,6 +402,62 @@ describe("PromptNode", () => {
     expect(runButton.className).toContain("btn-sm");
     expect(runButton.className).not.toContain("!py-1");
   });
+
+  it("渠道不认 quality 时不渲染那一栏（选项给了也只会是「调了没反应」）", () => {
+    const props = nodeProps<typeof PromptNode>({
+      id: "prompt-1",
+      type: "prompt",
+      data: {
+        prompt: "product photo",
+        size: "1024x1024",
+        quality: "high",
+        outputDir: "output",
+        status: "idle",
+      },
+      selected: false,
+      onUpdate: vi.fn(),
+      onRun: vi.fn(),
+      onDelete: vi.fn(),
+      sizeOptions: [{ value: "1024x1024", label: "1:1" }],
+      // 判据在后端（quality 会不会进请求体），这里只消费结论：
+      // 为 false 时连选项都不给。
+      qualityOptions: [],
+      qualityEffective: false,
+    });
+
+    render(<ReactFlowProvider><PromptNode {...props} /></ReactFlowProvider>);
+
+    expect(screen.queryByText("质量")).toBeNull();
+    expect(screen.getByText("尺寸")).toBeTruthy();
+  });
+
+  it("渠道认 quality 时正常渲染那一栏", () => {
+    const props = nodeProps<typeof PromptNode>({
+      id: "prompt-1",
+      type: "prompt",
+      data: {
+        prompt: "product photo",
+        size: "1024x1024",
+        quality: "high",
+        outputDir: "output",
+        status: "idle",
+      },
+      selected: false,
+      onUpdate: vi.fn(),
+      onRun: vi.fn(),
+      onDelete: vi.fn(),
+      sizeOptions: [{ value: "1024x1024", label: "1:1" }],
+      qualityOptions: [
+        { value: "low", label: "low" },
+        { value: "high", label: "high" },
+      ],
+      qualityEffective: true,
+    });
+
+    render(<ReactFlowProvider><PromptNode {...props} /></ReactFlowProvider>);
+
+    expect(screen.getByText("质量")).toBeTruthy();
+  });
 });
 
 describe("PromptNode 生成中状态（没有占位卡）", () => {

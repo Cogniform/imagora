@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { findModel, findProvider, foldModelId, formatCost, priceHint, priceSummary, qualityAppliesTo, resolveSizes } from "./apiCatalog";
+import { findModel, findProvider, foldModelId, formatCost, priceHint, priceSummary, resolveSizes } from "./apiCatalog";
 import type { ProviderCatalog, SizeOption } from "./types";
 
 /** 火山方舟官方：0.2 / 0.3 元 */
@@ -175,22 +175,3 @@ describe("金额文案", () => {
   });
 });
 
-describe("qualityAppliesTo", () => {
-  it("豆包 Seedream 不认质量参数（模型名前缀判定，大小写与空白无关）", () => {
-    expect(qualityAppliesTo("doubao-seedream-5-0-pro-260628", VOLC.baseUrl)).toBe(false);
-    expect(qualityAppliesTo("  Doubao-Seedream-4-0  ", "https://example.com")).toBe(false);
-    // 中转站若代理豆包模型，上游照样没有这个参数 → 仍应隐藏
-    expect(qualityAppliesTo("doubao-seedream-5-0-pro-260628", WANWU.baseUrl)).toBe(false);
-  });
-
-  it("中转站 / 自定义 OpenAI 兼容地址认质量参数", () => {
-    expect(qualityAppliesTo("gpt-image-2.5-flare", WANWU.baseUrl)).toBe(true);
-    expect(qualityAppliesTo("gpt-image-1", "https://my-relay.example.com")).toBe(true);
-    expect(qualityAppliesTo("", "")).toBe(true);
-  });
-
-  it("模型名认不出时，火山官方地址兜底判为不认", () => {
-    expect(qualityAppliesTo("", VOLC.baseUrl)).toBe(false);
-    expect(qualityAppliesTo("some-alias", VOLC.baseUrl)).toBe(false);
-  });
-});
