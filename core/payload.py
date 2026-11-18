@@ -14,17 +14,16 @@
 1. 换模型、不换服务器，这个字段还成立吗？成立 → 写 `transport.request`（本模块）。
 2. 换服务器、不换模型，这个字段还成立吗？成立 → 写 `models[].params`（本模块）。
 
-实证（2026-11-18，chatgpt2api + gpt-image-2.6，同一句提示词）：
+## 为什么不动「谁认什么」
 
-| 请求体 | 耗时 | 拿到的字节 |
-| --- | --- | --- |
-| 现状（含 `output_format: png`） | ~47s | `url` → **JPEG/RGB，黑底** |
-| 去掉 `output_format` / `watermark` | 49.0s | `url` → **JPEG/RGB** |
-| 再加 `stream: true` | 45.3s | SSE 里仍是 `url` → **JPEG/RGB** |
-| 只加 `response_format: b64_json` | **44.4s** | **PNG/RGBA，alpha 0–255** |
+同一字段在不同渠道上可能一个认、一个不认，而且会随时间变。所以本模块只回答
+**「最终发了什么」**，判断权在配置（`transport` / `models[].params`）：某家渠道认什么，
+由写配置的人实测后填进去。
 
-结论：`url` 通道回的是网关转码过的 JPEG（无 alpha），只有 `b64_json` 拿到模型原始
-PNG。`b64_json` 不是性能负担，它省掉了「再发一个请求下载」这一步。
+具体到某一家、某一模型的实测记录不写在这里 —— 那会把一家之言变成所有人的默认，
+换一家就是错的。实测过程与数据见
+`.agents/notes/2026-11-18-request-payload-layers.md`，面向使用者的写法见
+`docs/provider-config.md`。
 
 ## 三条规则（顺序不可换）
 
