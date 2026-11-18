@@ -21,6 +21,7 @@ import sys
 import warnings
 from pathlib import Path
 
+from core import payload as payload_rules
 from core import provider_store
 
 # ---------- 工作根（启动时固定一次，后续路径统一以此为基准） ----------
@@ -62,9 +63,12 @@ _DEFAULTS = {
     "default_quality": "high",
     "default_size": "1024x1024",
     "default_tier": "2K",
-    # 多模型清单：每个模型自带 ratios / size_options / output_formats。
+    # 多模型清单：每个模型自带 ratios / size_options / output_formats / params。
     # 空列表表示不启用多模型（回退 profile 级的 ratios / size_options 单模型模式）。
     "models": [],
+    # 渠道字段块：这家服务器要额外带的字段、以及要摘掉的基线字段。
+    # 空块 = 与改动前逐字相同的行为（见 core/payload.py 的说明与实测表）。
+    "transport": {"request": {}, "drop": []},
     # 供应商展示名（如「火山方舟官方」/「aiwanwu 中转站」）
     "label": "",
 }
@@ -134,7 +138,7 @@ def reload_config() -> None:
     """
     global _cfg, ACTIVE_PROFILE, _profile
     global BASE_URL, API_PATHS, PROFILE_LABEL
-    global MODELS, RATIOS, SIZE_OPTIONS, QUALITY_OPTIONS
+    global MODELS, RATIOS, SIZE_OPTIONS, QUALITY_OPTIONS, TRANSPORT
     global DEFAULT_MODEL, DEFAULT_QUALITY, DEFAULT_SIZE, DEFAULT_TIER
 
     _cfg = _merge_local_providers(_load_config_file())
@@ -146,6 +150,7 @@ def reload_config() -> None:
     API_PATHS = _get("api_paths")
     PROFILE_LABEL = _get("label") if isinstance(_get("label"), str) else ""
     MODELS = normalize_models(_get("models"))
+    TRANSPORT = _resolve_transport(_get("transport"))
     RATIOS = _get("ratios")
     SIZE_OPTIONS = _get("size_options")
     QUALITY_OPTIONS = _get("quality_options")
@@ -342,6 +347,7 @@ def normalize_models(raw) -> list[dict]:
 
     - label 缺省用 id
     - output_formats 缺省 ["png","jpeg"]
+    - params 缺省 {}（模型能力差异的请求字段，见 core/payload.py）
     - size_options / ratios 缺省用空（调用方回退 profile 级）
     """
     if not isinstance(raw, list):
@@ -357,6 +363,7 @@ def normalize_models(raw) -> list[dict]:
                 "label": str(item.get("label") or model_id),
                 "note": str(item.get("note") or ""),
                 "output_formats": list(item.get("output_formats") or ["png", "jpeg"]),
+                "params": dict(item.get("params") or {}),
                 "size_options": list(item.get("size_options") or []),
                 "ratios": dict(item.get("ratios") or {}),
             }
@@ -365,6 +372,20 @@ def normalize_models(raw) -> list[dict]:
 
 
 MODELS = normalize_models(_get("models"))
+
+
+def _resolve_transport(raw) -> dict:
+    """把 profile 的 transport 归一成 {request, drop}；坏块回落到空块并打警告。
+
+    失败策略：配置写错只降级（= 与改动前逐字相同的行为），不抛异常、不影响启动。
+    """
+    clean, problems = payload_rules.normalize_transport(raw)
+    for problem in problems:
+        warnings.warn(f"transport 配置被忽略：{problem}")
+    return clean
+
+
+TRANSPORT = _resolve_transport(_get("transport"))
 
 
 # 各种「看起来像减号」的字符：中转站在同一条产品线上混用了半角与全角连字符，
@@ -502,6 +523,21 @@ def model_label(model_id: str | None) -> str:
     """模型展示名（下拉框用）；未知返回 id 本身。"""
     m = _model_anywhere(model_id)
     return m["label"] if m else (model_id or "")
+
+
+def model_params(model_id: str | None) -> dict:
+    """该模型要额外带的请求字段（模型能力差异，如 `background: transparent`）。
+
+    未知模型 / 没写 params → 空 dict（= 不加任何字段）。坏块同样只降级：
+    打成警告后返回空 dict，绝不让一个笔误把所有出图请求打挂。
+    """
+    m = _model_anywhere(model_id)
+    if not m:
+        return {}
+    clean, problems = payload_rules.normalize_model_params(m.get("params"))
+    for problem in problems:
+        warnings.warn(f"模型 {model_id} 的 params 被忽略：{problem}")
+    return clean
 
 
 # ---------- 尺寸映射 / UI 选项 / 默认参数（全部来自当前 profile） ----------

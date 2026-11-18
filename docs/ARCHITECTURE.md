@@ -47,7 +47,7 @@ Imagora 是本地单机工具，运行时分三层，方向单一：
 | `core/` | 后端核心逻辑（见 2.2），全部无 HTTP 依赖的纯业务模块；**双件**：规则层 core/AGENTS.md + 文件索引 core/README.md |
 | `frontend/` | React SPA（见 2.3）；**双件**：frontend/AGENTS.md（规则）+ frontend/README.md（索引） |
 | `scripts/` | 独立运维脚本：`migrate.py`（存储一步到最新，默认只报告、`--apply` 才落盘备份校验）；**双件**：scripts/AGENTS.md + scripts/README.md |
-| `tests/` | 后端 pytest（500 用例）+ 前端 vitest（1104 用例），全部不调上游；**双件**：tests/AGENTS.md + tests/README.md（逐文件覆盖） |
+| `tests/` | 后端 pytest（531 用例）+ 前端 vitest（1104 用例），全部不调上游；**双件**：tests/AGENTS.md + tests/README.md（逐文件覆盖） |
 | `docs/` | 设计圣经 `ARCHITECTURE.md`（本文档）+ `prompt-import-format.md` / `ecom-prompt-import-format.md`（格式规范）；**双件**：docs/AGENTS.md + docs/README.md |
 | `assets/` | **文档配图**（只服务 markdown 渲染，不是应用资源）：`screenshots/` 放 README「界面一览」的界面截图；**双件**：assets/AGENTS.md + assets/README.md |
 | `_ui-audit/` | 开发期 UI 审计图（本机产物，git 忽略）：由 [scripts/capture.py](../scripts/capture.py) 生成，与门面配图 `assets/screenshots/` 不是一回事 |
@@ -183,6 +183,20 @@ Imagora 是本地单机工具，运行时分三层，方向单一：
 **只开这四个键**：其余（`ratios` / `size_options` / `models`）是价目表与能力清单，属出厂目录，开放环境变量覆盖会把 `_get()` 变成解析器而收益为零。
 
 **要改价目表 / 模型清单 / 新增整条来源，走 `providers.local.json`，不走环境变量**：覆盖通道只负责「把出厂来源的某一项临时换掉」，造新来源是另一件事（`POST /api/config/providers`）。新建来源的单价一律填 0 —— 真实单价只有用户知道，界面不编假数字，费用显示 0、预算看板不统计这家。
+
+#### 请求体分三层：产品基线 / 渠道字段 / 模型字段
+
+上游差异分两堆，出处不同（判据 + 示例 + 边界见 [provider-config.md](provider-config.md)）：
+
+- **渠道差异**（换模型、不换服务器仍成立）→ `transport.request`：如 `response_format` 决定「图以什么形式回来」。
+- **模型能力差异**（换服务器、不换模型仍成立）→ `models[].params`：如 `background: transparent`。
+- **产品语义**（`model` / `prompt` / `size` / `quality` / `n`）留在代码里，配置**不许改**，只能 `drop`。
+
+拼装顺序固定为 `基线 → 按 drop 摘 → 叠 transport → 叠 params`，实现在 [core/payload.py](../core/payload.py)（纯函数，无 I/O）。**唯一构造点**仍是 [core/api.py](../core/api.py)，它只负责把基线交给它。默认两块都空 = 与引入这套机制前逐字相同（`tests/test_core_payload.py` + `test_core_api.py` 锁死）。
+
+失败策略是**只降级、不半截生效**：块里任何一处非法 → 整块丢弃 + 警告 → 行为回到默认。同一形状的教训在别处已有：DSH 的 patch 层是「整行替换、不深合并」，理由同样是半截生效最难查。
+
+判据为什么是这两句：`response_format: b64_json` 在同一台服务器上换个模型仍然成立，所以它是渠道属性；而「这个模型会不会画透明」换服务器也不变，属于模型。**把渠道差异写进模型配置，换个网关就失效；把模型差异写进渠道配置，换个模型就失效**——这是这套分层唯一要守住的东西。
 
 `ACTIVE_PROFILE` 也可在界面切换（写 `.env`，值是 `config.json` 已注册的 profile 名，服务端校验）。它是其余覆盖键的**父级**——`BASE_URL_<PROFILE>` / `MODEL_<PROFILE>` 都挂在选中的 profile 下，所以切换它会换掉整条解析链。
 **未设置环境变量时回退路径与没有覆盖通道时逐字相同**（`tests/test_core_config_override.py` 锁死）。
@@ -503,6 +517,7 @@ React Flow v12（`@xyflow/react`）受控模式：`nodes` / `edges` 状态由 `C
 13. **弹窗内的浮层被 Esc 抢关**。现象：配置弹窗里展开下拉，按 Esc 想收起下拉，结果**整个弹窗被关掉**，正在填的内容全丢。根因：`ModalShell` 的 Esc 监听挂在 `document` 上且是 **capture 阶段**（`addEventListener("keydown", h, true)`），比浮层自己挂在触发元素上的 `onKeyDown` 先跑；`preventDefault()` 只能拦默认行为，拦不住已经排在前面的监听。规范：**关窗类全局快捷键要先问「有浮层吗」**——浮层打开时 `Select` 调 `pushPopup()`、关闭时 `popPopup()`，`ModalShell` 在关窗前 `hasOpenPopup()` 为真就让给浮层，因此需要两次 Esc（先收浮层、再关弹窗）。计数必须做负数保护，否则多余的 `pop` 会让 `hasOpenPopup()` 永远为真、弹窗**再也关不掉**（比原 bug 更糟）。测试：`popupLayer.test.ts`（含负数保护）+ `ModalShell.test.tsx` 的交互回归（已验证去掉守卫会失败）。
 14. **「复制图片」提示已复制、粘贴却是空的**。现象（2026-11-01 实测）：点「复制图片」立刻弹「已复制图片」，切到微信 Ctrl+V 没反应，多按几次偶尔成功；**停在页面上等 1 秒左右再粘就稳定**。根因：浏览器 `navigator.clipboard.write()` 写图片是**异步投递**——Promise resolve 只代表"请求已受理"，系统剪贴板里的位图要 100~300ms 后才读得到（实测 resolve 时读回 `image=NONE`，0.3s 后才有；合成 4.2MB 图那轮 `resolve` 了但剪贴板仍是上一张，整次静默丢弃），页面失活时更久甚至被挂起。也就是说"成功提示比能粘早一截"，而时间不是关键变量、**写有没有真的提交才是**。规范：① 复制的可信来源是本机后端——`POST /api/clipboard/image` 用 Win32 `SetClipboardData(CF_DIB)` 同步写，**接口返回即已可粘**（`core/clipboard.py`）；② 前端只在写入真的完成后才报「已复制」，进行中显示「复制中…」并禁用按钮（连点会并发写剪贴板，最后落地哪张不确定）；③ 后端这条走不通（非 Windows / 旧服务端 / 依赖缺失）才退回浏览器 API，功能不因此消失。判据：复制后**立刻**（不等）用别的程序粘贴必须拿到图；**透明背景的 PNG 粘到认 alpha 的应用（Photoshop / Office / 浏览器）里仍然是透明的**（只写 DIB 会把透明区粘成黑块——24 位 DIB 没有 alpha，详见下文 ④）。测试：`test_core_clipboard.py`（CF_DIB 布局：24 位 BGR / 自下而上 / 4 字节行对齐 / 透明合成白底 + PNG 载荷保 alpha）+ `test_server_clipboard.py`（404 / 503 / ok）+ `imageCopy.test.ts`（服务端优先与回退）+ `WorkflowModals.test.tsx`（先「复制中…」后「已复制」）。④ **格式要写两种**：`CF_DIB`（24 位、无 alpha，给微信/画图/老软件）与注册格式 `PNG`（原字节、带 alpha，给 Photoshop/Office/浏览器）——浏览器 `clipboard.write()` 本来就是这个组合，首版后端只写 DIB 属于功能退化（2026-11-03 用户问「透明背景 png 呢」时实测发现）。DIB 里的透明像素**合成到白底**而不是丢弃 alpha（丢弃 = 透明区一片黑）。决策记录（含实测数据与被否方案）：[2026-11-01-clipboard-write-by-server.md](../.agents/notes/2026-11-01-clipboard-write-by-server.md)。
 15. **点画布空白处收不起下拉**。现象：提示词卡片里展开尺寸 / 质量下拉，点画布空白（或点别的卡片）列表不收，非得先选一项或按 Esc。根因：外部点击监听若挂在 `document` 的**冒泡阶段**，就会被下游拦掉 —— React Flow 的平移走 d3-zoom、节点拖拽走 d3-drag，两者 `mousedowned` 的第一句都是 `stopImmediatePropagation()`（d3 的 `nopropagation`）。规范：**「点外部关闭」类监听一律走捕获阶段**（`addEventListener("mousedown", h, true)`），捕获在目标之前跑，不受下游 `stopPropagation` 影响；判定仍看 `rootRef.contains` / 浮层 `contains`，两处都要判（浮层是 portal 到 body 的，不在触发器的 DOM 子树里）。判据：`Select.test.tsx` 的「点画布空白处也能收起」（用一个 `onMouseDown` 里 `stopPropagation` 的外层替身模拟 d3）+ E2E `verify_canvas.py` 的「点画布空白处收起下拉」（真鼠标，合成事件不经过 d3，jsdom 复现不出来）。同源提醒：全局快捷键若也挂在 document 上，同样要求捕获阶段（见第 13 条）。
+16. **要透明底却拿到黑底 JPEG**。现象（2026-11-18）：提示词写了「透明底」，生成结果打开是一片黑；同一句提示词用另一个生图工具却拿到真透明 PNG。根因不在模型也不在我们的代码：**上游的 `url` 回图通道给的是网关转码后的 JPEG**，而 JPEG 没有 alpha，于是透明像素被压成纯黑（实测四角 `(0,0,0)`、`mode=RGB`）。同模型、同提示词、同尺寸的三次对照：默认 `url` → JPEG（49.0s）；加 `stream: true` → SSE 里仍是 `url` → 仍 JPEG（45.3s）；只加 `response_format: b64_json` → **PNG/RGBA、四角 alpha=0**（44.4s，最快）。规范：**「模型会不会画透明」与「拿不拿得到透明」是两件事** —— 后者是渠道属性，写 `transport.request.response_format: b64_json`；前者是模型属性，需要时写 `models[].params.background: transparent`。别把两件事写进同一层。另有两条判据：`url` 路径拿不到原始字节时**不要**试图本地「黑底转透明」（黑底抠图对深色主体有损，属近似而非原生）；`b64_json` 不是性能负担，它省掉了「再发一个请求下载」这一步。配置方式与自检见 [provider-config.md](provider-config.md)，决策记录见 [2026-11-18-request-payload-layers.md](../.agents/notes/2026-11-18-request-payload-layers.md)。
 
 ### 9.5 测试隔离
 
@@ -541,7 +556,7 @@ React Flow v12（`@xyflow/react`）受控模式：`nodes` / `edges` 状态由 `C
 
 ### 10.1 单元测试
 
-- 后端 pytest：**500 用例**（Windows 含 5 个专属测试，CI 必须 `windows-latest`；默认 tmp 路径的 WinError 5 历史坑已随目录重建恢复，见 AGENTS「活跃坑」）
+- 后端 pytest：**531 用例**（Windows 含 5 个专属测试，CI 必须 `windows-latest`；默认 tmp 路径的 WinError 5 历史坑已随目录重建恢复，见 AGENTS「活跃坑」）
 - 前端 vitest：**1104 用例**；`tsc --noEmit` + `vite build` 成功；`npm run lint` / `uv run ruff check .` 均零告警
 - 文档完整性：`python scripts/check_docs.py`（相对链接可解析 + AGENTS/tests-README/ARCHITECTURE/frontend-README 的测试计数与源码一致；改任何文档后必跑，见 [scripts/README.md](../scripts/README.md)）
 - **逐文件用例 / 覆盖范围 / 变更影响路由（完整表）见 [tests/README.md](../tests/README.md) 文件索引**

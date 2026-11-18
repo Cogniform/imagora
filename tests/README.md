@@ -5,7 +5,7 @@ FastAPI 路由级 + 纯逻辑测试，**不调真实上游 API、不花钱**。�
 ## 本地常用命令（在项目根目录执行）
 
 ```powershell
-# 后端全量（500 用例）
+# 后端全量（531 用例）
 .\.venv\Scripts\python.exe -m pytest
 # 按模块筛选
 .\.venv\Scripts\python.exe -m pytest tests/test_core_config.py tests/test_server_helpers.py
@@ -23,11 +23,12 @@ cd frontend; npm test
 - **测试数字是 AGENTS 仪表盘数据源**：增/删测试用例必须同步 AGENTS「当前仪表盘」；数字意外变化（非新增导致）必须报告维护者
 - **别按变量名读断言**：`test_core_api.py` 里的 `calls["n"] == 3` 是**重试次数**计数器，与生成张数无关。看名字以为"多张已覆盖"过一次误判（CLI `--n` 的真覆盖在 `test_main_cli.py`，见 issue #34）
 
-## 文件索引（后端 pytest，共 500）——每个 test_*.py 测什么
+## 文件索引（后端 pytest，共 531）——每个 test_*.py 测什么
 
 | 文件 | 用例 | 覆盖 |
 | --- | --- | --- |
-| [`test_core_api.py`](test_core_api.py) | 30 | 尺寸解析 / 默认输出路径（并发唯一）/ 错误格式化 / 写文件瞬时锁重试 / **蒙版局部重绘（mask_data_url 落临时文件并进 multipart 的 `mask` 字段、临时文件必删、无底图时报清晰错误、mask_path 优先、data URL 非法报错）** |
+| [`test_core_api.py`](test_core_api.py) | 34 | 尺寸解析 / 默认输出路径（并发唯一）/ 错误格式化 / 写文件瞬时锁重试 / **蒙版局部重绘（mask_data_url 落临时文件并进 multipart 的 `mask` 字段、临时文件必删、无底图时报清晰错误、mask_path 优先、data URL 非法报错）** |
+| [`test_core_payload.py`](test_core_payload.py) | 27 | 请求体三层叠加（零配置=逐字不变 / 渠道字段 / 模型字段覆盖渠道 / `drop` 只摘基线 / 摘后可再给值 / 透传可见）+ 护栏（产品语义键与凭证键被拒、嵌套值被拒）+ 失败降级（坏块整体丢弃后回到默认） |
 | [`test_core_batch.py`](test_core_batch.py) | 10 | 配置读取 / 路径解析 / 模块过滤 / dry-run |
 | [`test_core_config.py`](test_core_config.py) | 26 | API Key 跟随 profile / profile 解析优先级与缺失回退 / 白名单校验 / RATIOS 表结构 / **配置来源视图（值 + 来自哪一层、.env 与系统环境变量区分、密钥不回传值）** / **`normalize_model_id` 只在当前 profile 内折叠连字符、不跨 profile 借名** |
 | [`test_core_config_override.py`](test_core_config_override.py) | 16 | `.env` 本机覆盖通道（`BASE_URL_` / `MODEL_` / `API_PATH_<PROFILE>`）：**未设环境变量时行为与没有覆盖时逐字相同**、覆盖只影响自己那一个键、只对当前 profile 生效、换 profile 后覆盖跟着换、空值视为未设置、来源标注区分 `.env` 与系统环境变量、删掉覆盖行后回到 config.json profile、非覆盖键没有环境变量名 |

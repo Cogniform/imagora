@@ -43,11 +43,12 @@
 - 改**复制图片 / 剪贴板**（「已复制」提示、写入路径）→ 查 [core/README.md](core/README.md) 的 clipboard.py 节 → 跑 `pytest tests/test_core_clipboard.py tests/test_server_clipboard.py` → 前端 `npm test`（`imageCopy.test.ts` + `WorkflowModals.test.tsx`）→ **浏览器 `clipboard.write()` 的 resolve 早于「能粘」，不得据此报成功**，防错条见 ARCHITECTURE 9.4 第 14 条
 - 改测试隔离 / 报「测试打到了上游」→ 查 [tests/README.md](tests/README.md) 的隔离节 → 防错条见 ARCHITECTURE 9.5（任务池 worker 会在 monkeypatch 撤销后真调上游）
 - 改 [scripts/migrate.py](scripts/migrate.py) 或存储格式 → 查 [scripts/README.md](scripts/README.md) → 跑 `pytest tests/test_core_migrate.py` → **必须先 Handoff 确认（硬边界）**
+- 改**请求体字段**（渠道差异 / 模型能力差异，如 `response_format`、`background`）→ 规则只在 [core/payload.py](core/payload.py)，**先判「换模型还成立吗 / 换服务器还成立吗」**（见 [docs/provider-config.md](docs/provider-config.md)）→ 跑 `pytest tests/test_core_payload.py tests/test_core_api.py` → **插件 `src/host/payload.js` 必须同步**（同名断言在 `scripts/smoke-host.mjs`）
 - 改测试文件 → 查 [tests/README.md](tests/README.md) → 按模块筛选跑 → 增/删用例后更新本文档「仪表盘」数字
 
 ## 仪表盘（最近验证快照，2026-10-29，main）
 
-- 后端 pytest：**500 passed**（命令与逐文件覆盖见 [tests/README.md](tests/README.md)）
+- 后端 pytest：**531 passed**（命令与逐文件覆盖见 [tests/README.md](tests/README.md)）
 - 前端 vitest：**1104 passed**；tsc + vite build 成功；lint / ruff 零告警（命令见 [frontend/README.md](frontend/README.md)、[tests/README.md](tests/README.md)）
 - E2E [verify_canvas.py](frontend/e2e/verify_canvas.py)：**109/109 PASS**；[verify_provider.py](frontend/e2e/verify_provider.py)：**38/38 PASS**（前置：起 7860 服务，见 [frontend/README.md](frontend/README.md)；两条都可用 `--base` 打隔离实例，verify_provider 另需 `--app-root` 对齐服务进程的应用根，否则断言的是仓库里那份真实 `providers.local.json`）
 - 迁移（v1→v2 / .canvas→.assets / 账本回填）已完成，日常无需执行（见 [scripts/README.md](scripts/README.md)）
@@ -110,6 +111,7 @@ CI 在 push 后自动跑，红叉处理顺序：`gh run view <id>` 看哪个 job
 | 测试文件 ↔ 被测代码映射 / 特殊坑 | [tests/README.md](tests/README.md) |
 | 迁移脚本用法 / 危险级别 | [scripts/README.md](scripts/README.md) |
 | 提示词导入格式规范 | [docs/README.md](docs/README.md) |
+| **接一家新渠道 / 加一个能力不同的模型**（只改配置，读者含 agent） | [docs/provider-config.md](docs/provider-config.md) |
 | 文档配图放哪 / 截图重拍判据 | [assets/README.md](assets/README.md) |
 | 各目录工作约束（规则层，自动注入） | [core/AGENTS.md](core/AGENTS.md) · [frontend/AGENTS.md](frontend/AGENTS.md) · [tests/AGENTS.md](tests/AGENTS.md) · [scripts/AGENTS.md](scripts/AGENTS.md) · [docs/AGENTS.md](docs/AGENTS.md) · [assets/AGENTS.md](assets/AGENTS.md) |
 
